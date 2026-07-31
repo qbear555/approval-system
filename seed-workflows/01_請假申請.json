@@ -1,0 +1,224 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "sourceId": 4,
+  "name": "請假申請",
+  "description": "申請人 → 代理人 → 人事單位 → 部門主管 → 副總經理（兩位皆須核准） → 總經理",
+  "formFields": [
+    {
+      "id": "agent",
+      "label": "代理人",
+      "type": "user",
+      "required": true,
+      "placeholder": "請選擇代理人"
+    },
+    {
+      "id": "leave_type",
+      "label": "假別",
+      "type": "select",
+      "required": true,
+      "placeholder": "",
+      "options": [
+        "特別休假（特休）",
+        "事假",
+        "普通傷病假（病假）",
+        "住院傷病假",
+        "公傷病假",
+        "婚假",
+        "喪假",
+        "產假",
+        "產檢假",
+        "安胎休養",
+        "陪產檢及陪產假",
+        "生理假",
+        "家庭照顧假",
+        "公假",
+        "補休",
+        "祭儀假",
+        "其他"
+      ]
+    },
+    {
+      "id": "start_date",
+      "label": "起始日／時間",
+      "type": "datetime",
+      "required": true,
+      "placeholder": "日期 + 時間（30 分鐘）"
+    },
+    {
+      "id": "end_date",
+      "label": "結束日／時間",
+      "type": "datetime",
+      "required": true,
+      "placeholder": "日期 + 時間（30 分鐘）"
+    },
+    {
+      "id": "days",
+      "label": "天數",
+      "type": "number",
+      "required": true,
+      "placeholder": "全日 09:00～17:30＝1 日"
+    },
+    {
+      "id": "hours",
+      "label": "小時",
+      "type": "number",
+      "required": false,
+      "placeholder": "依起迄自動試算（全日 09:00～17:30＝8 小時）"
+    },
+    {
+      "id": "reason",
+      "label": "事由",
+      "type": "textarea",
+      "required": false,
+      "placeholder": ""
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "代理人",
+      "assignType": "form_user",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "人事單位",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "倉管部",
+      "approverIds": [
+        6,
+        11
+      ],
+      "approvers": [
+        {
+          "id": 6,
+          "username": "claire",
+          "name": "林秀美"
+        },
+        {
+          "id": 11,
+          "username": "betty",
+          "name": "陳怡靜"
+        }
+      ],
+      "approverFields": [
+        {
+          "id": "hr_leave_type",
+          "label": "假別（人事核定）",
+          "type": "select",
+          "required": true,
+          "placeholder": "",
+          "options": [
+            "特別休假（特休）",
+            "事假",
+            "普通傷病假（病假）",
+            "住院傷病假",
+            "公傷病假",
+            "婚假",
+            "喪假",
+            "產假",
+            "產檢假",
+            "安胎休養",
+            "陪產檢及陪產假",
+            "生理假",
+            "家庭照顧假",
+            "公假",
+            "補休",
+            "祭儀假",
+            "其他"
+          ]
+        },
+        {
+          "id": "remaining_special_leave_days",
+          "label": "剩餘特休日數",
+          "type": "number",
+          "required": true,
+          "placeholder": "例如：7 或 7.5"
+        },
+        {
+          "id": "remaining_special_leave_hours",
+          "label": "剩餘特休小時",
+          "type": "number",
+          "required": true,
+          "placeholder": "0～8，可填 0.5 小時"
+        },
+        {
+          "id": "hr_note",
+          "label": "人事備註",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "選填"
+        }
+      ],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "部門主管",
+      "assignType": "dept_head",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 4,
+      "name": "副總經理",
+      "assignType": "users",
+      "mode": "all",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        7,
+        9
+      ],
+      "approvers": [
+        {
+          "id": 7,
+          "username": "luis",
+          "name": "陳政宏"
+        },
+        {
+          "id": 9,
+          "username": "danny",
+          "name": "陳牧晨"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 5,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "all",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        10
+      ],
+      "approvers": [
+        {
+          "id": 10,
+          "username": "martin",
+          "name": "陳明耀"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "exportedAt": "2026-07-18T09:31:08.414Z"
+}

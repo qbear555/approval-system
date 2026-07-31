@@ -1,0 +1,50 @@
+========================================
+  線上簽核系統 — Ubuntu 一鍵安裝包
+========================================
+
+【系統需求】
+  - Ubuntu 22.04 或 24.04 LTS（建議 64 位元）
+  - 至少 1 GB RAM、2 GB 磁碟
+  - 可連外網（安裝 Docker 或 Node 時）
+
+【一鍵安裝（最快）】
+
+  1. 將本資料夾上傳到 Ubuntu，例如：
+       /opt/approval-system
+
+  2. 登入 Ubuntu 終端機：
+
+       cd /opt/approval-system
+       chmod +x install.sh uninstall.sh status.sh backup-data.sh
+       ./install.sh
+
+  3. 依選單選擇：
+       1 = Docker（建議）
+       2 = 原生 Node + systemd
+
+  4. 瀏覽器開啟：
+       http://伺服器IP:3847
+
+  5. 登入（全新資料庫）：
+       帳號 admin
+       密碼 admin123
+       ※ 請立刻修改密碼
+
+【已有舊資料要遷移】
+  安裝前或安裝後，將舊主機的 data 目錄覆蓋到本目錄的 data/：
+    data/approval.db
+    data/uploads/
+    data/backups/
+  然後重啟服務（見下方）。
+
+【詳細說明】
+  請開啟：安裝說明.md
+
+【常用指令】
+  ./status.sh                 查看狀態
+  ./backup-data.sh            備份 data
+  ./uninstall.sh              解除安裝（保留 data）
+  docker compose logs -f      Docker 日誌
+  sudo journalctl -u approval-system -f   原生服務日誌
+
+========================================

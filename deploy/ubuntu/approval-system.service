@@ -1,0 +1,17 @@
+[Unit]
+Description=線上簽核系統 Approval System
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/approval-system
+EnvironmentFile=-/etc/default/approval-system
+ExecStart=/usr/bin/node /opt/approval-system/server/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

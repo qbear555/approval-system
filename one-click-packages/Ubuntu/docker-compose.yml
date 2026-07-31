@@ -1,0 +1,41 @@
+# 線上簽核系統 — Docker Compose
+# 適用：Ubuntu / Synology / 任何 Docker 主機
+# 說明：docs/UBUNTU.md 、 docs/SYNOLOGY.md
+
+services:
+  approval-system:
+    build: .
+    image: approval-system:1.1
+    container_name: approval-system
+    restart: unless-stopped
+    ports:
+      # 左邊 = 主機對外埠，可改；右邊固定容器內埠
+      - "3847:3847"   # HTTP
+      - "3848:3848"   # HTTPS（自簽憑證，首次啟動自動產生）
+    environment:
+      - PORT=3847
+      - HTTPS_PORT=3848
+      - HTTPS_ENABLED=1
+      - NODE_ENV=production
+      # 正式環境請改成夠長的隨機字串
+      - JWT_SECRET=change-me-to-a-long-random-secret
+      # 自簽憑證 CN / SAN（可依 NAS IP 調整）
+      - SSL_CN=192.168.99.220
+      - SSL_SAN=DNS:localhost,DNS:approval-system,IP:127.0.0.1,IP:192.168.99.220
+      # 時區（台灣）
+      - TZ=Asia/Taipei
+    volumes:
+      # 持久化：資料庫、上傳附件、備份 PDF/ZIP、HTTPS 憑證
+      - ./data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3847/api/departments').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

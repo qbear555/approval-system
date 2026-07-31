@@ -1,0 +1,8 @@
+﻿# 一鍵安裝包規則：不含 Email 設定
+
+- 禁止包含 data/mail-config.json
+- 禁止包含 data/mail-outbox 內實際信件
+- Email／SMTP 僅於安裝後由管理員在系統設定中填寫
+- 建置／同步腳本會自動剔除上述檔案
+
+更新：2026-07-25

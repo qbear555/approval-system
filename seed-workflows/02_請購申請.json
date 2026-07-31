@@ -1,0 +1,129 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "sourceId": 5,
+  "name": "請購申請",
+  "description": "申請人 → 部門主管 → 副總經理 → 總經理",
+  "formFields": [
+    {
+      "id": "item_name",
+      "label": "品名/項目",
+      "type": "text",
+      "required": true,
+      "placeholder": "",
+      "options": []
+    },
+    {
+      "id": "qty",
+      "label": "數量",
+      "type": "number",
+      "required": true,
+      "placeholder": "",
+      "options": []
+    },
+    {
+      "id": "currency",
+      "label": "幣別",
+      "type": "select",
+      "required": true,
+      "placeholder": "請選擇幣別",
+      "options": [
+        "NTD",
+        "USD"
+      ]
+    },
+    {
+      "id": "amount",
+      "label": "預估金額",
+      "type": "number",
+      "required": true,
+      "placeholder": "請輸入金額（配合上方幣別）",
+      "options": []
+    },
+    {
+      "id": "vendor",
+      "label": "建議廠商",
+      "type": "text",
+      "required": false,
+      "placeholder": "",
+      "options": []
+    },
+    {
+      "id": "reason",
+      "label": "請購事由",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "",
+      "options": []
+    },
+    {
+      "id": "need_date",
+      "label": "需用日期",
+      "type": "date",
+      "required": false,
+      "placeholder": "",
+      "options": []
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "部門主管",
+      "assignType": "dept_head",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "財務部",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "副總經理",
+      "assignType": "users_pick",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        7,
+        9
+      ],
+      "approvers": [
+        {
+          "id": 7,
+          "username": "luis",
+          "name": "陳政宏"
+        },
+        {
+          "id": 9,
+          "username": "danny",
+          "name": "陳牧晨"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        10
+      ],
+      "approvers": [
+        {
+          "id": 10,
+          "username": "martin",
+          "name": "陳明耀"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "exportedAt": "2026-07-18T09:31:08.414Z"
+}

@@ -1,0 +1,131 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "sourceId": 8,
+  "name": "出差申請",
+  "description": "申請人 → 人事單位 → 部門主管 → 副總經理 → 總經理",
+  "formFields": [
+    {
+      "id": "destination",
+      "label": "出差地點",
+      "type": "text",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "start_date",
+      "label": "起始日",
+      "type": "date",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "end_date",
+      "label": "結束日",
+      "type": "date",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "purpose",
+      "label": "出差事由",
+      "type": "textarea",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "budget",
+      "label": "預估費用",
+      "type": "number",
+      "required": false,
+      "placeholder": ""
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "人事單位",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "人事單位",
+      "approverIds": [
+        6,
+        11
+      ],
+      "approvers": [
+        {
+          "id": 6,
+          "username": "claire",
+          "name": "林秀美"
+        },
+        {
+          "id": 11,
+          "username": "betty",
+          "name": "陳怡靜"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "部門主管",
+      "assignType": "dept_head",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "副總經理",
+      "assignType": "users_pick",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        7,
+        9
+      ],
+      "approvers": [
+        {
+          "id": 7,
+          "username": "luis",
+          "name": "陳政宏"
+        },
+        {
+          "id": 9,
+          "username": "danny",
+          "name": "陳牧晨"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 4,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "all",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        10
+      ],
+      "approvers": [
+        {
+          "id": 10,
+          "username": "martin",
+          "name": "陳明耀"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "exportedAt": "2026-07-18T09:31:08.414Z"
+}

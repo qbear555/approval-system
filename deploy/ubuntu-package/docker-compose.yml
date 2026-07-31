@@ -1,0 +1,32 @@
+# 線上簽核系統 — Ubuntu / Docker Compose
+# 由 install.sh --docker 使用；亦可手動: docker compose up -d --build
+#
+# 環境變數可寫在同目錄 .env（install.sh 會自動產生 JWT_SECRET）
+
+services:
+  approval-system:
+    build: .
+    image: approval-system:1.0
+    container_name: approval-system
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3847}:3847"
+    environment:
+      - PORT=3847
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET:-please-change-me-in-dotenv-file}
+      - TZ=${TZ:-Asia/Taipei}
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3847/api/departments').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s

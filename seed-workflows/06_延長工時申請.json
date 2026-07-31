@@ -1,0 +1,179 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "sourceId": 9,
+  "name": "延長工時申請",
+  "description": "延長工時（加班）申請。誤餐費與補休僅可擇一；補休最多累計 40 小時且限一年內休完。流程：申請人→部門主管→副總經理→人事核算→總經理。",
+  "formFields": [
+    {
+      "id": "reason",
+      "label": "事由",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "請說明延長工時原因"
+    },
+    {
+      "id": "ot_start",
+      "label": "延長工時開始",
+      "type": "datetime",
+      "required": true,
+      "placeholder": "17:30～24:00，每 30 分鐘"
+    },
+    {
+      "id": "ot_end",
+      "label": "延長工時結束",
+      "type": "datetime",
+      "required": true,
+      "placeholder": "17:30～24:00，每 30 分鐘"
+    },
+    {
+      "id": "hours",
+      "label": "申請時數（小時）",
+      "type": "number",
+      "required": true,
+      "placeholder": "依起迄自動換算（最小 0.5 小時）"
+    },
+    {
+      "id": "ot_option",
+      "label": "選擇項目",
+      "type": "select",
+      "required": true,
+      "options": [
+        "補休",
+        "誤餐費",
+        "其他"
+      ],
+      "placeholder": ""
+    },
+    {
+      "id": "ot_option_other",
+      "label": "其他說明",
+      "type": "text",
+      "required": false,
+      "placeholder": "選擇「其他」時請填寫"
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "部門主管",
+      "assignType": "dept_head",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "副總經理",
+      "assignType": "users_pick",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "",
+      "approverIds": [
+        7,
+        9
+      ],
+      "approvers": [
+        {
+          "id": 7,
+          "username": "luis",
+          "name": "陳政宏"
+        },
+        {
+          "id": 9,
+          "username": "danny",
+          "name": "陳牧晨"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "人事單位",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "管理部",
+      "approverIds": [
+        6,
+        11
+      ],
+      "approvers": [
+        {
+          "id": 6,
+          "username": "claire",
+          "name": "林秀美"
+        },
+        {
+          "id": 11,
+          "username": "betty",
+          "name": "陳怡靜"
+        }
+      ],
+      "approverFields": [
+        {
+          "id": "actual_start",
+          "label": "實際工時開始",
+          "type": "datetime",
+          "required": true,
+          "placeholder": "17:30～24:00，每 30 分鐘"
+        },
+        {
+          "id": "actual_end",
+          "label": "實際工時結束",
+          "type": "datetime",
+          "required": true,
+          "placeholder": "17:30～24:00，每 30 分鐘"
+        },
+        {
+          "id": "actual_hours",
+          "label": "實際總計（小時）",
+          "type": "number",
+          "required": true,
+          "placeholder": "依起迄自動換算（最小 0.5 小時）"
+        },
+        {
+          "id": "comp_leave_balance",
+          "label": "目前累計可用時數（補休）",
+          "type": "number",
+          "required": false,
+          "placeholder": "補休累計（最多 40 小時）"
+        },
+        {
+          "id": "hr_note",
+          "label": "人事備註",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "選填"
+        }
+      ],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 4,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "",
+      "approverIds": [
+        10
+      ],
+      "approvers": [
+        {
+          "id": 10,
+          "username": "martin",
+          "name": "陳明耀"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "exportedAt": "2026-07-18T09:31:08.414Z"
+}

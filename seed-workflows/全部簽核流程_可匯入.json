@@ -1,0 +1,1097 @@
+{
+  "format": "approval-system-workflows",
+  "version": 1,
+  "exportedAt": "2026-07-18T09:31:08.414Z",
+  "systemUrl": "http://127.0.0.1:8080/",
+  "count": 7,
+  "workflows": [
+    {
+      "format": "approval-system-workflow",
+      "version": 1,
+      "sourceId": 4,
+      "name": "請假申請",
+      "description": "申請人 → 代理人 → 人事單位 → 部門主管 → 副總經理（兩位皆須核准） → 總經理",
+      "formFields": [
+        {
+          "id": "agent",
+          "label": "代理人",
+          "type": "user",
+          "required": true,
+          "placeholder": "請選擇代理人"
+        },
+        {
+          "id": "leave_type",
+          "label": "假別",
+          "type": "select",
+          "required": true,
+          "placeholder": "",
+          "options": [
+            "特別休假（特休）",
+            "事假",
+            "普通傷病假（病假）",
+            "住院傷病假",
+            "公傷病假",
+            "婚假",
+            "喪假",
+            "產假",
+            "產檢假",
+            "安胎休養",
+            "陪產檢及陪產假",
+            "生理假",
+            "家庭照顧假",
+            "公假",
+            "補休",
+            "祭儀假",
+            "其他"
+          ]
+        },
+        {
+          "id": "start_date",
+          "label": "起始日／時間",
+          "type": "datetime",
+          "required": true,
+          "placeholder": "日期 + 時間（30 分鐘）"
+        },
+        {
+          "id": "end_date",
+          "label": "結束日／時間",
+          "type": "datetime",
+          "required": true,
+          "placeholder": "日期 + 時間（30 分鐘）"
+        },
+        {
+          "id": "days",
+          "label": "天數",
+          "type": "number",
+          "required": true,
+          "placeholder": "全日 09:00～17:30＝1 日"
+        },
+        {
+          "id": "hours",
+          "label": "小時",
+          "type": "number",
+          "required": false,
+          "placeholder": "依起迄自動試算（全日 09:00～17:30＝8 小時）"
+        },
+        {
+          "id": "reason",
+          "label": "事由",
+          "type": "textarea",
+          "required": false,
+          "placeholder": ""
+        }
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "name": "代理人",
+          "assignType": "form_user",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 2,
+          "name": "人事單位",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "倉管部",
+          "approverIds": [
+            6,
+            11
+          ],
+          "approvers": [
+            {
+              "id": 6,
+              "username": "claire",
+              "name": "林秀美"
+            },
+            {
+              "id": 11,
+              "username": "betty",
+              "name": "陳怡靜"
+            }
+          ],
+          "approverFields": [
+            {
+              "id": "hr_leave_type",
+              "label": "假別（人事核定）",
+              "type": "select",
+              "required": true,
+              "placeholder": "",
+              "options": [
+                "特別休假（特休）",
+                "事假",
+                "普通傷病假（病假）",
+                "住院傷病假",
+                "公傷病假",
+                "婚假",
+                "喪假",
+                "產假",
+                "產檢假",
+                "安胎休養",
+                "陪產檢及陪產假",
+                "生理假",
+                "家庭照顧假",
+                "公假",
+                "補休",
+                "祭儀假",
+                "其他"
+              ]
+            },
+            {
+              "id": "remaining_special_leave_days",
+              "label": "剩餘特休日數",
+              "type": "number",
+              "required": true,
+              "placeholder": "例如：7 或 7.5"
+            },
+            {
+              "id": "remaining_special_leave_hours",
+              "label": "剩餘特休小時",
+              "type": "number",
+              "required": true,
+              "placeholder": "0～8，可填 0.5 小時"
+            },
+            {
+              "id": "hr_note",
+              "label": "人事備註",
+              "type": "textarea",
+              "required": false,
+              "placeholder": "選填"
+            }
+          ],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 3,
+          "name": "部門主管",
+          "assignType": "dept_head",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 4,
+          "name": "副總經理",
+          "assignType": "users",
+          "mode": "all",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            7,
+            9
+          ],
+          "approvers": [
+            {
+              "id": 7,
+              "username": "luis",
+              "name": "陳政宏"
+            },
+            {
+              "id": 9,
+              "username": "danny",
+              "name": "陳牧晨"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 5,
+          "name": "總經理",
+          "assignType": "users",
+          "mode": "all",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            10
+          ],
+          "approvers": [
+            {
+              "id": 10,
+              "username": "martin",
+              "name": "陳明耀"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        }
+      ],
+      "exportedAt": "2026-07-18T09:31:08.414Z"
+    },
+    {
+      "format": "approval-system-workflow",
+      "version": 1,
+      "sourceId": 5,
+      "name": "請購申請",
+      "description": "申請人 → 部門主管 → 副總經理 → 總經理",
+      "formFields": [
+        {
+          "id": "item_name",
+          "label": "品名/項目",
+          "type": "text",
+          "required": true,
+          "placeholder": "",
+          "options": []
+        },
+        {
+          "id": "qty",
+          "label": "數量",
+          "type": "number",
+          "required": true,
+          "placeholder": "",
+          "options": []
+        },
+        {
+          "id": "currency",
+          "label": "幣別",
+          "type": "select",
+          "required": true,
+          "placeholder": "請選擇幣別",
+          "options": [
+            "NTD",
+            "USD"
+          ]
+        },
+        {
+          "id": "amount",
+          "label": "預估金額",
+          "type": "number",
+          "required": true,
+          "placeholder": "請輸入金額（配合上方幣別）",
+          "options": []
+        },
+        {
+          "id": "vendor",
+          "label": "建議廠商",
+          "type": "text",
+          "required": false,
+          "placeholder": "",
+          "options": []
+        },
+        {
+          "id": "reason",
+          "label": "請購事由",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "",
+          "options": []
+        },
+        {
+          "id": "need_date",
+          "label": "需用日期",
+          "type": "date",
+          "required": false,
+          "placeholder": "",
+          "options": []
+        }
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "name": "部門主管",
+          "assignType": "dept_head",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "財務部",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 2,
+          "name": "副總經理",
+          "assignType": "users_pick",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            7,
+            9
+          ],
+          "approvers": [
+            {
+              "id": 7,
+              "username": "luis",
+              "name": "陳政宏"
+            },
+            {
+              "id": 9,
+              "username": "danny",
+              "name": "陳牧晨"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 3,
+          "name": "總經理",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            10
+          ],
+          "approvers": [
+            {
+              "id": 10,
+              "username": "martin",
+              "name": "陳明耀"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        }
+      ],
+      "exportedAt": "2026-07-18T09:31:08.414Z"
+    },
+    {
+      "format": "approval-system-workflow",
+      "version": 1,
+      "sourceId": 6,
+      "name": "一般簽呈",
+      "description": "申請人 → 部門主管（可略過）→ 會簽人員（可多選、皆須核准）→ 副總經理 → 總經理",
+      "formFields": [
+        {
+          "id": "subject",
+          "label": "主旨說明",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "",
+          "options": []
+        },
+        {
+          "id": "category",
+          "label": "類別",
+          "type": "select",
+          "required": true,
+          "placeholder": "",
+          "options": [
+            "人事",
+            "行政",
+            "業務",
+            "其他"
+          ]
+        },
+        {
+          "id": "urgent",
+          "label": "急件",
+          "type": "checkbox",
+          "required": false,
+          "placeholder": "",
+          "options": []
+        }
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "name": "部門主管",
+          "assignType": "dept_head",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "管理部",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 2,
+          "name": "會簽人員",
+          "assignType": "cosign_pick",
+          "mode": "all",
+          "formFieldId": "",
+          "department": "",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 3,
+          "name": "副總經理",
+          "assignType": "users_pick",
+          "mode": "all",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            7,
+            9
+          ],
+          "approvers": [
+            {
+              "id": 7,
+              "username": "luis",
+              "name": "陳政宏"
+            },
+            {
+              "id": 9,
+              "username": "danny",
+              "name": "陳牧晨"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 4,
+          "name": "總經理",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            10
+          ],
+          "approvers": [
+            {
+              "id": 10,
+              "username": "martin",
+              "name": "陳明耀"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        }
+      ],
+      "exportedAt": "2026-07-18T09:31:08.414Z"
+    },
+    {
+      "format": "approval-system-workflow",
+      "version": 1,
+      "sourceId": 7,
+      "name": "費用報支",
+      "description": "申請人 → 部門主管 → 副總經理 → 總經理",
+      "formFields": [
+        {
+          "id": "expense_type",
+          "label": "費用類別",
+          "type": "select",
+          "required": true,
+          "placeholder": "",
+          "options": [
+            "差旅",
+            "交際",
+            "辦公用品",
+            "雜支",
+            "資訊設備",
+            "電信費用",
+            "清潔費",
+            "電費",
+            "其他"
+          ]
+        },
+        {
+          "id": "currency",
+          "label": "幣別",
+          "type": "select",
+          "required": true,
+          "placeholder": "請選擇幣別",
+          "options": [
+            "NTD",
+            "USD"
+          ]
+        },
+        {
+          "id": "amount",
+          "label": "金額",
+          "type": "number",
+          "required": true,
+          "placeholder": "請輸入金額（配合上方幣別）"
+        },
+        {
+          "id": "expense_date",
+          "label": "發生日期",
+          "type": "date",
+          "required": true,
+          "placeholder": ""
+        },
+        {
+          "id": "desc",
+          "label": "費用說明",
+          "type": "textarea",
+          "required": true,
+          "placeholder": ""
+        }
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "name": "部門主管",
+          "assignType": "dept_head",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 2,
+          "name": "副總經理",
+          "assignType": "users_pick",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            7,
+            9
+          ],
+          "approvers": [
+            {
+              "id": 7,
+              "username": "luis",
+              "name": "陳政宏"
+            },
+            {
+              "id": 9,
+              "username": "danny",
+              "name": "陳牧晨"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 3,
+          "name": "總經理",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            10
+          ],
+          "approvers": [
+            {
+              "id": 10,
+              "username": "martin",
+              "name": "陳明耀"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        }
+      ],
+      "exportedAt": "2026-07-18T09:31:08.414Z"
+    },
+    {
+      "format": "approval-system-workflow",
+      "version": 1,
+      "sourceId": 8,
+      "name": "出差申請",
+      "description": "申請人 → 人事單位 → 部門主管 → 副總經理 → 總經理",
+      "formFields": [
+        {
+          "id": "destination",
+          "label": "出差地點",
+          "type": "text",
+          "required": true,
+          "placeholder": ""
+        },
+        {
+          "id": "start_date",
+          "label": "起始日",
+          "type": "date",
+          "required": true,
+          "placeholder": ""
+        },
+        {
+          "id": "end_date",
+          "label": "結束日",
+          "type": "date",
+          "required": true,
+          "placeholder": ""
+        },
+        {
+          "id": "purpose",
+          "label": "出差事由",
+          "type": "textarea",
+          "required": true,
+          "placeholder": ""
+        },
+        {
+          "id": "budget",
+          "label": "預估費用",
+          "type": "number",
+          "required": false,
+          "placeholder": ""
+        }
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "name": "人事單位",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "人事單位",
+          "approverIds": [
+            6,
+            11
+          ],
+          "approvers": [
+            {
+              "id": 6,
+              "username": "claire",
+              "name": "林秀美"
+            },
+            {
+              "id": 11,
+              "username": "betty",
+              "name": "陳怡靜"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 2,
+          "name": "部門主管",
+          "assignType": "dept_head",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 3,
+          "name": "副總經理",
+          "assignType": "users_pick",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            7,
+            9
+          ],
+          "approvers": [
+            {
+              "id": 7,
+              "username": "luis",
+              "name": "陳政宏"
+            },
+            {
+              "id": 9,
+              "username": "danny",
+              "name": "陳牧晨"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 4,
+          "name": "總經理",
+          "assignType": "users",
+          "mode": "all",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [
+            10
+          ],
+          "approvers": [
+            {
+              "id": 10,
+              "username": "martin",
+              "name": "陳明耀"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        }
+      ],
+      "exportedAt": "2026-07-18T09:31:08.414Z"
+    },
+    {
+      "format": "approval-system-workflow",
+      "version": 1,
+      "sourceId": 9,
+      "name": "延長工時申請",
+      "description": "延長工時（加班）申請。誤餐費與補休僅可擇一；補休最多累計 40 小時且限一年內休完。流程：申請人→部門主管→副總經理→人事核算→總經理。",
+      "formFields": [
+        {
+          "id": "reason",
+          "label": "事由",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "請說明延長工時原因"
+        },
+        {
+          "id": "ot_start",
+          "label": "延長工時開始",
+          "type": "datetime",
+          "required": true,
+          "placeholder": "17:30～24:00，每 30 分鐘"
+        },
+        {
+          "id": "ot_end",
+          "label": "延長工時結束",
+          "type": "datetime",
+          "required": true,
+          "placeholder": "17:30～24:00，每 30 分鐘"
+        },
+        {
+          "id": "hours",
+          "label": "申請時數（小時）",
+          "type": "number",
+          "required": true,
+          "placeholder": "依起迄自動換算（最小 0.5 小時）"
+        },
+        {
+          "id": "ot_option",
+          "label": "選擇項目",
+          "type": "select",
+          "required": true,
+          "options": [
+            "補休",
+            "誤餐費",
+            "其他"
+          ],
+          "placeholder": ""
+        },
+        {
+          "id": "ot_option_other",
+          "label": "其他說明",
+          "type": "text",
+          "required": false,
+          "placeholder": "選擇「其他」時請填寫"
+        }
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "name": "部門主管",
+          "assignType": "dept_head",
+          "mode": "any",
+          "formFieldId": "agent",
+          "department": "",
+          "approverIds": [],
+          "approvers": [],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 2,
+          "name": "副總經理",
+          "assignType": "users_pick",
+          "mode": "any",
+          "formFieldId": "",
+          "department": "",
+          "approverIds": [
+            7,
+            9
+          ],
+          "approvers": [
+            {
+              "id": 7,
+              "username": "luis",
+              "name": "陳政宏"
+            },
+            {
+              "id": 9,
+              "username": "danny",
+              "name": "陳牧晨"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 3,
+          "name": "人事單位",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "",
+          "department": "管理部",
+          "approverIds": [
+            6,
+            11
+          ],
+          "approvers": [
+            {
+              "id": 6,
+              "username": "claire",
+              "name": "林秀美"
+            },
+            {
+              "id": 11,
+              "username": "betty",
+              "name": "陳怡靜"
+            }
+          ],
+          "approverFields": [
+            {
+              "id": "actual_start",
+              "label": "實際工時開始",
+              "type": "datetime",
+              "required": true,
+              "placeholder": "17:30～24:00，每 30 分鐘"
+            },
+            {
+              "id": "actual_end",
+              "label": "實際工時結束",
+              "type": "datetime",
+              "required": true,
+              "placeholder": "17:30～24:00，每 30 分鐘"
+            },
+            {
+              "id": "actual_hours",
+              "label": "實際總計（小時）",
+              "type": "number",
+              "required": true,
+              "placeholder": "依起迄自動換算（最小 0.5 小時）"
+            },
+            {
+              "id": "comp_leave_balance",
+              "label": "目前累計可用時數（補休）",
+              "type": "number",
+              "required": false,
+              "placeholder": "補休累計（最多 40 小時）"
+            },
+            {
+              "id": "hr_note",
+              "label": "人事備註",
+              "type": "textarea",
+              "required": false,
+              "placeholder": "選填"
+            }
+          ],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 4,
+          "name": "總經理",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "",
+          "department": "",
+          "approverIds": [
+            10
+          ],
+          "approvers": [
+            {
+              "id": 10,
+              "username": "martin",
+              "name": "陳明耀"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        }
+      ],
+      "exportedAt": "2026-07-18T09:31:08.414Z"
+    },
+    {
+      "format": "approval-system-workflow",
+      "version": 1,
+      "sourceId": 10,
+      "name": "電腦異常報修申請",
+      "description": "電腦異常報修申請。管理部依檢核標準（2024年3月核定）檢修後，陳核副總經理、總經理。流程：申請人→管理部檢修→副總經理→總經理。",
+      "formFields": [
+        {
+          "id": "issue_desc",
+          "label": "設備異常說明",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "請描述異常現象、發生時間與影響"
+        },
+        {
+          "id": "computer_spec",
+          "label": "電腦規格（申請人填寫）",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "型號、配備等（選填）"
+        }
+      ],
+      "steps": [
+        {
+          "order": 1,
+          "name": "管理部檢修",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "",
+          "department": "管理部",
+          "approverIds": [
+            1,
+            3
+          ],
+          "approvers": [
+            {
+              "id": 1,
+              "username": "admin",
+              "name": "系統管理員"
+            },
+            {
+              "id": 3,
+              "username": "steven",
+              "name": "張祖銘"
+            }
+          ],
+          "approverFields": [
+            {
+              "id": "pc_acquired_date",
+              "label": "原電腦取得日期",
+              "type": "date",
+              "required": true,
+              "placeholder": "由管理部填寫"
+            },
+            {
+              "id": "check_os",
+              "label": "作業系統（Windows10）",
+              "type": "select",
+              "required": true,
+              "options": [
+                "符合",
+                "不符合"
+              ]
+            },
+            {
+              "id": "check_memory",
+              "label": "記憶體（4G 以上）",
+              "type": "select",
+              "required": true,
+              "options": [
+                "符合",
+                "不符合"
+              ]
+            },
+            {
+              "id": "check_disk",
+              "label": "硬碟（SSD 500G 以上）",
+              "type": "select",
+              "required": true,
+              "options": [
+                "符合",
+                "不符合"
+              ]
+            },
+            {
+              "id": "check_3dmark",
+              "label": "3DMARK 分數（500 分以上）",
+              "type": "select",
+              "required": true,
+              "options": [
+                "符合",
+                "不符合"
+              ]
+            },
+            {
+              "id": "check_email",
+              "label": "電子郵件定期清理",
+              "type": "select",
+              "required": true,
+              "options": [
+                "符合",
+                "不符合"
+              ]
+            },
+            {
+              "id": "check_backup",
+              "label": "重要資料定期備份",
+              "type": "select",
+              "required": true,
+              "options": [
+                "符合",
+                "不符合"
+              ]
+            },
+            {
+              "id": "check_battery",
+              "label": "電池容量（70% 以下）",
+              "type": "select",
+              "required": true,
+              "options": [
+                "符合",
+                "不符合"
+              ]
+            },
+            {
+              "id": "handle_result",
+              "label": "電腦處理情形",
+              "type": "select",
+              "required": true,
+              "options": [
+                "升級部分零件，更換整備品相容零件，若無則需購置",
+                "無法使用，購置新電腦",
+                "其他"
+              ]
+            },
+            {
+              "id": "handle_note",
+              "label": "處理說明／其他",
+              "type": "textarea",
+              "required": false,
+              "placeholder": "零件項目、估價、建議等"
+            }
+          ],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 2,
+          "name": "副總經理",
+          "assignType": "users_pick",
+          "mode": "any",
+          "formFieldId": "",
+          "department": "",
+          "approverIds": [
+            7,
+            9
+          ],
+          "approvers": [
+            {
+              "id": 7,
+              "username": "luis",
+              "name": "陳政宏"
+            },
+            {
+              "id": 9,
+              "username": "danny",
+              "name": "陳牧晨"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        },
+        {
+          "order": 3,
+          "name": "總經理",
+          "assignType": "users",
+          "mode": "any",
+          "formFieldId": "",
+          "department": "",
+          "approverIds": [
+            10
+          ],
+          "approvers": [
+            {
+              "id": 10,
+              "username": "martin",
+              "name": "陳明耀"
+            }
+          ],
+          "approverFields": [],
+          "skipIfNoApprover": false
+        }
+      ],
+      "exportedAt": "2026-07-18T09:31:08.414Z"
+    }
+  ]
+}

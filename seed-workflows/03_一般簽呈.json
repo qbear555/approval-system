@@ -1,0 +1,111 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "sourceId": 6,
+  "name": "一般簽呈",
+  "description": "申請人 → 部門主管（可略過）→ 會簽人員（可多選、皆須核准）→ 副總經理 → 總經理",
+  "formFields": [
+    {
+      "id": "subject",
+      "label": "主旨說明",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "",
+      "options": []
+    },
+    {
+      "id": "category",
+      "label": "類別",
+      "type": "select",
+      "required": true,
+      "placeholder": "",
+      "options": [
+        "人事",
+        "行政",
+        "業務",
+        "其他"
+      ]
+    },
+    {
+      "id": "urgent",
+      "label": "急件",
+      "type": "checkbox",
+      "required": false,
+      "placeholder": "",
+      "options": []
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "部門主管",
+      "assignType": "dept_head",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "管理部",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "會簽人員",
+      "assignType": "cosign_pick",
+      "mode": "all",
+      "formFieldId": "",
+      "department": "",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "副總經理",
+      "assignType": "users_pick",
+      "mode": "all",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        7,
+        9
+      ],
+      "approvers": [
+        {
+          "id": 7,
+          "username": "luis",
+          "name": "陳政宏"
+        },
+        {
+          "id": 9,
+          "username": "danny",
+          "name": "陳牧晨"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 4,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        10
+      ],
+      "approvers": [
+        {
+          "id": 10,
+          "username": "martin",
+          "name": "陳明耀"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "exportedAt": "2026-07-18T09:31:08.414Z"
+}

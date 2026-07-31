@@ -1,0 +1,194 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "sourceId": 10,
+  "name": "電腦異常報修申請",
+  "description": "電腦異常報修申請。管理部依檢核標準（2024年3月核定）檢修後，陳核副總經理、總經理。流程：申請人→管理部檢修→副總經理→總經理。",
+  "formFields": [
+    {
+      "id": "issue_desc",
+      "label": "設備異常說明",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "請描述異常現象、發生時間與影響"
+    },
+    {
+      "id": "computer_spec",
+      "label": "電腦規格（申請人填寫）",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "型號、配備等（選填）"
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "管理部檢修",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "管理部",
+      "approverIds": [
+        1,
+        3
+      ],
+      "approvers": [
+        {
+          "id": 1,
+          "username": "admin",
+          "name": "系統管理員"
+        },
+        {
+          "id": 3,
+          "username": "steven",
+          "name": "張祖銘"
+        }
+      ],
+      "approverFields": [
+        {
+          "id": "pc_acquired_date",
+          "label": "原電腦取得日期",
+          "type": "date",
+          "required": true,
+          "placeholder": "由管理部填寫"
+        },
+        {
+          "id": "check_os",
+          "label": "作業系統（Windows10）",
+          "type": "select",
+          "required": true,
+          "options": [
+            "符合",
+            "不符合"
+          ]
+        },
+        {
+          "id": "check_memory",
+          "label": "記憶體（4G 以上）",
+          "type": "select",
+          "required": true,
+          "options": [
+            "符合",
+            "不符合"
+          ]
+        },
+        {
+          "id": "check_disk",
+          "label": "硬碟（SSD 500G 以上）",
+          "type": "select",
+          "required": true,
+          "options": [
+            "符合",
+            "不符合"
+          ]
+        },
+        {
+          "id": "check_3dmark",
+          "label": "3DMARK 分數（500 分以上）",
+          "type": "select",
+          "required": true,
+          "options": [
+            "符合",
+            "不符合"
+          ]
+        },
+        {
+          "id": "check_email",
+          "label": "電子郵件定期清理",
+          "type": "select",
+          "required": true,
+          "options": [
+            "符合",
+            "不符合"
+          ]
+        },
+        {
+          "id": "check_backup",
+          "label": "重要資料定期備份",
+          "type": "select",
+          "required": true,
+          "options": [
+            "符合",
+            "不符合"
+          ]
+        },
+        {
+          "id": "check_battery",
+          "label": "電池容量（70% 以下）",
+          "type": "select",
+          "required": true,
+          "options": [
+            "符合",
+            "不符合"
+          ]
+        },
+        {
+          "id": "handle_result",
+          "label": "電腦處理情形",
+          "type": "select",
+          "required": true,
+          "options": [
+            "升級部分零件，更換整備品相容零件，若無則需購置",
+            "無法使用，購置新電腦",
+            "其他"
+          ]
+        },
+        {
+          "id": "handle_note",
+          "label": "處理說明／其他",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "零件項目、估價、建議等"
+        }
+      ],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "副總經理",
+      "assignType": "users_pick",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "",
+      "approverIds": [
+        7,
+        9
+      ],
+      "approvers": [
+        {
+          "id": 7,
+          "username": "luis",
+          "name": "陳政宏"
+        },
+        {
+          "id": 9,
+          "username": "danny",
+          "name": "陳牧晨"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "",
+      "approverIds": [
+        10
+      ],
+      "approvers": [
+        {
+          "id": 10,
+          "username": "martin",
+          "name": "陳明耀"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "exportedAt": "2026-07-18T09:31:08.414Z"
+}

@@ -1,0 +1,120 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "sourceId": 7,
+  "name": "費用報支",
+  "description": "申請人 → 部門主管 → 副總經理 → 總經理",
+  "formFields": [
+    {
+      "id": "expense_type",
+      "label": "費用類別",
+      "type": "select",
+      "required": true,
+      "placeholder": "",
+      "options": [
+        "差旅",
+        "交際",
+        "辦公用品",
+        "雜支",
+        "資訊設備",
+        "電信費用",
+        "清潔費",
+        "電費",
+        "其他"
+      ]
+    },
+    {
+      "id": "currency",
+      "label": "幣別",
+      "type": "select",
+      "required": true,
+      "placeholder": "請選擇幣別",
+      "options": [
+        "NTD",
+        "USD"
+      ]
+    },
+    {
+      "id": "amount",
+      "label": "金額",
+      "type": "number",
+      "required": true,
+      "placeholder": "請輸入金額（配合上方幣別）"
+    },
+    {
+      "id": "expense_date",
+      "label": "發生日期",
+      "type": "date",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "desc",
+      "label": "費用說明",
+      "type": "textarea",
+      "required": true,
+      "placeholder": ""
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "部門主管",
+      "assignType": "dept_head",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "副總經理",
+      "assignType": "users_pick",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        7,
+        9
+      ],
+      "approvers": [
+        {
+          "id": 7,
+          "username": "luis",
+          "name": "陳政宏"
+        },
+        {
+          "id": 9,
+          "username": "danny",
+          "name": "陳牧晨"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        10
+      ],
+      "approvers": [
+        {
+          "id": 10,
+          "username": "martin",
+          "name": "陳明耀"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "exportedAt": "2026-07-18T09:31:08.414Z"
+}

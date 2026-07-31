@@ -1,0 +1,92 @@
+# 線上簽核系統 — Docker Compose
+# 適用：Ubuntu / Synology / 任何 Docker 主機
+# 說明：docs/UBUNTU.md 、 docs/SYNOLOGY.md
+#
+# OnlyOffice（可選，線上編輯 Word／Excel）：
+#   1. 設定 .env 中 ONLYOFFICE_* 與 JWT
+#   2. docker compose --profile onlyoffice up -d
+#   3. 首次拉取 onlyoffice/documentserver 映像較大（約數 GB）
+#   注意：OnlyOffice 僅綁 8088，勿佔用簽核 HTTPS 3848
+
+services:
+  approval-system:
+    build: .
+    image: approval-system:1.1
+    container_name: approval-system
+    restart: unless-stopped
+    ports:
+      # 左邊 = 主機對外埠，可改；右邊固定容器內埠
+      - "3847:3847"   # HTTP
+      - "3848:3848"   # HTTPS（自簽／既有憑證，entrypoint 產生）
+    environment:
+      - PORT=3847
+      - HTTPS_PORT=3848
+      - HTTPS_ENABLED=1
+      - NODE_ENV=production
+      # 正式環境請改成夠長的隨機字串
+      - JWT_SECRET=${JWT_SECRET:-change-me-to-a-long-random-secret}
+      - TZ=${TZ:-Asia/Taipei}
+      # 自簽憑證 CN / SAN（可依 NAS IP／網域調整）
+      - SSL_CN=${SSL_CN:-192.168.99.220}
+      - SSL_SAN=${SSL_SAN:-DNS:localhost,DNS:approval-system,DNS:catshome.tw,IP:127.0.0.1,IP:192.168.99.220}
+      # OnlyOffice（預設關閉；啟用 profile 時請一併改 .env）
+      - ONLYOFFICE_ENABLED=${ONLYOFFICE_ENABLED:-0}
+      - ONLYOFFICE_DOCS_URL=${ONLYOFFICE_DOCS_URL:-http://127.0.0.1:8088}
+      - ONLYOFFICE_INTERNAL_URL=${ONLYOFFICE_INTERNAL_URL:-http://onlyoffice}
+      - ONLYOFFICE_APP_URL=${ONLYOFFICE_APP_URL:-http://approval-system:3847}
+      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-${JWT_SECRET:-change-me-to-a-long-random-secret}}
+      - ONLYOFFICE_JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-1}
+    volumes:
+      # 持久化：資料庫、上傳附件、備份 PDF/ZIP、HTTPS 憑證
+      - ./data:/app/data
+    networks:
+      - approval-net
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3847/api/departments').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # 線上編輯 Word／Excel（OnlyOffice Document Server）
+  # 啟動：docker compose --profile onlyoffice up -d
+  # 僅 8088，不佔 3848（3848 保留給簽核 HTTPS）
+  onlyoffice:
+    profiles: ["onlyoffice"]
+    image: onlyoffice/documentserver:8.2
+    container_name: onlyoffice
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    environment:
+      - JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-true}
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-${JWT_SECRET:-change-me-to-a-long-random-secret}}
+      - JWT_HEADER=Authorization
+      - JWT_IN_BODY=true
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+      - ALLOW_META_IP_ADDRESS=true
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+    networks:
+      - approval-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/healthcheck || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+networks:
+  approval-net:
+    driver: bridge
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_logs:
