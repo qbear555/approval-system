@@ -48,7 +48,15 @@
     const tag = clickable ? 'button' : 'div';
     const type = clickable ? ' type="button"' : '';
     const go = clickable ? ` data-go="${_esc(o.go)}"` : '';
-    const cls = `stat-card${clickable ? ' stat-card-clickable' : ''}${o.disabled ? ' stat-card-disabled' : ''}`;
+    const label = String(o.label || '');
+
+    let colorCls = ' total';
+    if (label.includes('待我') || label.includes('待辦') || label.includes('待簽')) colorCls = ' pending';
+    else if (label.includes('完成') || label.includes('核准')) colorCls = ' approved';
+    else if (label.includes('駁回') || label.includes('失敗')) colorCls = ' rejected';
+    else if (label.includes('進行') || label.includes('審核')) colorCls = ' pending';
+
+    const cls = `stat-card${colorCls}${clickable ? ' stat-card-clickable' : ''}${o.disabled ? ' stat-card-disabled' : ''}`;
     const hint =
       o.hint != null
         ? o.hint

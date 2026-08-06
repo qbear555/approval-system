@@ -113,7 +113,11 @@ async function main() {
     await downloadTree(sftp, SFTP_DATA, SNAPSHOT);
 
     // Copy critical files into project data/
-    const files = ['approval.db', 'mail-config.json'];
+    // Clean stale WAL/SHM in local data before copying DB
+    fs.rmSync(path.join(LOCAL_DATA, 'approval.db-wal'), { force: true });
+    fs.rmSync(path.join(LOCAL_DATA, 'approval.db-shm'), { force: true });
+
+    const files = ['approval.db', 'approval.db-wal', 'approval.db-shm', 'mail-config.json'];
     for (const f of files) {
       const src = path.join(SNAPSHOT, f);
       if (fs.existsSync(src)) {

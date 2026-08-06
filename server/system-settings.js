@@ -28,6 +28,8 @@ const DEFAULTS = {
   // 備份 ZIP AES-256 加密（密碼僅伺服器端）
   backupEncryptEnabled: false,
   backupEncryptPass: '',
+  // 備份根目錄（空字串 = 預設 data/backups）
+  backupDir: '',
   // 總覽公告（單則最小版）
   announcementEnabled: false,
   announcementTitle: '',
@@ -101,6 +103,7 @@ function loadRaw() {
       backupEncryptEnabled: !!raw.backupEncryptEnabled,
       backupEncryptPass:
         raw.backupEncryptPass != null ? String(raw.backupEncryptPass) : '',
+      backupDir: raw.backupDir ? String(raw.backupDir).trim().slice(0, 500) : '',
       announcementEnabled: !!raw.announcementEnabled,
       announcementTitle:
         raw.announcementTitle != null
@@ -152,6 +155,7 @@ function saveRaw(settings) {
     backupEncryptEnabled: !!cur.backupEncryptEnabled,
     backupEncryptPass:
       cur.backupEncryptPass != null ? String(cur.backupEncryptPass) : '',
+    backupDir: cur.backupDir ? String(cur.backupDir).trim().slice(0, 500) : '',
     announcementEnabled: !!cur.announcementEnabled,
     announcementTitle: cur.announcementTitle != null ? String(cur.announcementTitle).slice(0, 120) : '',
     announcementBody: cur.announcementBody != null ? String(cur.announcementBody).slice(0, 8000) : '',
@@ -431,6 +435,7 @@ function getAdminSettings() {
       hasPass: backupHasPass,
       ready: !!s.backupEncryptEnabled && backupHasPass,
     },
+    backupDir: s.backupDir || '',
     announcement: getAnnouncementPublic(),
   };
 }
@@ -481,6 +486,15 @@ function updateSettings(patch = {}) {
     String(patch.backupEncryptPass) !== ''
   ) {
     cur.backupEncryptPass = String(patch.backupEncryptPass).slice(0, 200);
+  }
+  // 備份目錄：明確傳入才更新（含空字串表示恢復預設）
+  if (Object.prototype.hasOwnProperty.call(patch, 'backupDir')) {
+    const dir = String(patch.backupDir || '').trim();
+    // 安全性：禁止路徑包含 .. 向上穿越
+    if (dir && dir.includes('..')) {
+      throw new Error('備份目錄不可包含「..」路徑穿越');
+    }
+    cur.backupDir = dir.slice(0, 500);
   }
   return saveRaw(cur);
 }
@@ -824,6 +838,17 @@ function getCompanyName() {
   return loadRaw().companyName || DEFAULT_COMPANY_NAME;
 }
 
+/** 取得備份根目錄絕對路徑（考慮自訂 backupDir 設定） */
+function getBackupDir() {
+  const s = loadRaw();
+  const dir = s.backupDir ? String(s.backupDir).trim() : '';
+  if (dir) {
+    // 自訂目錄：支援絕對路徑，或相對於 DATA_DIR 的路徑
+    return path.isAbsolute(dir) ? dir : path.join(DATA_DIR, dir);
+  }
+  return path.join(DATA_DIR, 'backups');
+}
+
 module.exports = {
   getPublicSettings,
   getAdminSettings,
@@ -843,6 +868,7 @@ module.exports = {
   clearPdfSignCert,
   createSelfSignedPdfSignCert,
   getBackupEncryptConfig,
+  getBackupDir,
   DEFAULT_LOGO_URL,
   DEFAULT_COMPANY_NAME,
   BRAND_DIR,

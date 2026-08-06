@@ -37,6 +37,7 @@ const {
 } = require('./backup');
 const { hashPassword: hp } = require('./auth');
 const mail = require('./mail');
+const lineNotify = require('./line-notify');
 const { importPayload } = require('./import-workflows');
 const workflowModule = require('./workflow-module');
 const systemPackage = require('./system-package');
@@ -212,6 +213,145 @@ function canUserAttachOnStep(userId, detail) {
   return true;
 }
 
+/** 取得請求端 IP 位址 */
+function getClientIp(req) {
+  if (!req) return '127.0.0.1';
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return String(forwarded).split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
+}
+
+/** 寫入系統進階稽核日誌 (P3-1) */
+function logAudit(req, { action_type, category = 'general', description, target_id = null, detail = {} }) {
+  try {
+    const user = req?.user;
+    const userId = user?.id || null;
+    const userName = user?.name || (userId ? '' : '系統/訪客');
+    const userUsername = user?.username || '';
+    const ip = getClientIp(req);
+
+    db.prepare(`
+      INSERT INTO system_audit_logs (user_id, user_name, user_username, action_type, category, description, ip_address, target_id, detail_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      userName,
+      userUsername,
+      String(action_type || 'unknown'),
+      String(category || 'general'),
+      String(description || ''),
+      ip,
+      target_id ? Number(target_id) : null,
+      JSON.stringify(detail || {})
+    );
+  } catch (e) {
+    console.error('[audit-log] record failed:', e.message);
+  }
+}
+
+/**
+ * P2-1: 處理最終核准時的自動連動 (銷假單扣回 & 加班轉補休)
+ */
+function handleP2ApprovedSideEffects(detail, req = null) {
+  if (!detail || detail.status !== 'approved') return;
+
+  try {
+    const title = String(detail.title || '').trim();
+    const wfName = String(detail.workflow_name || '').trim();
+    const formData = typeof detail.form_data === 'string' ? JSON.parse(detail.form_data || '{}') : (detail.form_data || {});
+    const requesterId = Number(detail.requester_id);
+
+    if (!requesterId) return;
+
+    // 1. 銷假連動 (銷假申請單 / Title包含銷假 / form_data 有 cancel_target_id / leave_request_id)
+    const isCancelLeave = title.includes('銷假') || wfName.includes('銷假') || formData.is_cancel_leave || formData.cancel_target_id;
+    if (isCancelLeave) {
+      const targetRequestId = Number(formData.cancel_target_id || formData.target_request_id || formData.leave_request_id);
+      let returnedDays = Number(formData.days || formData.cancel_days || 0);
+      let returnedHours = Number(formData.hours || formData.cancel_hours || 0);
+      const leaveType = String(formData.leave_type || formData.leave_name || '特別休假（特休）').trim();
+
+      // 若有指定原請假單號，查詢原單據資訊
+      if (targetRequestId) {
+        const targetReq = db.prepare(`SELECT * FROM approval_requests WHERE id = ?`).get(targetRequestId);
+        if (targetReq) {
+          const tFormData = JSON.parse(targetReq.form_data || '{}');
+          if (!returnedDays && !returnedHours) {
+            returnedDays = Number(tFormData.days || 0);
+            returnedHours = Number(tFormData.hours || 0);
+          }
+          // 將原單據標記為已銷假
+          db.prepare(`UPDATE approval_requests SET status = 'cancelled', updated_at = datetime('now', 'localtime') WHERE id = ?`)
+            .run(targetRequestId);
+        }
+      }
+
+      // 將銷假扣回的天數／小時加回使用者的可休／手動餘額
+      const user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(requesterId);
+      if (user) {
+        let entitledMap = {};
+        try { entitledMap = JSON.parse(user.leave_entitled_json || '{}'); } catch {}
+        
+        const curEntitled = Number(entitledMap[leaveType] || 0);
+        const addEntitled = returnedDays + (returnedHours / 7.5);
+        entitledMap[leaveType] = Math.round((curEntitled + addEntitled) * 100) / 100;
+
+        db.prepare(`UPDATE users SET leave_entitled_json = ? WHERE id = ?`)
+          .run(JSON.stringify(entitledMap), requesterId);
+
+        logAudit(req, {
+          action_type: 'leave_cancel_returned',
+          category: 'approval',
+          description: `銷假單 #${detail.id} 核准完成，自動歸還 ${user.name} 假別「${leaveType}」${returnedDays ? `${returnedDays} 天` : ''}${returnedHours ? `${returnedHours} 小時` : ''}`,
+          target_id: detail.id,
+        });
+      }
+    }
+
+    // 2. 加班轉補休連動 (加班申請單 / 延長工時 / Title包含加班 / form_data 選擇轉補休)
+    const isOvertime = title.includes('加班') || title.includes('延長工時') || wfName.includes('加班') || wfName.includes('延長工時') || formData.is_overtime;
+    const isConvertToComp = String(formData.convert_type || formData.type || formData.overtime_action || formData.convert_to || '').includes('補休') || formData.convert_to_comp === true || formData.convert_to_comp === 'true';
+
+    if (isOvertime && isConvertToComp) {
+      const otHours = Number(formData.hours || formData.overtime_hours || formData.total_hours || 0);
+      if (otHours > 0) {
+        let compHours = otHours;
+        if (formData.use_rate_calc) {
+          if (otHours <= 2) {
+            compHours = Math.round(otHours * 1.34 * 100) / 100;
+          } else {
+            compHours = Math.round((2 * 1.34 + (otHours - 2) * 1.67) * 100) / 100;
+          }
+        }
+
+        const user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(requesterId);
+        if (user) {
+          let entitledMap = {};
+          try { entitledMap = JSON.parse(user.leave_entitled_json || '{}'); } catch {}
+          
+          const compKey = '補休';
+          const curComp = Number(entitledMap[compKey] || 0);
+          entitledMap[compKey] = Math.round((curComp + compHours / 7.5) * 100) / 100;
+
+          db.prepare(`UPDATE users SET leave_entitled_json = ? WHERE id = ?`)
+            .run(JSON.stringify(entitledMap), requesterId);
+
+          logAudit(req, {
+            action_type: 'overtime_to_comp',
+            category: 'approval',
+            description: `加班單 #${detail.id} 核准完成，自動核給同仁 ${user.name} 補休 ${compHours} 小時`,
+            target_id: detail.id,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[P2-1 side effects error]', err.message);
+  }
+}
+
 /**
  * 是否已有簽署人核准過（含會簽已有人簽、或已進入第 2 關以後）
  * 一旦成立，申請單不可取消／刪除
@@ -273,6 +413,17 @@ const PERMISSION_DEFS = [
     id: 'finance_confirm',
     label: '財務部授信額度建檔確認',
     description: '財務部：可於總覽／待簽核檢視待建檔信用額度申請單，並進行建檔登記',
+  },
+  {
+    id: 'audit_logs',
+    label: '系統稽核日誌',
+    description: '查看及匯出系統維運、全站登入與操作行為之進階稽核軌跡。系統管理員預設具備。',
+  },
+  {
+    id: 'line_settings',
+    label: 'LINE 通知設定',
+    description:
+      '可設定 LINE 推播服務網址／API 金鑰／事件（當「誰可設定 LINE」選「指定權限」時生效）。系統管理員預設具備。',
   },
 ];
 const ALL_PERM_IDS = PERMISSION_DEFS.map((p) => p.id);
@@ -395,6 +546,7 @@ function publicUser(row, { withLabor = false } = {}) {
     active: row.active,
     created_at: row.created_at,
     permissions: getPermissionsForUser(row),
+    signature_image: row.signature_image || null,
   };
   if (withLabor) {
     base.labor = labor.buildLaborSummary({
@@ -492,6 +644,66 @@ function fireAndForgetMail(label, promise) {
     .catch((e) => console.error(`[mail:${label}]`, e.message));
 }
 
+function fireAndForgetLine(label, promise) {
+  lineNotify.fireAndForget(label, promise);
+}
+
+/** 信內／LINE 內連結用系統網址（與 Email baseUrl 共用） */
+function getAppBaseUrl() {
+  try {
+    const cfg = mail.loadConfig();
+    return String(cfg.baseUrl || '')
+      .trim()
+      .replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function getUsernameById(id) {
+  if (id == null) return null;
+  const row = db.prepare(`SELECT username FROM users WHERE id = ?`).get(id);
+  return row?.username || null;
+}
+
+function getUsernamesByIds(ids) {
+  const list = (ids || []).map(Number).filter(Boolean);
+  if (!list.length) return [];
+  const out = [];
+  for (const id of list) {
+    const u = getUsernameById(id);
+    if (u) out.push(u);
+  }
+  return out;
+}
+
+/**
+ * 是否可設定 LINE 通知
+ * configAccess: builtin_admin | any_admin | permission
+ */
+function canConfigureLineSettings(user) {
+  if (!user) return false;
+  const access = lineNotify.loadConfig().configAccess || 'builtin_admin';
+  if (access === 'builtin_admin') return isBuiltinAdminUsername(user.username);
+  if (access === 'any_admin') return user.role === 'admin' || isBuiltinAdminUsername(user.username);
+  if (access === 'permission') {
+    return (
+      user.role === 'admin' ||
+      isBuiltinAdminUsername(user.username) ||
+      userHasPermission(user.id, 'line_settings')
+    );
+  }
+  return isBuiltinAdminUsername(user.username);
+}
+
+function lineSettingsOnly(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: '未登入' });
+  if (!canConfigureLineSettings(req.user)) {
+    return res.status(403).json({ error: '您沒有 LINE 通知設定權限' });
+  }
+  next();
+}
+
 /** 以數字比對步驟 order（避免 JSON 字串 / SQLite 整數不一致） */
 function findStepByOrder(steps, order) {
   const o = Number(order);
@@ -556,6 +768,17 @@ function notifyCurrentApprovers(detail, kind, fromName) {
     kind === 'remind' ? 'remind' : 'approver',
     mail.sendApproverMails(detail, step, emails, kind, fromName)
   );
+  // LINE：依 username 推播（成員需先在 LINE 官方帳號綁定簽核帳號）
+  const usernames = getUsernamesByIds(targetIds);
+  if (usernames.length) {
+    fireAndForgetLine(
+      kind === 'remind' ? 'remind' : 'approver',
+      lineNotify.notifyApproversLine(detail, usernames, kind, {
+        actorName: fromName,
+        baseUrl: getAppBaseUrl(),
+      })
+    );
+  }
 }
 
 /** 將使用者加入部門（可同時隸屬多個部門） */
@@ -1781,9 +2004,11 @@ function getRequestDetail(id) {
 
   const actions = db
     .prepare(
-      `SELECT a.*, u.name AS actor_name, u.username AS actor_username
+      `SELECT a.*, u.name AS actor_name, u.username AS actor_username,
+              du.name AS delegated_for_name, du.username AS delegated_for_username
        FROM approval_actions a
        JOIN users u ON u.id = a.actor_id
+       LEFT JOIN users du ON du.id = a.delegated_for_id
        WHERE a.request_id = ?
        ORDER BY a.created_at ASC, a.id ASC`
     )
@@ -1916,7 +2141,17 @@ function getRequestDetail(id) {
     } catch {
       fd = {};
     }
-    return { ...a, form_data: fd };
+    let sigImg = a.signature_image || null;
+    if (!sigImg && a.actor_id && a.action === 'approve') {
+      const uSig = db.prepare(`SELECT signature_image FROM users WHERE id = ?`).get(a.actor_id);
+      if (uSig?.signature_image) sigImg = uSig.signature_image;
+    }
+    return {
+      ...a,
+      form_data: fd,
+      signature_image: sigImg,
+      delegated_for_name: a.delegated_for_name || null,
+    };
   });
 
   const notify_prefs = mail.parseNotifyPrefs
@@ -1959,19 +2194,97 @@ function getRequestDetail(id) {
   };
 }
 
-function canUserApproveStep(userId, step, requestId) {
-  if (!step || !Array.isArray(step.approverIds)) return false;
-  const ids = step.approverIds.map(Number);
-  if (!ids.includes(Number(userId))) return false;
-  if (step.mode !== 'all') return true;
-  // mode all: not yet approved by this user
-  const already = db
+/** 檢查使用者目前是否有生效中的簽核代理人設定 */
+function getActiveDelegationForUser(grantorUserId) {
+  const row = db
     .prepare(
-      `SELECT id FROM approval_actions
-       WHERE request_id = ? AND step_order = ? AND actor_id = ? AND action = 'approve'`
+      `SELECT d.*, u.name AS delegate_name, u.username AS delegate_username
+       FROM user_delegations d
+       JOIN users u ON u.id = d.delegate_user_id
+       WHERE d.user_id = ? AND d.active = 1
+       ORDER BY d.id DESC LIMIT 1`
     )
-    .get(requestId, Number(step.order), Number(userId));
-  return !already;
+    .get(Number(grantorUserId));
+  if (!row) return null;
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  if (row.start_time && row.start_time > now) return null;
+  if (row.end_time && row.end_time < now) return null;
+  return row;
+}
+
+/** 取得某代理人 (delegateUserId) 目前代理授權發起人 ID 清單 */
+function getGrantorUserIdsForDelegate(delegateUserId) {
+  const rows = db
+    .prepare(
+      `SELECT d.user_id, d.start_time, d.end_time, u.name AS grantor_name, u.username AS grantor_username
+       FROM user_delegations d
+       JOIN users u ON u.id = d.user_id
+       WHERE d.delegate_user_id = ? AND d.active = 1 AND u.active = 1`
+    )
+    .all(Number(delegateUserId));
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  const activeList = [];
+  for (const r of rows) {
+    if (r.start_time && r.start_time > now) continue;
+    if (r.end_time && r.end_time < now) continue;
+    activeList.push(r);
+  }
+  return activeList;
+}
+
+/**
+ * 判斷使用者是否可簽核某步驟（支援直接簽核與代理簽核）
+ * @returns {{ canApprove: boolean, isDelegated: boolean, delegatedFor?: { id: number, name: string } }}
+ */
+function checkUserApprovalRight(userId, step, requestId) {
+  if (!step || !Array.isArray(step.approverIds)) return { canApprove: false, isDelegated: false };
+  const ids = step.approverIds.map(Number);
+  const uid = Number(userId);
+
+  // 1. 本人直接為簽核人
+  if (ids.includes(uid)) {
+    if (step.mode !== 'all') return { canApprove: true, isDelegated: false };
+    const already = db
+      .prepare(
+        `SELECT id FROM approval_actions
+         WHERE request_id = ? AND step_order = ? AND actor_id = ? AND action = 'approve'`
+      )
+      .get(requestId, Number(step.order), uid);
+    if (!already) return { canApprove: true, isDelegated: false };
+  }
+
+  // 2. 作為代理人代簽
+  const grantors = getGrantorUserIdsForDelegate(uid);
+  for (const g of grantors) {
+    if (ids.includes(Number(g.user_id))) {
+      if (step.mode !== 'all') {
+        return {
+          canApprove: true,
+          isDelegated: true,
+          delegatedFor: { id: g.user_id, name: g.grantor_name, username: g.grantor_username },
+        };
+      }
+      const alreadyG = db
+        .prepare(
+          `SELECT id FROM approval_actions
+           WHERE request_id = ? AND step_order = ? AND (actor_id = ? OR actor_id = ? OR delegated_for_id = ?) AND action = 'approve'`
+        )
+        .get(requestId, Number(step.order), Number(g.user_id), uid, Number(g.user_id));
+      if (!alreadyG) {
+        return {
+          canApprove: true,
+          isDelegated: true,
+          delegatedFor: { id: g.user_id, name: g.grantor_name, username: g.grantor_username },
+        };
+      }
+    }
+  }
+
+  return { canApprove: false, isDelegated: false };
+}
+
+function canUserApproveStep(userId, step, requestId) {
+  return checkUserApprovalRight(userId, step, requestId).canApprove;
 }
 
 function isStepComplete(requestId, step) {
@@ -1997,6 +2310,107 @@ function isStepComplete(requestId, step) {
     if (!row) return false;
   }
   return (step.approverIds || []).length > 0;
+}
+
+/**
+ * 評估關卡條件式動態分支 (Conditional Routing)
+ */
+function evaluateStepCondition(step, detail) {
+  if (!step?.condition || !step.condition.enabled) return { required: true };
+  const { fieldId, operator, value, action } = step.condition;
+  if (!fieldId || !operator) return { required: true };
+
+  const formData = detail?.form_data || {};
+  let rawVal = formData[fieldId];
+  if (rawVal == null || rawVal === '') {
+    if (fieldId === 'days' || fieldId === 'hours' || fieldId === 'amount' || fieldId === 'total_amount') {
+      rawVal = formData[fieldId] ?? formData['days'] ?? formData['hours'] ?? formData['金額'] ?? formData['總金額'] ?? 0;
+    } else {
+      rawVal = '';
+    }
+  }
+
+  const numVal = Number(rawVal);
+  const numTarget = Number(value);
+  const isNumeric = !Number.isNaN(numVal) && !Number.isNaN(numTarget);
+
+  let matched = false;
+  if (isNumeric) {
+    if (operator === '>') matched = numVal > numTarget;
+    else if (operator === '>=') matched = numVal >= numTarget;
+    else if (operator === '<') matched = numVal < numTarget;
+    else if (operator === '<=') matched = numVal <= numTarget;
+    else if (operator === '==') matched = numVal === numTarget;
+    else if (operator === '!=') matched = numVal !== numTarget;
+  } else {
+    const strVal = String(rawVal ?? '').trim();
+    const strTarget = String(value ?? '').trim();
+    if (operator === '==') matched = strVal === strTarget;
+    else if (operator === '!=') matched = strVal !== strTarget;
+    else if (operator === 'contains') matched = strVal.includes(strTarget);
+  }
+
+  const fieldLabel = fieldId === 'days' ? '天數' : fieldId === 'hours' ? '小時' : fieldId === 'amount' ? '金額' : fieldId;
+
+  if (action === 'skip') {
+    // skip = 符合條件時跳過
+    return {
+      required: !matched,
+      reason: matched
+        ? `符合跳關條件 (${fieldLabel} ${operator} ${value})，動態自動跳過關卡`
+        : `未達跳關條件 (${fieldLabel} ${operator} ${value})，進行簽核`,
+    };
+  } else {
+    // require (預設) = 符合條件才需要簽核，未符合則自動跳過
+    return {
+      required: matched,
+      reason: matched
+        ? `符合簽核條件 (${fieldLabel} ${operator} ${value})，進入本關簽核`
+        : `未達簽核門檻 (${fieldLabel} ${operator} ${value})，動態自動跳過關卡`,
+    };
+  }
+}
+
+/**
+ * 推進至下一個符合條件的簽核步驟 (可連續跳過多個不符合條件的關卡)
+ */
+function advanceToNextEligibleStep(id, detail, steps, currentStep) {
+  let idx = steps.findIndex((s) => Number(s.order) === Number(currentStep.order));
+  let nextIdx = idx < 0 ? 0 : idx + 1;
+  let finalNextStep = null;
+
+  while (nextIdx < steps.length) {
+    const candidate = steps[nextIdx];
+    const cond = evaluateStepCondition(candidate, detail);
+    if (cond.required) {
+      finalNextStep = candidate;
+      break;
+    } else {
+      // 記錄系統自動略過動作
+      db.prepare(
+        `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
+         VALUES (?, ?, ?, 0, 'system', ?, '{}')`
+      ).run(id, Number(candidate.order), candidate.name, `[動態條件跳關] ${cond.reason}`);
+      nextIdx++;
+    }
+  }
+
+  if (finalNextStep) {
+    db.prepare(
+      `UPDATE approval_requests SET current_step = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`
+    ).run(finalNextStep.order, id);
+    return {
+      mailEvent: 'step',
+      nextStepName: finalNextStep.name || `步驟 ${finalNextStep.order}`,
+      nextStep: finalNextStep,
+    };
+  } else {
+    db.prepare(
+      `UPDATE approval_requests SET status = 'approved', completed_at = datetime('now', 'localtime'),
+       updated_at = datetime('now', 'localtime') WHERE id = ?`
+    ).run(id);
+    return { mailEvent: 'approved', nextStepName: '', nextStep: null };
+  }
 }
 
 function isValidDepartment(name) {
@@ -2355,12 +2769,16 @@ app.post('/api/auth/login', (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: '請輸入帳號與密碼' });
   }
-  // 帳號大小寫皆可登入（Admin / admin / ADMIN 相同）；回傳的 username 為庫內正規寫法（首字母大寫）
-  const user = findUserByUsername(username, { activeOnly: true });
-  if (!user || !verifyPassword(password, user.password_hash)) {
+  const uStr = String(username).trim();
+  const pStr = String(password);
+  const pTrim = pStr.trim();
+  const user = findUserByUsername(uStr, { activeOnly: true });
+  if (!user || (!verifyPassword(pStr, user.password_hash) && !verifyPassword(pTrim, user.password_hash))) {
+    logAudit(req, { action_type: 'login_fail', category: 'auth', description: `登入失敗（帳號：${uStr}）` });
     return res.status(401).json({ error: '帳號或密碼錯誤' });
   }
   const safe = publicUser(user);
+  logAudit(req, { action_type: 'login', category: 'auth', description: `使用者 ${safe.name} (${safe.username}) 登入成功` });
   res.json({ token: signToken(safe), user: safe, permissionDefs: PERMISSION_DEFS });
 });
 
@@ -2437,6 +2855,157 @@ app.put('/api/auth/profile', authMiddleware, (req, res) => {
   const user = db.prepare(`SELECT * FROM users WHERE id = ? AND active = 1`).get(req.user.id);
   if (!user) return res.status(401).json({ error: '使用者不存在' });
   res.json({ user: publicUser(user) });
+});
+
+// ---------- 簽核代理人 ----------
+app.get('/api/delegations/my', authMiddleware, (req, res) => {
+  const activeDelegation = getActiveDelegationForUser(req.user.id);
+  const rawDelegation = db
+    .prepare(
+      `SELECT d.*, u.name AS delegate_name, u.username AS delegate_username
+       FROM user_delegations d
+       JOIN users u ON u.id = d.delegate_user_id
+       WHERE d.user_id = ?
+       ORDER BY d.id DESC LIMIT 1`
+    )
+    .get(req.user.id);
+  const grantors = getGrantorUserIdsForDelegate(req.user.id);
+  res.json({
+    activeDelegation,
+    delegation: rawDelegation || null,
+    grantors,
+  });
+});
+
+app.post('/api/delegations/my', authMiddleware, (req, res) => {
+  const { delegate_user_id, start_time, end_time, active } = req.body || {};
+  const delegateId = Number(delegate_user_id);
+  if (!delegateId) {
+    return res.status(400).json({ error: '請選擇代理對象' });
+  }
+  if (delegateId === req.user.id) {
+    return res.status(400).json({ error: '不能指定自己為代理人' });
+  }
+  const targetUser = db.prepare(`SELECT id, name FROM users WHERE id = ? AND active = 1`).get(delegateId);
+  if (!targetUser) {
+    return res.status(400).json({ error: '代理人帳號不存在或已停用' });
+  }
+
+  const startVal = start_time ? String(start_time).trim() : null;
+  const endVal = end_time ? String(end_time).trim() : null;
+  const isActive = active === false || active === 0 || active === '0' ? 0 : 1;
+
+  // 將舊的代理設定設為停用
+  db.prepare(`UPDATE user_delegations SET active = 0 WHERE user_id = ?`).run(req.user.id);
+
+  db.prepare(
+    `INSERT INTO user_delegations (user_id, delegate_user_id, start_time, end_time, active)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(req.user.id, delegateId, startVal, endVal, isActive);
+
+  const current = getActiveDelegationForUser(req.user.id);
+  res.json({ ok: true, delegation: current, message: `已成功設定 ${targetUser.name} 為您的簽核代理人` });
+});
+
+app.delete('/api/delegations/my', authMiddleware, (req, res) => {
+  db.prepare(`UPDATE user_delegations SET active = 0 WHERE user_id = ?`).run(req.user.id);
+  res.json({ ok: true, message: '已取消簽核代理設定' });
+});
+
+// ---------- 電子簽名檔 ----------
+app.get('/api/users/me/signature', authMiddleware, (req, res) => {
+  const row = db.prepare(`SELECT signature_image FROM users WHERE id = ?`).get(req.user.id);
+  res.json({ signature_image: row?.signature_image || null });
+});
+
+app.post('/api/users/me/signature', authMiddleware, (req, res) => {
+  const sig = req.body?.signature_image || req.body?.signature;
+  if (!sig || !String(sig).startsWith('data:image/')) {
+    return res.status(400).json({ error: '請提供有效的圖檔 Base64 簽名資料' });
+  }
+  db.prepare(`UPDATE users SET signature_image = ? WHERE id = ?`).run(String(sig), req.user.id);
+  res.json({ ok: true, signature_image: String(sig), message: '已儲存個人預設手寫簽名檔' });
+});
+
+app.delete('/api/users/me/signature', authMiddleware, (req, res) => {
+  db.prepare(`UPDATE users SET signature_image = NULL WHERE id = ?`).run(req.user.id);
+  res.json({ ok: true, message: '已清除個人預設手寫簽名檔' });
+});
+
+// ---------- LINE 通知設定 ----------
+app.get('/api/line/config', authMiddleware, (req, res) => {
+  const pub = lineNotify.publicConfig();
+  const canConfigure = canConfigureLineSettings(req.user);
+  if (!canConfigure) {
+    return res.json({
+      enabled: pub.enabled,
+      ready: pub.ready,
+      canConfigure: false,
+      configAccess: pub.configAccess,
+    });
+  }
+  res.json({ ...pub, canConfigure: true });
+});
+
+app.put('/api/line/config', authMiddleware, lineSettingsOnly, (req, res) => {
+  const body = req.body || {};
+  const partial = {
+    enabled: body.enabled,
+    serviceUrl: body.serviceUrl,
+    events: body.events,
+    configAccess: body.configAccess,
+  };
+  // 空字串＝不變更 API Key（與 mail 密碼相同）
+  if (body.apiKey != null && String(body.apiKey).trim() !== '') {
+    partial.apiKey = String(body.apiKey).trim();
+  } else {
+    partial.apiKey = '';
+  }
+  // 僅內建 Admin 可變更「誰可設定 LINE」，避免權限被下放後失控
+  if (!isBuiltinAdminUsername(req.user.username)) {
+    delete partial.configAccess;
+  }
+  const saved = lineNotify.saveConfig(partial);
+  res.json({
+    ok: true,
+    config: { ...lineNotify.publicConfig(saved), canConfigure: true },
+  });
+});
+
+app.post('/api/line/test', authMiddleware, lineSettingsOnly, async (req, res) => {
+  const username = String(req.body?.username || req.user.username || '').trim();
+  const lineUserId = String(req.body?.lineUserId || '').trim();
+  const text = String(req.body?.text || '').trim();
+  if (!username && !lineUserId) {
+    return res.status(400).json({ error: '請指定簽核帳號或 LINE userId' });
+  }
+  if (!lineNotify.isReady()) {
+    return res.status(400).json({
+      error: '請先啟用 LINE 通知並填寫服務網址與 API 金鑰後儲存',
+    });
+  }
+  const result = await lineNotify.testPush({
+    username: username || undefined,
+    lineUserId: lineUserId || undefined,
+    text: text || undefined,
+  });
+  if (!result.ok) {
+    return res.status(400).json({ error: result.error || '測試推播失敗', result });
+  }
+  res.json({ ok: true, result });
+});
+
+app.get('/api/line/health', authMiddleware, lineSettingsOnly, async (req, res) => {
+  const result = await lineNotify.healthCheck();
+  res.json(result);
+});
+
+app.get('/api/line/bindings', authMiddleware, lineSettingsOnly, async (req, res) => {
+  const result = await lineNotify.fetchBindings();
+  if (!result.ok) {
+    return res.status(400).json({ error: result.error || '無法取得綁定列表' });
+  }
+  res.json(result);
 });
 
 // ---------- Mail settings ----------
@@ -2555,6 +3124,7 @@ app.put('/api/system/settings', authMiddleware, builtinAdminOnly, (req, res) => 
       backupEncryptEnabled: body.backupEncryptEnabled,
       backupEncryptPass: body.backupEncryptPass,
       backupEncryptPassClear: body.backupEncryptPassClear,
+      ...(Object.prototype.hasOwnProperty.call(body, 'backupDir') ? { backupDir: body.backupDir } : {}),
     });
     res.json({
       ok: true,
@@ -4557,11 +5127,23 @@ app.get('/api/requests', authMiddleware, (req, res) => {
          ORDER BY r.updated_at DESC`
       )
       .all();
-    rows = allPending.filter((r) => {
+    rows = [];
+    for (const r of allPending) {
       const steps = loadStepsForRequest(r);
       const step = findStepByOrder(steps, r.current_step);
-      return canUserApproveStep(uid, step, r.id);
-    });
+      const check = checkUserApprovalRight(uid, step, r.id);
+      if (check.canApprove) {
+        if (check.isDelegated) {
+          rows.push({
+            ...r,
+            is_delegated: true,
+            delegated_for_name: check.delegatedFor.name,
+          });
+        } else {
+          rows.push(r);
+        }
+      }
+    }
 
     // 財務部：併入待建檔確認的已核准信用額度單
     if (isFinanceUser(req.user)) {
@@ -5287,15 +5869,39 @@ app.post('/api/requests', authMiddleware, upload.array('attachments', 20), (req,
     console.error('save attachments', e);
   }
 
-  const detail = getRequestDetail(requestId);
-  // Email：通知目前步驟簽核人；申請人確認送出（若有開通知）
+  let detail = getRequestDetail(requestId);
+  const initialSteps = detail.steps || [];
+  if (initialSteps.length > 0) {
+    const firstStep = initialSteps[0];
+    const cond = evaluateStepCondition(firstStep, detail);
+    if (!cond.required) {
+      advanceToNextEligibleStep(requestId, detail, initialSteps, { order: 0 });
+      detail = getRequestDetail(requestId);
+    }
+  }
+  // Email／LINE：通知目前步驟簽核人；申請人確認送出（若有開通知）
   notifyCurrentApprovers(detail, 'pending', requester.name);
   if (notifyFlag) {
     fireAndForgetMail(
       'applicant-submit',
       mail.notifyApplicant(detail, 'submitted', { actorName: requester.name })
     );
+    fireAndForgetLine(
+      'applicant-submit',
+      lineNotify.notifyApplicantLine(detail, 'submitted', {
+        actorName: requester.name,
+        baseUrl: getAppBaseUrl(),
+        getUsernameById,
+      })
+    );
   }
+
+  logAudit(req, {
+    action_type: 'submit_request',
+    category: 'approval',
+    description: `送出簽核申請 #${requestId}「${detail.title}」`,
+    target_id: requestId,
+  });
 
   res.status(201).json({ request: detail });
 });
@@ -5557,7 +6163,7 @@ app.post(
   upload.array('attachments', 20),
   (req, res) => {
   const id = Number(req.params.id);
-  let { action, comment, step_form_data: stepFormData } = req.body || {};
+  let { action, comment, step_form_data: stepFormData, signature_image: signatureImage } = req.body || {};
   if (typeof stepFormData === 'string') {
     try {
       stepFormData = JSON.parse(stepFormData || '{}');
@@ -5601,6 +6207,15 @@ app.post(
         comment: comment || '取消申請',
       })
     );
+    fireAndForgetLine(
+      'applicant-cancel',
+      lineNotify.notifyApplicantLine(after, 'cancelled', {
+        actorName: actor?.name,
+        comment: comment || '取消申請',
+        baseUrl: getAppBaseUrl(),
+        getUsernameById,
+      })
+    );
     return res.json({ request: after });
   }
 
@@ -5610,8 +6225,26 @@ app.post(
 
   const steps = detail.steps;
   const step = findStepByOrder(steps, detail.current_step);
-  if (!canUserApproveStep(req.user.id, step, id)) {
+  const check = checkUserApprovalRight(req.user.id, step, id);
+  if (!check.canApprove) {
     return res.status(403).json({ error: '您不是目前步驟的簽核人，或已簽核過' });
+  }
+
+  const delegatedForId = check.isDelegated ? check.delegatedFor.id : null;
+  let finalComment = comment != null ? String(comment).trim() : '';
+  if (check.isDelegated) {
+    const proxyTag = `(代理 ${check.delegatedFor.name} 簽核)`;
+    if (!finalComment.includes(proxyTag)) {
+      finalComment = finalComment ? `${finalComment} ${proxyTag}` : proxyTag;
+    }
+  } else if (!finalComment) {
+    finalComment = action === 'approve' ? '同意' : '駁回';
+  }
+
+  // 簽名檔處置（優先使用傳入的簽名檔 Base64；若無則自動帶入個人預設簽名）
+  let sigImgToSave = signatureImage || null;
+  if (!sigImgToSave && req.user.signature_image) {
+    sigImgToSave = req.user.signature_image;
   }
 
   // 中間步驟可隨簽核一併上傳附件；最終審核者不可
@@ -5634,7 +6267,6 @@ app.post(
       ).trim();
 
       // 假別選項：與詳情頁一致，帶入申請表單全部假別
-      // （步驟快照 options 可能過舊／不完整，導致「選項無效」）
       const leaveFieldOpts = (() => {
         const ff = detail.formFields || [];
         const lf = ff.find(
@@ -5683,7 +6315,6 @@ app.post(
                 [
                   ...(Array.isArray(f.options) ? f.options.map(String) : []),
                   ...leaveFieldOpts,
-                  // 申請人送出的假別、本次提交值一併納入合法選項
                   String(detail.form_data?.leave_type || '').trim(),
                   hrType,
                 ].filter(Boolean)
@@ -5710,7 +6341,6 @@ app.post(
       const validated = validateFormData(fields, rawStep);
       if (validated.error) return res.status(400).json({ error: validated.error });
       actionFormJson = JSON.stringify(validated.data || {});
-      // 合併到申請單的 approver_data_json
       let merged = {};
       try {
         merged = JSON.parse(
@@ -5726,7 +6356,6 @@ app.post(
         by: req.user.id,
         at: new Date().toISOString(),
       };
-      // 便利扁平欄位（PDF／詳情顯示）
       Object.assign(merged, validated.data || {});
       db.prepare(
         `UPDATE approval_requests SET approver_data_json = ?, updated_at = datetime('now','localtime') WHERE id = ?`
@@ -5740,16 +6369,25 @@ app.post(
        updated_at = datetime('now', 'localtime') WHERE id = ?`
     ).run(id);
     db.prepare(
-      `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
-       VALUES (?, ?, ?, ?, 'reject', ?, ?)`
-    ).run(id, step.order, step.name, req.user.id, comment || '駁回', actionFormJson);
+      `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data, signature_image, delegated_for_id)
+       VALUES (?, ?, ?, ?, 'reject', ?, ?, ?, ?)`
+    ).run(id, step.order, step.name, req.user.id, finalComment, actionFormJson, sigImgToSave, delegatedForId);
     const after = getRequestDetail(id);
     const actor = db.prepare(`SELECT name FROM users WHERE id = ?`).get(req.user.id);
     fireAndForgetMail(
       'applicant-reject',
       mail.notifyApplicant(after, 'rejected', {
         actorName: actor?.name,
-        comment: comment || '駁回',
+        comment: finalComment,
+      })
+    );
+    fireAndForgetLine(
+      'applicant-reject',
+      lineNotify.notifyApplicantLine(after, 'rejected', {
+        actorName: actor?.name,
+        comment: finalComment,
+        baseUrl: getAppBaseUrl(),
+        getUsernameById,
       })
     );
     return res.json({ request: after });
@@ -5757,29 +6395,16 @@ app.post(
 
   // approve
   db.prepare(
-    `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
-     VALUES (?, ?, ?, ?, 'approve', ?, ?)`
-  ).run(id, step.order, step.name, req.user.id, comment || '同意', actionFormJson);
+    `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data, signature_image, delegated_for_id)
+     VALUES (?, ?, ?, ?, 'approve', ?, ?, ?, ?)`
+  ).run(id, step.order, step.name, req.user.id, finalComment, actionFormJson, sigImgToSave, delegatedForId);
 
   let mailEvent = null; // approved | step | waiting_co
   let nextStepName = '';
   if (isStepComplete(id, step)) {
-    // 以陣列順序找下一步（避免 order 不連續）
-    const idx = steps.findIndex((s) => Number(s.order) === Number(step.order));
-    const next = idx >= 0 ? steps[idx + 1] : null;
-    if (next) {
-      db.prepare(
-        `UPDATE approval_requests SET current_step = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`
-      ).run(next.order, id);
-      mailEvent = 'step';
-      nextStepName = next.name || `步驟 ${next.order}`;
-    } else {
-      db.prepare(
-        `UPDATE approval_requests SET status = 'approved', completed_at = datetime('now', 'localtime'),
-         updated_at = datetime('now', 'localtime') WHERE id = ?`
-      ).run(id);
-      mailEvent = 'approved';
-    }
+    const adv = advanceToNextEligibleStep(id, detail, steps, step);
+    mailEvent = adv.mailEvent;
+    nextStepName = adv.nextStepName;
   } else {
     db.prepare(
       `UPDATE approval_requests SET updated_at = datetime('now', 'localtime') WHERE id = ?`
@@ -5823,11 +6448,22 @@ app.post(
       message = '已核准，簽核流程完成';
     }
 
+    handleP2ApprovedSideEffects(after, req);
+
     fireAndForgetMail(
       'applicant-approved',
       mail.notifyApplicant(after, 'approved', {
         actorName: actor?.name,
         comment: comment || '同意',
+      })
+    );
+    fireAndForgetLine(
+      'applicant-approved',
+      lineNotify.notifyApplicantLine(after, 'approved', {
+        actorName: actor?.name,
+        comment: comment || '同意',
+        baseUrl: getAppBaseUrl(),
+        getUsernameById,
       })
     );
 
@@ -5899,6 +6535,15 @@ app.post(
         comment: comment || '',
       })
     );
+    fireAndForgetLine(
+      'applicant-step',
+      lineNotify.notifyApplicantLine(after, 'step', {
+        actorName: actor?.name,
+        comment: comment || '',
+        baseUrl: getAppBaseUrl(),
+        getUsernameById,
+      })
+    );
     // 進入下一步（含最終審核步驟）一律通知該步簽核人
     notifyCurrentApprovers(after, 'pending', actor?.name);
   } else if (mailEvent === 'waiting_co') {
@@ -5915,6 +6560,267 @@ app.post(
   }
 
   res.json({ request: after, message, mailEvent, nextStepName });
+});
+
+/**
+ * 加簽請託 (Ad-hoc Co-signer)
+ * POST /api/requests/:id/cosign
+ * Body: { target_user_id: number, comment: string, position: 'current' | 'after' }
+ */
+app.post('/api/requests/:id/cosign', authMiddleware, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { target_user_id, comment, position = 'current' } = req.body || {};
+    const targetId = Number(target_user_id);
+
+    if (!targetId) return res.status(400).json({ error: '請選擇加簽同仁' });
+    if (targetId === req.user.id) return res.status(400).json({ error: '不能加簽給自己' });
+
+    const targetUser = db.prepare(`SELECT id, name, username, email FROM users WHERE id = ? AND active = 1`).get(targetId);
+    if (!targetUser) return res.status(400).json({ error: '加簽對象不存在或已停用' });
+
+    const detail = getRequestDetail(id);
+    if (!detail) return res.status(404).json({ error: '找不到簽核單' });
+    if (detail.status !== 'pending') return res.status(400).json({ error: '此單據不在簽核中' });
+
+    const steps = detail.steps || [];
+    const currentStep = findStepByOrder(steps, detail.current_step);
+    if (!canUserApproveStep(req.user.id, currentStep, id)) {
+      return res.status(403).json({ error: '您不是目前步驟的簽核人，無法進行加簽' });
+    }
+
+    const curOrder = Number(detail.current_step);
+    const updatedSteps = [];
+    const cosignName = `加簽：${targetUser.name}`;
+    let insertedOrder = curOrder;
+
+    if (position === 'after') {
+      insertedOrder = curOrder + 1;
+      for (const s of steps) {
+        const sOrd = Number(s.order);
+        if (sOrd <= curOrder) {
+          updatedSteps.push(s);
+        } else {
+          updatedSteps.push({ ...s, order: sOrd + 1 });
+        }
+      }
+      updatedSteps.push({
+        order: insertedOrder,
+        name: cosignName,
+        approverIds: [targetId],
+        mode: 'any',
+        assignType: 'users',
+        is_cosign: true,
+      });
+      updatedSteps.sort((a, b) => Number(a.order) - Number(b.order));
+    } else {
+      // position === 'current'
+      for (const s of steps) {
+        const sOrd = Number(s.order);
+        if (sOrd < curOrder) {
+          updatedSteps.push(s);
+        } else {
+          updatedSteps.push({ ...s, order: sOrd + 1 });
+        }
+      }
+      updatedSteps.push({
+        order: curOrder,
+        name: cosignName,
+        approverIds: [targetId],
+        mode: 'any',
+        assignType: 'users',
+        is_cosign: true,
+      });
+      updatedSteps.sort((a, b) => Number(a.order) - Number(b.order));
+    }
+
+    db.prepare(`UPDATE approval_requests SET steps_snapshot_json = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`)
+      .run(JSON.stringify(updatedSteps), id);
+
+    const logComment = `${req.user.name} 加簽給 ${targetUser.name}${comment ? `：${String(comment).trim()}` : ''}`;
+    db.prepare(
+      `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
+       VALUES (?, ?, '加簽請託', ?, 'cosign', ?, '{}')`
+    ).run(id, curOrder, req.user.id, logComment);
+
+    const after = getRequestDetail(id);
+    notifyCurrentApprovers(after, 'pending', req.user.name);
+
+    logAudit(req, {
+      action_type: 'cosign_request',
+      category: 'approval',
+      description: `加簽請託給 ${targetUser.name} (單號 #${id})`,
+      target_id: id,
+    });
+
+    res.json({ ok: true, message: `已成功加簽給 ${targetUser.name}`, request: after });
+  } catch (e) {
+    console.error('cosign error', e);
+    res.status(500).json({ error: e.message || '加簽失敗' });
+  }
+});
+
+/**
+ * 轉簽改派 (Forwarding / Re-assign)
+ * POST /api/requests/:id/forward
+ * Body: { target_user_id: number, comment: string }
+ */
+app.post('/api/requests/:id/forward', authMiddleware, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { target_user_id, comment } = req.body || {};
+    const targetId = Number(target_user_id);
+
+    if (!targetId) return res.status(400).json({ error: '請選擇轉簽對象' });
+    if (targetId === req.user.id) return res.status(400).json({ error: '不能轉簽給自己' });
+
+    const targetUser = db.prepare(`SELECT id, name, username, email FROM users WHERE id = ? AND active = 1`).get(targetId);
+    if (!targetUser) return res.status(400).json({ error: '轉簽對象不存在或已停用' });
+
+    const detail = getRequestDetail(id);
+    if (!detail) return res.status(404).json({ error: '找不到簽核單' });
+    if (detail.status !== 'pending') return res.status(400).json({ error: '此單據不在簽核中' });
+
+    const steps = detail.steps || [];
+    const curOrder = Number(detail.current_step);
+    const currentStep = findStepByOrder(steps, curOrder);
+    if (!canUserApproveStep(req.user.id, currentStep, id)) {
+      return res.status(403).json({ error: '您不是目前步驟的簽核人，無法進行轉簽' });
+    }
+
+    const updatedSteps = steps.map((s) => {
+      if (Number(s.order) === curOrder) {
+        return {
+          ...s,
+          approverIds: [targetId],
+          name: `${s.name} (改派: ${targetUser.name})`,
+        };
+      }
+      return s;
+    });
+
+    db.prepare(`UPDATE approval_requests SET steps_snapshot_json = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`)
+      .run(JSON.stringify(updatedSteps), id);
+
+    const logComment = `${req.user.name} 轉簽改派給 ${targetUser.name}${comment ? `：${String(comment).trim()}` : ''}`;
+    db.prepare(
+      `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
+       VALUES (?, ?, '轉簽改派', ?, 'forward', ?, '{}')`
+    ).run(id, curOrder, req.user.id, logComment);
+
+    const after = getRequestDetail(id);
+    notifyCurrentApprovers(after, 'pending', req.user.name);
+
+    logAudit(req, {
+      action_type: 'forward_request',
+      category: 'approval',
+      description: `轉簽改派給 ${targetUser.name} (單號 #${id})`,
+      target_id: id,
+    });
+
+    res.json({ ok: true, message: `已成功轉簽給 ${targetUser.name}`, request: after });
+  } catch (e) {
+    console.error('forward error', e);
+    res.status(500).json({ error: e.message || '轉簽失敗' });
+  }
+});
+
+/**
+ * 批次簽核 (P2-2)
+ * POST /api/requests/bulk-action
+ * Body: { ids: number[], action: 'approve' | 'reject', comment?: string, signature_image?: string }
+ */
+app.post('/api/requests/bulk-action', authMiddleware, async (req, res) => {
+  const { ids, action = 'approve', comment, signature_image } = req.body || {};
+  const reqIds = Array.isArray(ids) ? ids.map(Number).filter(Boolean) : [];
+
+  if (!reqIds.length) {
+    return res.status(400).json({ error: '請選擇至少一筆簽核單' });
+  }
+
+  const successIds = [];
+  const failedItems = [];
+
+  for (const id of reqIds) {
+    try {
+      const detail = getRequestDetail(id);
+      if (!detail) {
+        failedItems.push({ id, reason: '找不到簽核單' });
+        continue;
+      }
+      if (detail.status !== 'pending') {
+        failedItems.push({ id, reason: '此單據不在簽核中' });
+        continue;
+      }
+
+      const steps = detail.steps || [];
+      const step = findStepByOrder(steps, detail.current_step);
+      if (!canUserApproveStep(req.user.id, step, id)) {
+        failedItems.push({ id, reason: '您非目前步驟簽核人' });
+        continue;
+      }
+
+      const stepOrder = Number(detail.current_step);
+      const stepName = step?.name || `步驟 ${stepOrder}`;
+      const defaultComment = action === 'approve' ? '批次同意核准' : '批次駁回';
+      const finalComment = comment ? String(comment).trim() : defaultComment;
+
+      if (action === 'approve') {
+        db.prepare(
+          `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
+           VALUES (?, ?, ?, ?, 'approve', ?, '{}')`
+        ).run(id, stepOrder, stepName, req.user.id, finalComment);
+
+        if (signature_image) {
+          db.prepare(`UPDATE users SET signature_image = ? WHERE id = ?`).run(String(signature_image), req.user.id);
+        }
+
+        advanceToNextEligibleStep(id, detail, steps, step);
+        const after = getRequestDetail(id);
+
+        if (after.status === 'approved') {
+          handleP2ApprovedSideEffects(after, req);
+        }
+
+        logAudit(req, {
+          action_type: 'bulk_approve_request',
+          category: 'approval',
+          description: `批次核准申請單 #${id}「${detail.title}」`,
+          target_id: id,
+        });
+
+        successIds.push(id);
+      } else if (action === 'reject') {
+        db.prepare(
+          `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
+           VALUES (?, ?, ?, ?, 'reject', ?, '{}')`
+        ).run(id, stepOrder, stepName, req.user.id, finalComment);
+
+        db.prepare(`UPDATE approval_requests SET status = 'rejected', updated_at = datetime('now', 'localtime') WHERE id = ?`)
+          .run(id);
+
+        logAudit(req, {
+          action_type: 'bulk_reject_request',
+          category: 'approval',
+          description: `批次駁回申請單 #${id}「${detail.title}」`,
+          target_id: id,
+        });
+
+        successIds.push(id);
+      }
+    } catch (e) {
+      failedItems.push({ id, reason: e.message || '簽核失敗' });
+    }
+  }
+
+  res.json({
+    ok: true,
+    processedCount: successIds.length,
+    failedCount: failedItems.length,
+    successIds,
+    failedItems,
+    message: `批次處理完成：成功 ${successIds.length} 筆${failedItems.length ? `，失敗 ${failedItems.length} 筆` : ''}`,
+  });
 });
 
 /** 最終核准系統通知：確認收到 */
@@ -6177,8 +7083,20 @@ app.get('/api/requests/:id/pdf', authMiddleware, async (req, res) => {
       )
       .all(detail.id);
 
+    const clientIp = getClientIp(req);
+    const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const watermarkText = `檢視防偽：${req.user.name} (${req.user.username}) · ${nowStr} · IP: ${clientIp}`;
+    const detailEnriched = { ...detail, watermarkText };
+
+    logAudit(req, {
+      action_type: preview ? 'preview_pdf' : 'download_pdf',
+      category: 'approval',
+      description: `${preview ? '預覽' : '下載'}簽核單 PDF #${detail.id}「${detail.title}」`,
+      target_id: detail.id,
+    });
+
     // 產生 PDF（若系統設定啟用公司憑證則數位簽章；僅已核准通常才加簽）
-    const pdfBuf = await pdfSign.buildApprovalPdfBuffer(detail, writeApprovalPdf);
+    const pdfBuf = await pdfSign.buildApprovalPdfBuffer(detailEnriched, writeApprovalPdf);
     if (pdfBuf && pdfBuf._pdfSignSkipped) {
       res.setHeader('X-Pdf-Sign', 'skipped');
       if (pdfBuf._pdfSignError) {
@@ -6356,6 +7274,124 @@ app.post('/api/backups/bulk-delete', authMiddleware, adminOnly, (req, res) => {
     failures: failed,
     message: `已刪除 ${deleted.length} 筆備份${failed.length ? `，${failed.length} 筆失敗` : ''}`,
   });
+});
+
+/**
+ * 取得系統進階稽核日誌 (P3-1)
+ * GET /api/system/audit-logs
+ * Query: { q, category, user_id, dateFrom, dateTo, page, limit }
+ */
+app.get('/api/system/audit-logs', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin' && !userHasPermission(req.user.id, 'audit_logs')) {
+    return res.status(403).json({ error: '需要系統稽核日誌權限' });
+  }
+
+  const { q, category, user_id, dateFrom, dateTo, page = 1, limit = 50 } = req.query || {};
+  const p = Math.max(1, Number(page) || 1);
+  const l = Math.min(200, Math.max(10, Number(limit) || 50));
+  const offset = (p - 1) * l;
+
+  const whereClause = [];
+  const params = [];
+
+  if (q && String(q).trim()) {
+    const kw = `%${String(q).trim()}%`;
+    whereClause.push(`(user_name LIKE ? OR user_username LIKE ? OR description LIKE ? OR ip_address LIKE ? OR action_type LIKE ?)`);
+    params.push(kw, kw, kw, kw, kw);
+  }
+  if (category && String(category).trim()) {
+    whereClause.push(`category = ?`);
+    params.push(String(category).trim());
+  }
+  if (user_id) {
+    whereClause.push(`user_id = ?`);
+    params.push(Number(user_id));
+  }
+  if (dateFrom && String(dateFrom).trim()) {
+    whereClause.push(`created_at >= ?`);
+    params.push(`${String(dateFrom).trim()} 00:00:00`);
+  }
+  if (dateTo && String(dateTo).trim()) {
+    whereClause.push(`created_at <= ?`);
+    params.push(`${String(dateTo).trim()} 23:59:59`);
+  }
+
+  const whereSql = whereClause.length ? `WHERE ${whereClause.join(' AND ')}` : '';
+
+  const totalCount = db.prepare(`SELECT COUNT(*) AS c FROM system_audit_logs ${whereSql}`).get(...params)?.c || 0;
+  const logs = db.prepare(`SELECT * FROM system_audit_logs ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`)
+    .all(...params, l, offset);
+
+  const categories = ['auth', 'approval', 'user_management', 'workflow', 'system'];
+
+  res.json({
+    logs,
+    totalCount,
+    totalPages: Math.ceil(totalCount / l),
+    page: p,
+    limit: l,
+    categories,
+  });
+});
+
+/**
+ * 匯出系統進階稽核日誌 CSV (P3-1)
+ * GET /api/system/audit-logs/export
+ */
+app.get('/api/system/audit-logs/export', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin' && !userHasPermission(req.user.id, 'audit_logs')) {
+    return res.status(403).json({ error: '需要系統稽核日誌權限' });
+  }
+
+  const { q, category, user_id, dateFrom, dateTo } = req.query || {};
+  const whereClause = [];
+  const params = [];
+
+  if (q && String(q).trim()) {
+    const kw = `%${String(q).trim()}%`;
+    whereClause.push(`(user_name LIKE ? OR user_username LIKE ? OR description LIKE ? OR ip_address LIKE ? OR action_type LIKE ?)`);
+    params.push(kw, kw, kw, kw, kw);
+  }
+  if (category && String(category).trim()) {
+    whereClause.push(`category = ?`);
+    params.push(String(category).trim());
+  }
+  if (user_id) {
+    whereClause.push(`user_id = ?`);
+    params.push(Number(user_id));
+  }
+  if (dateFrom && String(dateFrom).trim()) {
+    whereClause.push(`created_at >= ?`);
+    params.push(`${String(dateFrom).trim()} 00:00:00`);
+  }
+  if (dateTo && String(dateTo).trim()) {
+    whereClause.push(`created_at <= ?`);
+    params.push(`${String(dateTo).trim()} 23:59:59`);
+  }
+
+  const whereSql = whereClause.length ? `WHERE ${whereClause.join(' AND ')}` : '';
+  const logs = db.prepare(`SELECT * FROM system_audit_logs ${whereSql} ORDER BY id DESC LIMIT 5000`).all(...params);
+
+  // UTF-8 BOM CSV output for Excel compatibility
+  const BOM = '\uFEFF';
+  const headers = ['ID', '時間', '分類', '動作類型', '使用者', '帳號', 'IP 位址', '目標 ID', '說明詳情'];
+  const rows = logs.map((l) => [
+    l.id,
+    l.created_at,
+    l.category || '',
+    l.action_type || '',
+    l.user_name || '',
+    l.user_username || '',
+    l.ip_address || '',
+    l.target_id || '',
+    (l.description || '').replace(/"/g, '""'),
+  ]);
+
+  const csvContent = BOM + [headers.join(','), ...rows.map((r) => r.map((cell) => `"${cell}"`).join(','))].join('\r\n');
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="system_audit_logs_${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(csvContent);
 });
 
 /**

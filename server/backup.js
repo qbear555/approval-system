@@ -16,8 +16,15 @@ const {
 const pdfSign = require('./pdf-sign');
 const systemSettings = require('./system-settings');
 
-const BACKUP_ROOT = path.join(__dirname, '..', 'data', 'backups');
 const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
+
+/** 動態取得備份根目錄（可由 admin 在系統設定中變更） */
+function getBackupRoot() {
+  return systemSettings.getBackupDir();
+}
+
+// 向後相容：匯出靜態值供其他模組參考（實際備份時用 getBackupRoot()）
+const BACKUP_ROOT = getBackupRoot;
 
 let encryptedFormatRegistered = false;
 
@@ -176,8 +183,9 @@ async function backupOneRequest(detail, adminId) {
   const fileName = asZip
     ? buildApprovalZipFileName(detail, { hasAttachments })
     : buildApprovalPdfFileName(detail);
+  const BACKUP_ROOT_NOW = getBackupRoot();
   const relDir = path.join(department, workflowName, `${year}-${month}`);
-  const absDir = path.join(BACKUP_ROOT, relDir);
+  const absDir = path.join(BACKUP_ROOT_NOW, relDir);
   ensureDir(absDir);
   const absFile = path.join(absDir, fileName);
   const relFile = path.join(relDir, fileName).replace(/\\/g, '/');
@@ -185,7 +193,7 @@ async function backupOneRequest(detail, adminId) {
   // 舊檔清理（同一 request_id 可能改名或 PDF↔ZIP 互換）
   const prev = db.prepare(`SELECT file_rel_path FROM backup_files WHERE request_id = ?`).get(detail.id);
   if (prev?.file_rel_path) {
-    const oldAbs = path.join(BACKUP_ROOT, prev.file_rel_path);
+    const oldAbs = path.join(BACKUP_ROOT_NOW, prev.file_rel_path);
     if (fs.existsSync(oldAbs) && path.resolve(oldAbs) !== path.resolve(absFile)) {
       try {
         fs.unlinkSync(oldAbs);
@@ -414,7 +422,7 @@ function getBackupMeta() {
     ),
     years,
     total: count,
-    backup_root: BACKUP_ROOT,
+    backup_root: getBackupRoot(),
     encrypt: {
       enabled: encryptCfg.enabled,
       hasPass: encryptCfg.hasPass,
@@ -429,7 +437,7 @@ function getBackupById(id) {
 
 function resolveBackupAbsPath(row) {
   if (!row?.file_rel_path) return null;
-  const abs = path.join(BACKUP_ROOT, row.file_rel_path);
+  const abs = path.join(getBackupRoot(), row.file_rel_path);
   if (!fs.existsSync(abs)) return null;
   return abs;
 }
@@ -473,7 +481,8 @@ function deleteBackups(ids) {
 }
 
 module.exports = {
-  BACKUP_ROOT,
+  BACKUP_ROOT: getBackupRoot,   // 函式參考，動態取值
+  getBackupRoot,
   backupOneRequest,
   runBackupJob,
   listBackups,

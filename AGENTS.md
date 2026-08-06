@@ -1,4 +1,4 @@
-﻿# 專案代理／維護約定
+# 專案代理／維護約定
 
 ## GitHub 同步（必做）
 
@@ -37,15 +37,31 @@
 
 ---
 
-## 變更順序（強制：先 NAS，後一鍵包）
+## 變更順序（強制：NAS 為主）
 
-1. **本機源碼**改完（`C:\Users\TsuMing\Documents\approval-system`）  
-2. **先部署 NAS 正式環境**並請使用者確認  
-   - `node scripts/deploy-code-nas.js` 或 `deploy-nas-package.js`  
-   - 一律 `NAS_SKIP_DB=1`，**不覆寫**正式 `data/`、mail、LINE 密鑰  
+> **⚠️ 2026-08 起調整：所有指令以 NAS 正式站為主，變動後同步本機與一鍵包**
+
+### 新標準流程
+
+1. **直接在 NAS 正式站修改**（`192.168.99.220`）  
    - 正式站：https://192.168.99.220:3848  
-3. **NAS 確認 OK 之後**，才同步一鍵安裝包三平台（下節）  
-4. 視需要推 GitHub  
+   - 一律 `NAS_SKIP_DB=1`，**不覆寫**正式 `data/`、mail、LINE 密鑰  
+2. **NAS 確認 OK 後**，同步程式碼到本機：  
+   ```bash
+   # 方式一：一鍵腳本（NAS → 本機 → 一鍵包）
+   從NAS同步到本機.bat
+
+   # 方式二：只拉程式碼
+   set NAS_PASS=***
+   node scripts/pull-nas-code.js
+   ```
+3. **重啟本機服務**使變更生效（`從NAS同步到本機.bat` 會自動執行）  
+4. **同步一鍵安裝包三平台**：`scripts/sync-oneclick-packages.ps1`  
+5. 視需要推 GitHub  
+
+### 舊流程（停用）
+
+~~本機改完 → 部署 NAS~~ ← 已不適用，改以 NAS 為主。
 
 **禁止**：只改一鍵包未上 NAS；或未經驗證就先大量改三平台。
 

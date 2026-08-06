@@ -20,6 +20,7 @@ const FILES = [
   'server/auth.js',
   'server/pdf.js',
   'server/mail.js',
+  'server/line-notify.js',
   'server/backup.js',
   'server/system-package.js',
   'server/import-workflows.js',

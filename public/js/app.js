@@ -339,6 +339,7 @@ function setAuth(token, user) {
 function logout(showMsg = true) {
   stopPendingWatcher();
   setAuth('', null);
+  updateAppWatermark();
   state.page = 'dashboard';
   state.pageParams = {};
   showAuth();
@@ -543,10 +544,170 @@ function isBuiltinAdminUser(u) {
   return !!(u && (u.isBuiltinAdmin || isBuiltinAdmin(u)));
 }
 
+/** 個人客製化佈景主題清單 */
+const THEMES = [
+  {
+    id: 'navy',
+    name: '🌊 經典藍調',
+    vars: {
+      '--primary': '#2563eb',
+      '--primary-hover': '#1d4ed8',
+      '--sidebar': '#0b192c',
+      '--sidebar-2': '#1e3e62',
+      '--bg': '#f1f5f9',
+      '--surface': '#ffffff',
+      '--text': '#0f172a',
+      '--text-heading': '#0f172a',
+      '--muted': '#64748b',
+      '--border': '#cbd5e1',
+      '--input-bg': '#ffffff'
+    }
+  },
+  {
+    id: 'dark',
+    name: '🌙 暗黑夜空',
+    vars: {
+      '--primary': '#3b82f6',
+      '--primary-hover': '#60a5fa',
+      '--sidebar': '#0f172a',
+      '--sidebar-2': '#1e293b',
+      '--bg': '#090d16',
+      '--surface': '#151d2a',
+      '--text': '#e2e8f0',
+      '--text-heading': '#f8fafc',
+      '--muted': '#94a3b8',
+      '--border': '#2a3649',
+      '--input-bg': '#1e293b'
+    }
+  },
+  {
+    id: 'emerald',
+    name: '🌲 翡翠森林',
+    vars: {
+      '--primary': '#059669',
+      '--primary-hover': '#047857',
+      '--sidebar': '#064e3b',
+      '--sidebar-2': '#047857',
+      '--bg': '#f0fdf4',
+      '--surface': '#ffffff',
+      '--text': '#064e3b',
+      '--text-heading': '#022c22',
+      '--muted': '#374151',
+      '--border': '#a7f3d0',
+      '--input-bg': '#ffffff'
+    }
+  },
+  {
+    id: 'violet',
+    name: '💜 皇家紫羅蘭',
+    vars: {
+      '--primary': '#7c3aed',
+      '--primary-hover': '#6d28d9',
+      '--sidebar': '#2e1065',
+      '--sidebar-2': '#4c1d95',
+      '--bg': '#f5f3ff',
+      '--surface': '#ffffff',
+      '--text': '#2e1065',
+      '--text-heading': '#1e1b4b',
+      '--muted': '#6b7280',
+      '--border': '#ddd6fe',
+      '--input-bg': '#ffffff'
+    }
+  },
+  {
+    id: 'amber',
+    name: '🌅 暖陽日暮',
+    vars: {
+      '--primary': '#d97706',
+      '--primary-hover': '#b45309',
+      '--sidebar': '#451a03',
+      '--sidebar-2': '#78350f',
+      '--bg': '#fffbeb',
+      '--surface': '#ffffff',
+      '--text': '#451a03',
+      '--text-heading': '#292524',
+      '--muted': '#57534e',
+      '--border': '#fde68a',
+      '--input-bg': '#ffffff'
+    }
+  },
+  {
+    id: 'rose',
+    name: '🌸 櫻花石榴',
+    vars: {
+      '--primary': '#e11d48',
+      '--primary-hover': '#be123c',
+      '--sidebar': '#4c0519',
+      '--sidebar-2': '#881337',
+      '--bg': '#fff1f2',
+      '--surface': '#ffffff',
+      '--text': '#4c0519',
+      '--text-heading': '#881337',
+      '--muted': '#64748b',
+      '--border': '#fecdd3',
+      '--input-bg': '#ffffff'
+    }
+  }
+];
+
+function applyUserTheme(themeId, save = false) {
+  const theme = THEMES.find((t) => t.id === themeId) || THEMES[0];
+  const root = document.documentElement;
+  Object.entries(theme.vars).forEach(([key, val]) => {
+    root.style.setProperty(key, val);
+  });
+  if (save) {
+    try {
+      localStorage.setItem('approval_user_theme', theme.id);
+    } catch (_) {}
+  }
+  return theme;
+}
+
+function initUserTheme() {
+  try {
+    const saved = localStorage.getItem('approval_user_theme') || 'navy';
+    applyUserTheme(saved, false);
+  } catch (_) {}
+}
+
 function hasPerm(permId) {
   if (isAdmin()) return true;
   const list = state.user?.permissions;
   return Array.isArray(list) && list.includes(permId);
+}
+
+/**
+ * 是否可進入 LINE 通知設定（依後端 configAccess）
+ * - 後端回傳 canConfigure 時優先
+ * - 否則依 state.lineConfigAccess 粗判（builtin_admin / any_admin / permission）
+ */
+function canConfigureLine() {
+  if (state.lineCanConfigure === true) return true;
+  if (state.lineCanConfigure === false) return false;
+  const access = state.lineConfigAccess || 'builtin_admin';
+  if (access === 'builtin_admin') return isBuiltinAdmin();
+  if (access === 'any_admin') return isAdmin() || isBuiltinAdmin();
+  if (access === 'permission') return isAdmin() || isBuiltinAdmin() || hasPerm('line_settings');
+  return isBuiltinAdmin();
+}
+
+/** 載入 LINE 設定摘要（決定側欄是否顯示） */
+async function refreshLineAccess() {
+  try {
+    const cfg = await api('/api/line/config');
+    state.lineConfigAccess = cfg.configAccess || 'builtin_admin';
+    state.lineCanConfigure = !!cfg.canConfigure;
+    state.lineReady = !!cfg.ready;
+    state.lineEnabled = !!cfg.enabled;
+    return cfg;
+  } catch {
+    state.lineCanConfigure = false;
+    state.lineConfigAccess = 'builtin_admin';
+    state.lineReady = false;
+    state.lineEnabled = false;
+    return null;
+  }
 }
 
 /** 載入並套用系統品牌（公司名稱／Logo） */
@@ -621,14 +782,19 @@ function applySystemBranding(s) {
 
   document.title = verLabel ? `${name} · 線上簽核 ${verLabel}` : `${name} · 線上簽核`;
   applyFavicon(logoUrl);
-  // 登入頁
-  const authLogo = document.querySelector('.brand-logo-auth');
-  if (authLogo) {
-    authLogo.src = logoUrl;
-    authLogo.alt = name;
-  }
+  // 登入頁與側欄 Logo 統一更換為公司自訂 Logo
+  document
+    .querySelectorAll(
+      '.brand-logo, .brand-logo-auth, .brand-logo-auth-hero, .brand-logo-side'
+    )
+    .forEach((img) => {
+      img.src = logoUrl;
+      img.alt = name;
+    });
   const authCompany = document.querySelector('.auth-brand .company-name');
   if (authCompany) authCompany.textContent = name;
+  const heroCompany = document.querySelector('.hero-company');
+  if (heroCompany) heroCompany.textContent = name;
   // h1 固定為「線上簽核」，不覆寫
   // 版本宣告
   const authVer = document.getElementById('auth-version');
@@ -645,12 +811,6 @@ function applySystemBranding(s) {
   if (sideVer && verLabel) {
     sideVer.textContent = verLabel;
     sideVer.title = verTip || verBanner;
-  }
-  // 側欄
-  const sideLogo = document.querySelector('.brand-logo-side');
-  if (sideLogo) {
-    sideLogo.src = logoUrl;
-    sideLogo.alt = name;
   }
   const sideName = document.querySelector('.sidebar-brand .company-name-sm');
   if (sideName) sideName.textContent = name;
@@ -671,6 +831,10 @@ function applyRoleUi() {
   // 系統設定：僅內建 Admin 帳號可見（其他最高權限也看不到）
   const sysNav = document.querySelector('[data-page="system-settings"]');
   if (sysNav) sysNav.classList.toggle('hidden', !isBuiltinAdmin());
+  // LINE 通知：依 line-config 的 configAccess
+  const lineNav = document.querySelector('#nav-line-settings') ||
+    document.querySelector('[data-page="line-settings"]');
+  if (lineNav) lineNav.classList.toggle('hidden', !canConfigureLine());
 }
 
 /**
@@ -686,9 +850,11 @@ const ROUTE_PAGES = [
   'workflows',
   'backups',
   'leave-report',
+  'audit-logs',
   'users',
   'departments',
   'settings',
+  'line-settings',
   'system-settings',
   'detail',
 ];
@@ -794,7 +960,12 @@ function showMain(opts = {}) {
   $('#user-role').textContent = u.role === 'admin' ? '系統管理員' : (u.department || '一般使用者');
   $('#user-avatar').textContent = (u.name || 'U').slice(0, 1);
   applyRoleUi();
+  updateAppWatermark();
   loadSystemSettings().catch(() => {});
+  // LINE 側欄權限（完成後再套一次選單）
+  refreshLineAccess()
+    .then(() => applyRoleUi())
+    .catch(() => {});
   // 優先網址 hash（Email／重新整理）；其次 session 記住的頁面；否則總覽
   if (!applyRouteFromHash({ allowSession: true })) {
     state.page = 'dashboard';
@@ -896,9 +1067,11 @@ const titles = {
   workflows: '簽核流程',
   backups: '備份資料',
   'leave-report': '請假報表',
+  'audit-logs': '系統稽核日誌',
   users: '成員名單',
   departments: '部門',
   settings: '帳號設定',
+  'line-settings': 'LINE 通知',
   'system-settings': '系統設定',
   detail: '簽核詳情',
 };
@@ -906,6 +1079,11 @@ const titles = {
 async function navigate(page, params = {}, navOpts = {}) {
   if (page === 'system-settings' && !isBuiltinAdmin()) {
     toast('僅系統內建 Admin 帳號可進入系統設定', 'error');
+    page = 'dashboard';
+    params = {};
+  }
+  if (page === 'line-settings' && !canConfigureLine()) {
+    toast('您沒有 LINE 通知設定權限', 'error');
     page = 'dashboard';
     params = {};
   }
@@ -921,6 +1099,11 @@ async function navigate(page, params = {}, navOpts = {}) {
   }
   if (page === 'leave-report' && !hasPerm('leave_report')) {
     toast('您沒有「請假報表匯出」權限', 'error');
+    page = 'dashboard';
+    params = {};
+  }
+  if (page === 'audit-logs' && !hasPerm('audit_logs')) {
+    toast('您沒有「系統稽核日誌」權限', 'error');
     page = 'dashboard';
     params = {};
   }
@@ -964,9 +1147,11 @@ async function navigate(page, params = {}, navOpts = {}) {
     else if (page === 'workflows') await renderWorkflows(body);
     else if (page === 'backups') await renderBackups(body);
     else if (page === 'leave-report') await renderLeaveReport(body);
+    else if (page === 'audit-logs') await renderAuditLogs(body);
     else if (page === 'users') await renderUsers(body);
     else if (page === 'departments') await renderDepartments(body);
     else if (page === 'settings') await renderSettings(body);
+    else if (page === 'line-settings') await renderLineSettings(body);
     else if (page === 'system-settings') await renderSystemSettings(body);
     else if (page === 'detail') await renderDetail(body, params.id);
   } catch (e) {
@@ -1108,13 +1293,7 @@ async function renderDashboard(body) {
         go: 'mine',
         hint: '查看我的申請',
       })}
-      ${statCardHtml({
-        label: '成員數',
-        value: stats.users ?? 0,
-        go: canUsers ? 'users' : undefined,
-        hint: canUsers ? '成員名單' : '僅管理員可管理',
-        disabled: !canUsers,
-      })}
+
       ${statCardHtml({
         label: '啟用中流程',
         value: stats.workflows ?? 0,
@@ -1339,45 +1518,58 @@ function requestTable(requests, emptyOkOrOpts = false, opts = {}) {
       }
     );
   }
+  const allowBatchSelect = opts.allowBatchSelect || false;
   const anyDeletable =
     allowDelete &&
     requests.some((r) => canDeleteRequestRow(r, { adminMode }));
+  const showCheckboxCol = anyDeletable || allowBatchSelect;
+
   return `
     <div class="table-wrap">
-      <table class="data">
+      <table class="data" style="width:100%;min-width:920px;table-layout:fixed">
         <thead>
           <tr>
-            ${anyDeletable ? '<th style="width:40px"></th>' : ''}
-            <th>單號</th><th>主旨</th><th>流程</th><th>申請人</th><th>狀態</th><th>更新時間</th>
-            ${anyDeletable ? '<th>操作</th>' : ''}
+            ${showCheckboxCol ? '<th style="width:36px;text-align:center"></th>' : ''}
+            <th style="width:70px;text-align:center;white-space:nowrap">單號</th>
+            <th style="min-width:320px">主旨</th>
+            <th style="width:150px">流程</th>
+            <th style="width:100px;white-space:nowrap">申請人</th>
+            <th style="width:90px;text-align:center;white-space:nowrap">狀態</th>
+            <th style="width:145px;white-space:nowrap">更新時間</th>
+            ${anyDeletable ? '<th style="width:95px;text-align:center;white-space:nowrap">操作</th>' : ''}
           </tr>
         </thead>
         <tbody>
           ${requests
             .map((r) => {
               const canDel = allowDelete && canDeleteRequestRow(r, { adminMode });
+              const proxyBadge = r.is_delegated
+                ? `<span class="tag draft" style="background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;margin-right:6px">代理 ${esc(r.delegated_for_name || '')}</span>`
+                : '';
               return `
             <tr class="clickable" data-id="${r.id}">
               ${
-                anyDeletable
-                  ? `<td onclick="event.stopPropagation()">
+                showCheckboxCol
+                  ? `<td style="text-align:center" onclick="event.stopPropagation()">
                       ${
                         canDel
                           ? `<input type="checkbox" data-req-check value="${r.id}" />`
-                          : ''
+                          : allowBatchSelect
+                            ? `<input type="checkbox" data-batch-check value="${r.id}" />`
+                            : ''
                       }
                     </td>`
                   : ''
               }
-              <td>#${r.id}</td>
-              <td><strong>${esc(r.title)}</strong></td>
-              <td>${esc(r.workflow_name)}</td>
-              <td>${esc(r.requester_name)}</td>
-              <td>${statusTag(r.status)}</td>
-              <td class="muted">${esc(r.updated_at)}</td>
+              <td style="text-align:center;white-space:nowrap"><span class="req-id-badge">#${r.id}</span></td>
+              <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.title)}">${proxyBadge}<strong>${esc(r.title)}</strong></td>
+              <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.workflow_name)}">${esc(r.workflow_name)}</td>
+              <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.requester_name)}">${esc(r.requester_name)}</td>
+              <td style="text-align:center;white-space:nowrap">${statusTag(r.status)}</td>
+              <td class="muted" style="white-space:nowrap">${esc(r.updated_at)}</td>
               ${
                 anyDeletable
-                  ? `<td onclick="event.stopPropagation()">
+                  ? `<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
                       ${
                         canDel
                           ? `<button type="button" class="btn sm danger" data-del-req="${r.id}">刪除</button>`
@@ -1411,6 +1603,78 @@ function getSelectedRequestIds(root) {
   return [...(root || document).querySelectorAll('input[data-req-check]:checked')]
     .map((c) => Number(c.value))
     .filter(Boolean);
+}
+
+function getSelectedBatchRequestIds(root) {
+  return [...(root || document).querySelectorAll('input[data-batch-check]:checked')]
+    .map((c) => Number(c.value))
+    .filter(Boolean);
+}
+
+/**
+ * 批次簽核 Modal (P2-2)
+ */
+function openBatchApprovalModal(selectedIds, action = 'approve', callback) {
+  const isApprove = action === 'approve';
+  const titleText = isApprove ? '⚡ 批次核准簽核單' : '❌ 批次駁回簽核單';
+  const defaultComment = isApprove ? '批次同意核准' : '批次駁回';
+
+  openModal(`
+    <h3 style="margin-top:0">${titleText} (共 ${selectedIds.length} 筆)</h3>
+    <p class="muted" style="margin-top:-4px">將對單號：<strong>#${selectedIds.join(', #')}</strong> 執行批次${isApprove ? '核准' : '駁回'}</p>
+    <form id="batch-action-form" class="form-grid">
+      <div class="field">
+        <label>簽核意見 / 備註</label>
+        <textarea name="comment" rows="3" placeholder="${defaultComment}">${defaultComment}</textarea>
+      </div>
+      ${
+        isApprove
+          ? `<div class="field">
+              <label>手寫電子簽名（選填）</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button type="button" class="btn outline sm" id="btn-batch-sig-pad">✏️ 打開手寫簽名板</button>
+                <span class="muted" id="batch-sig-status" style="font-size:0.85rem">使用個人預設簽名檔</span>
+              </div>
+            </div>`
+          : ''
+      }
+      <div class="form-actions" style="margin-top:16px">
+        <button type="submit" class="btn ${isApprove ? 'primary' : 'danger'}">確定批次${isApprove ? '核准' : '駁回'}</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+
+  let tempSigImage = state.user?.signature_image || null;
+
+  $('#btn-batch-sig-pad')?.addEventListener('click', () => {
+    openSignaturePadModal((sigDataUrl) => {
+      tempSigImage = sigDataUrl;
+      const statusEl = $('#batch-sig-status');
+      if (statusEl) statusEl.textContent = '✅ 已套用本次手寫簽名';
+    });
+  });
+
+  $('#batch-action-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const commentVal = String(e.target.comment.value || '').trim() || defaultComment;
+    try {
+      const res = await api('/api/requests/bulk-action', {
+        method: 'POST',
+        body: {
+          ids: selectedIds,
+          action,
+          comment: commentVal,
+          signature_image: tempSigImage,
+        },
+      });
+      closeModal();
+      toast(res.message || '批次簽核完成', 'success');
+      if (typeof callback === 'function') callback();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
 }
 
 async function renderRequestList(body, filter) {
@@ -1653,6 +1917,22 @@ async function renderRequestList(body, filter) {
           : ''
       }
       ${
+        filter === 'pending_me' && requests.length > 0
+          ? `<div class="form-actions" style="margin-bottom:12px;flex-wrap:wrap;align-items:center;justify-content:space-between;background:#f8fafc;padding:10px 14px;border:1px solid var(--border);border-radius:10px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600">
+                  <input type="checkbox" id="chk-all-batch-reqs" /> 全選本頁待簽項目
+                </label>
+                <span class="muted" id="batch-req-sel-count">已勾選 0 筆</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button type="button" class="btn primary sm" id="btn-batch-approve-reqs" disabled>⚡ 批次核准 (0)</button>
+                <button type="button" class="btn danger sm" id="btn-batch-reject-reqs" disabled>❌ 批次駁回 (0)</button>
+              </div>
+            </div>`
+          : ''
+      }
+      ${
         anyDeletable
           ? `<div class="form-actions" style="margin-bottom:12px;flex-wrap:wrap">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
@@ -1666,6 +1946,7 @@ async function renderRequestList(body, filter) {
       ${requestTable(requests, {
         allowDelete,
         adminMode,
+        allowBatchSelect: filter === 'pending_me' && requests.length > 0,
         empty: emptyByFilter[filter] || {
           title: '尚無資料',
           desc: '目前沒有符合條件的簽核單據。',
@@ -1699,6 +1980,49 @@ async function renderRequestList(body, filter) {
   body.querySelectorAll('#btn-req-clear').forEach((b) => {
     b.onclick = clearBtn;
   });
+
+  if (filter === 'pending_me' && requests.length > 0) {
+    const updateBatchBtnState = () => {
+      const selectedIds = getSelectedBatchRequestIds(body);
+      const count = selectedIds.length;
+      const countEl = $('#batch-req-sel-count');
+      const approveBtn = $('#btn-batch-approve-reqs');
+      const rejectBtn = $('#btn-batch-reject-reqs');
+
+      if (countEl) countEl.textContent = `已勾選 ${count} 筆`;
+      if (approveBtn) {
+        approveBtn.disabled = count === 0;
+        approveBtn.textContent = `⚡ 批次核准 (${count})`;
+      }
+      if (rejectBtn) {
+        rejectBtn.disabled = count === 0;
+        rejectBtn.textContent = `❌ 批次駁回 (${count})`;
+      }
+    };
+
+    $('#chk-all-batch-reqs')?.addEventListener('change', (e) => {
+      body.querySelectorAll('input[data-batch-check]').forEach((c) => {
+        c.checked = e.target.checked;
+      });
+      updateBatchBtnState();
+    });
+
+    body.querySelectorAll('input[data-batch-check]').forEach((c) => {
+      c.onchange = updateBatchBtnState;
+    });
+
+    $('#btn-batch-approve-reqs')?.addEventListener('click', () => {
+      const selectedIds = getSelectedBatchRequestIds(body);
+      if (!selectedIds.length) return toast('請先勾選要簽核的單據', 'error');
+      openBatchApprovalModal(selectedIds, 'approve', () => renderRequestList(body, 'pending_me'));
+    });
+
+    $('#btn-batch-reject-reqs')?.addEventListener('click', () => {
+      const selectedIds = getSelectedBatchRequestIds(body);
+      if (!selectedIds.length) return toast('請先勾選要駁回的單據', 'error');
+      openBatchApprovalModal(selectedIds, 'reject', () => renderRequestList(body, 'pending_me'));
+    });
+  }
 
   if (!anyDeletable) return;
 
@@ -2282,15 +2606,23 @@ function renderDynamicFieldHtml(f, defaults = {}, opts = {}) {
   const halfHint = isHalfStep
     ? `<div class="muted" style="font-size:0.78rem;margin-top:4px">最小單位 0.5（例：0、0.5、1、3.5、7.5、22.5）</div>`
     : '';
+
+  const isWide =
+    /主旨|標題|地址|說明|內容|備註|事由/.test(String(f.label || '')) ||
+    f.id === 'subject' ||
+    f.id === 'title' ||
+    f.id === 'address';
+  const fieldStyle = isWide ? 'style="grid-column:1/-1"' : '';
+
   if (type === 'number' && isHalfStep) {
-    return `<div class="field"><label>${esc(f.label)}${req}</label>
+    return `<div class="field" ${fieldStyle}><label>${esc(f.label)}${req}</label>
       <input type="number" name="${name}" data-ff="${esc(f.id)}" data-half-step="1"
         step="0.5" min="0" inputmode="decimal" ${reqAttr}
         placeholder="${ph}"${valAttr} />
       ${halfHint}
     </div>`;
   }
-  return `<div class="field"><label>${esc(f.label)}${req}</label>
+  return `<div class="field" ${fieldStyle}><label>${esc(f.label)}${req}</label>
     <input type="${type}" name="${name}" data-ff="${esc(f.id)}" ${reqAttr}
       placeholder="${ph}"${valAttr}${type === 'number' ? ' step="any"' : ''} />
     ${halfHint}
@@ -2932,6 +3264,64 @@ function bindFormTableEditors(root) {
       };
     });
   }
+}
+
+function renderAttachmentsBlock(attachments, opts = {}) {
+  const list = attachments || [];
+  if (!list.length) return '';
+  const ooOn = !!opts.onlyOfficeEnabled;
+  const reqStatus = String(opts.requestStatus || '');
+  const ooCanEdit = reqStatus === 'pending' || reqStatus === 'draft';
+  const fmtSize = (n) => {
+    if (!n) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  };
+  const getExtClass = (name) => {
+    const ext = (name || '').split('.').pop().toLowerCase();
+    if (ext === 'pdf') return 'pdf';
+    if (['doc', 'docx'].includes(ext)) return 'docx';
+    if (['xls', 'xlsx'].includes(ext)) return 'xlsx';
+    if (['png', 'jpg', 'jpeg', 'gif'].includes(ext)) return 'img';
+    return 'file';
+  };
+  return `
+    <h3 style="margin-top:20px;font-size:1.05rem;display:flex;align-items:center;gap:6px">📎 附件檔案 (${list.length})</h3>
+    ${
+      ooOn
+        ? `<p class="muted" style="font-size:0.82rem;margin:0 0 8px">${
+            ooCanEdit
+              ? 'Word／Excel 可「線上編輯」後自動回存（需 OnlyOffice）。'
+              : '簽核已完成，附件僅供「線上檢視」，無法再修改。'
+          }</p>`
+        : ''
+    }
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+      ${list
+        .map((a) => {
+          const office = ooOn && isOfficeFileName(a.original_name);
+          const ext = (a.original_name || '').split('.').pop().toLowerCase();
+          const badgeCls = getExtClass(a.original_name);
+          return `
+        <div class="attachment-pill">
+          <span class="file-type-badge ${badgeCls}">${esc(ext)}</span>
+          <button type="button" class="linkish" data-dl-att="${a.id}" data-dl-name="${esc(a.original_name || '')}" style="font-weight:500">${esc(a.original_name)}</button>
+          ${
+            office
+              ? `<button type="button" class="btn outline sm" data-oo-edit="${a.id}" style="padding:2px 8px;font-size:0.75rem">${
+                  ooCanEdit ? '線上編輯' : '線上檢視'
+                }</button>`
+              : ''
+          }
+          <span class="muted" style="font-size:0.78rem">
+            ${a.size_bytes ? `${fmtSize(a.size_bytes)}` : ''}
+            ${a.uploader_name ? ` · ${esc(a.uploader_name)}` : ''}
+          </span>
+        </div>`;
+        })
+        .join('')}
+    </div>`;
 }
 
 function collectFormData(root) {
@@ -4142,6 +4532,8 @@ async function renderDetail(body, id) {
     actionsHtml.push(`
       <button type="button" class="btn success" id="btn-approve">核准</button>
       <button type="button" class="btn danger" id="btn-reject">駁回</button>
+      <button type="button" class="btn outline" id="btn-cosign" title="臨時邀請其他同仁會簽">➕ 加簽</button>
+      <button type="button" class="btn outline" id="btn-forward" title="將目前簽核關卡轉交給其他主管">↗️ 轉簽</button>
     `);
   }
   if (
@@ -4182,25 +4574,28 @@ async function renderDetail(body, id) {
     return u ? u.name : `#${id}`;
   };
   const progress = [
-    `<span class="sp done">0. 申請人（${esc(request.requester_name || '')}）</span>`,
+    `<span class="sp done">✓ 0. 申請人（${esc(request.requester_name || '')}）</span>`,
     ...steps.map((s) => {
       let cls = '';
-      if (request.status === 'approved' || Number(s.order) < Number(request.current_step))
+      let icon = '';
+      if (request.status === 'approved' || Number(s.order) < Number(request.current_step)) {
         cls = 'done';
-      else if (
+        icon = '✓ ';
+      } else if (
         request.status === 'pending' &&
         Number(s.order) === Number(request.current_step)
-      )
+      ) {
         cls = 'current';
-      else if (
+      } else if (
         request.status === 'rejected' &&
         Number(s.order) === Number(request.current_step)
-      )
+      ) {
         cls = 'current';
+      }
       const who = (s.approverIds || []).map(userName).join('、');
       const modeHint =
         s.mode === 'all' && (s.approverIds || []).length > 1 ? '（需全簽）' : '';
-      return `<span class="sp ${cls}">${s.order}. ${esc(s.name)}${modeHint}${who ? `：${esc(who)}` : ''}</span>`;
+      return `<span class="sp ${cls}">${icon}${s.order}. ${esc(s.name)}${modeHint}${who ? `：${esc(who)}` : ''}</span>`;
     }),
   ].join('');
 
@@ -4547,11 +4942,58 @@ async function renderDetail(body, id) {
                     ? `<p class="muted" style="font-size:0.85rem;margin:0 0 12px">此為最終審核步驟，不可新增附件。</p>`
                     : ''
               }
+              <div class="field" style="margin-bottom:12px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:#f8fafc">
+                <label style="font-weight:600;margin-bottom:6px;display:block">✍️ 電子簽名檔選擇</label>
+                <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                    <input type="radio" name="sig_mode" value="default" ${state.user?.signature_image ? 'checked' : ''} />
+                    <span>使用預設個人簽名 ${state.user?.signature_image ? '✅' : '（未設定）'}</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                    <input type="radio" name="sig_mode" value="draw" ${!state.user?.signature_image ? 'checked' : ''} />
+                    <span>現場白板手寫簽名</span>
+                  </label>
+                </div>
+                <div id="draw-sig-wrap" style="margin-top:10px;${!state.user?.signature_image ? '' : 'display:none'}">
+                  <button type="button" class="btn outline sm" id="btn-open-spot-sig">✏️ 點此開始手寫簽名</button>
+                  <div id="spot-sig-preview" style="margin-top:8px"></div>
+                </div>
+              </div>
               <div class="field"><label>簽核意見</label><textarea id="action-comment" placeholder="選填意見…"></textarea></div>
             </div>`
           : ''
       }
     </div>`;
+
+  let spotSignatureImage = null;
+
+  if (canApprove) {
+    const sigRadios = body.querySelectorAll('input[name=sig_mode]');
+    const drawWrap = $('#draw-sig-wrap');
+    const spotPreview = $('#spot-sig-preview');
+    sigRadios.forEach((r) => {
+      r.addEventListener('change', () => {
+        if (drawWrap) drawWrap.style.display = r.value === 'draw' ? '' : 'none';
+      });
+    });
+    $('#btn-open-spot-sig')?.addEventListener('click', () => {
+      openSignaturePadModal({
+        title: '現場手寫簽名',
+        initialImage: spotSignatureImage,
+        onSave: (dataUrl) => {
+          spotSignatureImage = dataUrl;
+          if (spotPreview) {
+            spotPreview.innerHTML = `
+              <div style="display:flex;align-items:center;gap:10px">
+                <img src="${dataUrl}" style="max-height:65px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:2px" alt="手寫簽名" />
+                <span style="color:#15803d;font-size:0.85rem">✅ 已儲存現場簽名</span>
+              </div>
+            `;
+          }
+        },
+      });
+    });
+  }
 
   if (canApprove && (currentStep?.approverFields || []).length) {
     const stepBox = $('#step-form-fields') || body;
@@ -4617,12 +5059,30 @@ async function renderDetail(body, id) {
       toast('最終審核步驟不可新增附件', 'error');
       return;
     }
+
+    let finalSignatureImage = null;
+    if (action === 'approve') {
+      const selectedMode = body.querySelector('input[name=sig_mode]:checked')?.value || 'default';
+      if (selectedMode === 'draw') {
+        if (!spotSignatureImage) {
+          toast('請先點擊「點此開始手寫簽名」完成現場簽名', 'error');
+          return;
+        }
+        finalSignatureImage = spotSignatureImage;
+      } else if (state.user?.signature_image) {
+        finalSignatureImage = state.user.signature_image;
+      }
+    }
+
     try {
       // 有附件時用 FormData；無附件仍可用 FormData 以統一 multipart 路由
       const body = new FormData();
       body.append('action', action);
       body.append('comment', comment || '');
       body.append('step_form_data', JSON.stringify(step_form_data || {}));
+      if (finalSignatureImage) {
+        body.append('signature_image', finalSignatureImage);
+      }
       files.forEach((f) => body.append('attachments', f));
       const result = await api(`/api/requests/${id}/action`, {
         method: 'POST',
@@ -4665,6 +5125,8 @@ async function renderDetail(body, id) {
 
   $('#btn-approve')?.addEventListener('click', () => doAction('approve'));
   $('#btn-reject')?.addEventListener('click', () => doAction('reject'));
+  $('#btn-cosign')?.addEventListener('click', () => openCosignModal(request, () => navigate('detail', { id })));
+  $('#btn-forward')?.addEventListener('click', () => openForwardModal(request, () => navigate('detail', { id })));
   $('#btn-cancel')?.addEventListener('click', () => {
     if (confirm('確定取消此申請？')) doAction('cancel');
   });
@@ -4846,6 +5308,118 @@ async function renderDetail(body, id) {
   });
 }
 
+function openCosignModal(request, onDone) {
+  const me = state.user?.id;
+  const users = (state.users || []).filter((u) => u.active !== 0 && u.id !== me);
+  openModal(`
+    <h3>➕ 簽核加簽請託</h3>
+    <p class="muted" style="margin-top:0">
+      您可以臨時邀請其他同仁進行加簽。加簽同仁簽核完成後，將依位置繼續進行簽核。
+    </p>
+    <form id="cosign-form" class="form-grid">
+      <div class="field">
+        <label>加簽對象 *</label>
+        <select name="target_user_id" required>
+          <option value="">請選擇加簽同仁…</option>
+          ${users.map((u) => `<option value="${u.id}">${esc(u.name)}（${esc(u.department || '未設部門')}）</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>加簽順序</label>
+        <select name="position">
+          <option value="current" selected>先經加簽同仁簽核（再回傳原步驟）</option>
+          <option value="after">於本關核准後，插入下一步驟</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>加簽說明 / 請託意見</label>
+        <textarea name="comment" rows="3" placeholder="請填寫加簽說明或請同仁協助說明的項目…"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">送出加簽</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+
+  $('#cosign-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const target_user_id = Number(fd.get('target_user_id'));
+    if (!target_user_id) {
+      toast('請選擇加簽同仁', 'error');
+      return;
+    }
+    try {
+      const res = await api(`/api/requests/${request.id}/cosign`, {
+        method: 'POST',
+        body: {
+          target_user_id,
+          position: fd.get('position') || 'current',
+          comment: String(fd.get('comment') || '').trim(),
+        },
+      });
+      closeModal();
+      toast(res.message || '已成功送出加簽請託', 'success');
+      if (typeof onDone === 'function') onDone();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+}
+
+function openForwardModal(request, onDone) {
+  const me = state.user?.id;
+  const users = (state.users || []).filter((u) => u.active !== 0 && u.id !== me);
+  openModal(`
+    <h3>↗️ 簽核關卡轉簽改派</h3>
+    <p class="muted" style="margin-top:0">
+      將目前步驟的簽核權限轉交給指定同仁／主管辦理（您將不再為此步驟簽核人）。
+    </p>
+    <form id="forward-form" class="form-grid">
+      <div class="field">
+        <label>轉簽改派對象 *</label>
+        <select name="target_user_id" required>
+          <option value="">請選擇轉簽對象…</option>
+          ${users.map((u) => `<option value="${u.id}">${esc(u.name)}（${esc(u.department || '未設部門')}）</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>轉簽說明 / 理由</label>
+        <textarea name="comment" rows="3" placeholder="請填寫轉簽改派原因或注意事項…"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">確認轉簽</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+
+  $('#forward-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const target_user_id = Number(fd.get('target_user_id'));
+    if (!target_user_id) {
+      toast('請選擇轉簽對象', 'error');
+      return;
+    }
+    try {
+      const res = await api(`/api/requests/${request.id}/forward`, {
+        method: 'POST',
+        body: {
+          target_user_id,
+          comment: String(fd.get('comment') || '').trim(),
+        },
+      });
+      closeModal();
+      toast(res.message || '已成功轉簽改派', 'success');
+      if (typeof onDone === 'function') onDone();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+}
+
 function userLabelById(id) {
   const u = (state.users || []).find((x) => x.id === Number(id));
   return u ? u.name : `#${id}`;
@@ -4941,9 +5515,17 @@ async function renderWorkflows(body) {
         不需要的表單可先停用；確認無用再<strong>永久刪除</strong>。
       </p>
       <div class="table-wrap">
-        <table class="data">
+        <table class="data" style="width:100%;min-width:1080px;table-layout:fixed">
           <thead>
-            <tr><th>名稱</th><th>簽核步驟</th><th>PDF 排版</th><th>最終核准通知</th><th>建立者</th><th>狀態</th><th>操作</th></tr>
+            <tr>
+              <th style="width:200px">名稱</th>
+              <th style="min-width:320px">簽核步驟</th>
+              <th style="width:110px">PDF 排版</th>
+              <th style="width:140px">最終核准通知</th>
+              <th style="width:100px;white-space:nowrap">建立者</th>
+              <th style="width:85px;text-align:center;white-space:nowrap">狀態</th>
+              <th style="width:180px;text-align:center;white-space:nowrap">操作</th>
+            </tr>
           </thead>
           <tbody>
             ${workflows
@@ -4973,16 +5555,16 @@ async function renderWorkflows(body) {
                   : '關閉';
                 return `
               <tr>
-                <td>
+                <td style="white-space:normal;word-break:break-word">
                   <strong>${esc(w.name)}</strong>
-                  <div class="muted">${esc(w.description || '')}</div>
-                  <div class="muted" style="margin-top:4px">表單 ${fieldCount} 個欄位</div>
+                  ${w.description ? `<div class="muted" style="font-size:0.82rem;margin-top:2px">${esc(w.description)}</div>` : ''}
+                  <div class="muted" style="margin-top:4px;font-size:0.8rem">表單 ${fieldCount} 個欄位</div>
                 </td>
-                <td style="max-width:420px;font-size:0.88rem;line-height:1.45">${esc(steps) || '—'}</td>
-                <td style="font-size:0.85rem;white-space:nowrap" title="${esc(pl.type || 'auto')}">${esc(plLabel)}${esc(plResolved)}</td>
-                <td style="font-size:0.85rem;white-space:nowrap" title="${esc(fn.label || '')}">${esc(fnText)}</td>
-                <td>${esc(w.creator_name)}</td>
-                <td>
+                <td style="white-space:normal;word-break:break-word;font-size:0.88rem;line-height:1.5">${esc(steps) || '—'}</td>
+                <td style="font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(pl.type || 'auto')}">${esc(plLabel)}${esc(plResolved)}</td>
+                <td style="font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(fn.label || '')}">${esc(fnText)}</td>
+                <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(w.creator_name)}</td>
+                <td style="text-align:center;white-space:nowrap">
                   <label class="switch" title="${isOn ? '點擊停用' : '點擊啟用'}">
                     <input type="checkbox" data-toggle-wf="${w.id}" data-wf-name="${esc(w.name)}"
                       ${isOn ? 'checked' : ''} />
@@ -4990,13 +5572,13 @@ async function renderWorkflows(body) {
                     <span class="switch-text" data-switch-label="${w.id}">${isOn ? '啟用' : '停用'}</span>
                   </label>
                 </td>
-                <td>
-                  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+                <td style="text-align:center;white-space:nowrap">
+                  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center">
                     <button type="button" class="btn sm outline" data-edit="${w.id}">編輯</button>
                     <button type="button" class="btn sm outline" data-export-one="${w.id}">匯出</button>
                     ${
                       !isOn
-                        ? `<button type="button" class="btn sm danger" data-purge-wf="${w.id}" data-wf-name="${esc(w.name)}">永久刪除</button>`
+                        ? `<button type="button" class="btn sm danger" data-purge-wf="${w.id}" data-wf-name="${esc(w.name)}">刪除</button>`
                         : ''
                     }
                   </div>
@@ -5180,6 +5762,19 @@ function openWorkflowEditor(workflow = null) {
           Number(c.value)
         );
       }
+
+      const condEnable = document.querySelector(`[data-cond-enable="${i}"]`)?.checked;
+      if (condEnable) {
+        s.condition = {
+          enabled: true,
+          fieldId: document.querySelector(`[data-cond-field="${i}"]`)?.value || 'amount',
+          operator: document.querySelector(`[data-cond-op="${i}"]`)?.value || '>=',
+          value: document.querySelector(`[data-cond-val="${i}"]`)?.value?.trim() || '0',
+          action: document.querySelector(`[data-cond-action="${i}"]`)?.value || 'require',
+        };
+      } else {
+        s.condition = { enabled: false };
+      }
     });
   };
 
@@ -5197,6 +5792,7 @@ function openWorkflowEditor(workflow = null) {
             <span class="step-num">${i + 1}</span>
             <strong>簽核步驟</strong>
             <span class="field-type-tag">${esc(ASSIGN_TYPE_LABEL[at] || at)}</span>
+            ${s.condition?.enabled ? `<span class="tag draft" style="font-size:0.75rem">🔀 條件分支</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button type="button" class="btn sm outline" data-up="${i}" ${i === 0 ? 'disabled' : ''}>上移</button>
@@ -5305,6 +5901,42 @@ function openWorkflowEditor(workflow = null) {
               </p>`
             : ''
         }
+
+        <!-- 關卡條件式動態分支 -->
+        <div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px;background:#f8fafc;margin-top:10px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;margin:0 0 4px">
+            <input type="checkbox" data-cond-enable="${i}" ${s.condition?.enabled ? 'checked' : ''} />
+            <span>🔀 啟用關卡條件式動態分支 (符合/未達門檻時自動跳過關卡)</span>
+          </label>
+          <div data-cond-panel="${i}" class="${s.condition?.enabled ? '' : 'hidden'}" style="margin-top:8px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <span style="font-size:0.85rem">當欄位</span>
+              <select data-cond-field="${i}" style="font-size:0.85rem">
+                <option value="amount" ${s.condition?.fieldId === 'amount' ? 'selected' : ''}>金額 (amount / 總金額)</option>
+                <option value="days" ${s.condition?.fieldId === 'days' ? 'selected' : ''}>請假天數 (days)</option>
+                <option value="hours" ${s.condition?.fieldId === 'hours' ? 'selected' : ''}>請假小時 (hours)</option>
+                ${(formFields || []).map(f => `<option value="${esc(f.id)}" ${s.condition?.fieldId === f.id ? 'selected' : ''}>${esc(f.label)} (${esc(f.id)})</option>`).join('')}
+              </select>
+              <select data-cond-op="${i}" style="font-size:0.85rem">
+                <option value=">=" ${s.condition?.operator === '>=' ? 'selected' : ''}>&gt;= (大於等於)</option>
+                <option value=">" ${s.condition?.operator === '>' ? 'selected' : ''}>&gt; (大於)</option>
+                <option value="<=" ${s.condition?.operator === '<=' ? 'selected' : ''}>&lt;= (小於等於)</option>
+                <option value="<" ${s.condition?.operator === '<' ? 'selected' : ''}>&lt; (小於)</option>
+                <option value="==" ${s.condition?.operator === '==' ? 'selected' : ''}>== (等於)</option>
+                <option value="!=" ${s.condition?.operator === '!=' ? 'selected' : ''}>!= (不等於)</option>
+                <option value="contains" ${s.condition?.operator === 'contains' ? 'selected' : ''}>包含 (contains)</option>
+              </select>
+              <input type="text" data-cond-val="${i}" value="${esc(s.condition?.value || '')}" placeholder="數值或文字 (例: 100000)" style="width:140px;font-size:0.85rem" />
+              <select data-cond-action="${i}" style="font-size:0.85rem">
+                <option value="require" ${s.condition?.action !== 'skip' ? 'selected' : ''}>符合才簽核 (未達則自動跳過)</option>
+                <option value="skip" ${s.condition?.action === 'skip' ? 'selected' : ''}>符合則跳過 (未達才簽核)</option>
+              </select>
+            </div>
+            <p class="muted" style="font-size:0.8rem;margin:6px 0 0">
+              例：金額 &gt;= 100000 且選擇「符合才簽核」→ 當請購金額未滿 10 萬時，系統將自動跳過此關卡，直接進入下一關。
+            </p>
+          </div>
+        </div>
       </div>`;
       })
       .join('');
@@ -6061,6 +6693,7 @@ function openWorkflowEditor(workflow = null) {
             : [],
         // 保留步驟簽核表單（如人事：剩餘特休）
         approverFields: Array.isArray(s.approverFields) ? s.approverFields : [],
+        condition: s.condition || { enabled: false },
       })),
       formFields: formFields.map((f) => ({
         id: f.id,
@@ -6269,12 +6902,19 @@ async function renderBackups(body) {
             : ''
         }
         <div class="table-wrap">
-          <table class="data">
+          <table class="data" style="width:100%;min-width:1020px;table-layout:fixed">
             <thead>
               <tr>
-                ${canDeleteBackup ? '<th style="width:40px"></th>' : ''}
-                <th>單號</th><th>部門</th><th>表單類別</th><th>年月</th>
-                <th>主旨</th><th>申請人</th><th>狀態</th><th>備份時間</th><th>操作</th>
+                ${canDeleteBackup ? '<th style="width:36px;text-align:center"></th>' : ''}
+                <th style="width:70px;text-align:center;white-space:nowrap">單號</th>
+                <th style="width:120px">部門</th>
+                <th style="width:150px">表單類別</th>
+                <th style="width:85px;text-align:center;white-space:nowrap">年月</th>
+                <th style="min-width:300px">主旨</th>
+                <th style="width:100px;white-space:nowrap">申請人</th>
+                <th style="width:90px;text-align:center;white-space:nowrap">狀態</th>
+                <th style="width:145px;white-space:nowrap">備份時間</th>
+                <th style="width:140px;white-space:nowrap;text-align:center">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -6284,18 +6924,18 @@ async function renderBackups(body) {
                 <tr>
                   ${
                     canDeleteBackup
-                      ? `<td><input type="checkbox" data-backup-check value="${b.id}" /></td>`
+                      ? `<td style="text-align:center"><input type="checkbox" data-backup-check value="${b.id}" /></td>`
                       : ''
                   }
-                  <td>#${b.request_id}</td>
-                  <td>${esc(b.department)}</td>
-                  <td>${esc(b.workflow_name)}</td>
-                  <td>${esc(b.period_year)}-${esc(b.period_month)}</td>
-                  <td>${esc(b.title)}</td>
-                  <td>${esc(b.requester_name)}</td>
-                  <td>${esc(STATUS_MAP[b.status] || b.status)}</td>
-                  <td class="muted">${esc(b.created_at)}</td>
-                  <td style="white-space:nowrap">
+                  <td style="white-space:nowrap;font-weight:600;text-align:center">#${b.request_id}</td>
+                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.department)}">${esc(b.department)}</td>
+                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.workflow_name)}">${esc(b.workflow_name)}</td>
+                  <td style="text-align:center;white-space:nowrap">${esc(b.period_year)}-${esc(b.period_month)}</td>
+                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.title)}"><strong>${esc(b.title)}</strong></td>
+                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.requester_name)}">${esc(b.requester_name)}</td>
+                  <td style="text-align:center;white-space:nowrap"><span class="tag ${b.status}">${esc(STATUS_MAP[b.status] || b.status)}</span></td>
+                  <td class="muted" style="white-space:nowrap;font-size:0.82rem">${esc(b.created_at)}</td>
+                  <td style="white-space:nowrap;text-align:center">
                     <button type="button" class="btn sm primary" data-dl="${b.id}" data-fname="${esc(b.file_name || '')}">
                       ${/\.zip$/i.test(b.file_name || '') ? '下載 ZIP' : '下載 PDF'}
                     </button>
@@ -6735,14 +7375,16 @@ async function renderUsers(body) {
           : ''
       }
       <div class="table-wrap">
-        <table class="data">
+        <table class="data" style="width:100%;min-width:880px;table-layout:fixed">
           <thead>
             <tr>
-              ${canFull ? '<th style="width:40px"></th>' : ''}
-              <th>姓名</th><th>帳號</th><th>部門</th>
-              ${canLabor ? '<th>休假（可休／已休／剩餘）</th>' : ''}
-              <th>角色／權限</th>
-              <th>操作</th>
+              ${canFull ? '<th style="width:36px;text-align:center"></th>' : ''}
+              <th style="width:110px;white-space:nowrap">姓名</th>
+              <th style="width:120px;white-space:nowrap">帳號</th>
+              <th style="width:130px">部門</th>
+              ${canLabor ? '<th style="min-width:180px">休假（可休／已休／剩餘）</th>' : ''}
+              <th style="min-width:160px">角色／權限</th>
+              <th style="width:160px;text-align:center;white-space:nowrap">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -6774,8 +7416,8 @@ async function renderUsers(body) {
                       : ''
                   }
                 </td>
-                ${canLabor ? `<td>${laborCell(u)}</td>` : ''}
-                <td>
+                ${canLabor ? `<td style="white-space:normal;word-break:break-word">${laborCell(u)}</td>` : ''}
+                <td style="white-space:normal;word-break:break-word">
                   ${
                     u.role === 'admin'
                       ? '<span class="tag draft">最高權限 · 系統管理員</span>'
@@ -7025,6 +7667,171 @@ async function renderUsers(body) {
       }
     };
   });
+}
+
+/**
+ * 系統進階稽核日誌 (P3-1)
+ */
+async function renderAuditLogs(body) {
+  const query = state.auditListQuery || {};
+  const page = Number(query.page) || 1;
+  const q = String(query.q || '').trim();
+  const category = String(query.category || '').trim();
+  const dateFrom = String(query.dateFrom || '').trim();
+  const dateTo = String(query.dateTo || '').trim();
+
+  const params = new URLSearchParams({ page, limit: 30 });
+  if (q) params.set('q', q);
+  if (category) params.set('category', category);
+  if (dateFrom) params.set('dateFrom', dateFrom);
+  if (dateTo) params.set('dateTo', dateTo);
+
+  let data = { logs: [], totalCount: 0, totalPages: 1 };
+  try {
+    data = await api(`/api/system/audit-logs?${params.toString()}`);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+
+  const categoryLabels = {
+    auth: '🔒 帳號身份與登入',
+    approval: '📝 流程與簽核動作',
+    user_management: '👥 成員與權限變更',
+    workflow: '⚙️ 簽核流程範本',
+    system: '🛠️ 系統維運與設定',
+  };
+
+  const exportUrl = `/api/system/audit-logs/export?${params.toString()}`;
+
+  body.innerHTML = `
+    <div class="card">
+      <form id="audit-filter-form" class="req-filter-bar" style="margin-bottom:16px;padding:16px 18px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px;align-items:end">
+          <div class="field" style="margin:0">
+            <label>關鍵字搜尋</label>
+            <input type="search" name="q" value="${esc(q)}" placeholder="使用者姓名、帳號、IP、說明關鍵字…" autocomplete="off" />
+          </div>
+          <div class="field" style="margin:0">
+            <label>日誌分類</label>
+            <select name="category">
+              <option value="">全部分類</option>
+              ${Object.entries(categoryLabels)
+                .map(([k, v]) => `<option value="${k}" ${category === k ? 'selected' : ''}>${v}</option>`)
+                .join('')}
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <label>發生日期（起～迄）</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+              <input type="date" name="dateFrom" value="${esc(dateFrom)}" style="flex:1;min-width:120px" />
+              <span class="muted" style="flex-shrink:0">～</span>
+              <input type="date" name="dateTo" value="${esc(dateTo)}" style="flex:1;min-width:120px" />
+            </div>
+          </div>
+        </div>
+        <div class="form-actions" style="margin-top:14px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button type="submit" class="btn primary sm">查詢日誌</button>
+            <button type="button" class="btn outline sm" id="btn-audit-clear">清除條件</button>
+            <span class="muted" style="font-size:0.85rem">共 <strong>${data.totalCount || 0}</strong> 筆日誌</span>
+          </div>
+          <a href="${exportUrl}" download class="btn outline sm" style="display:inline-flex;align-items:center;gap:4px">
+            📥 匯出 CSV 報告
+          </a>
+        </div>
+      </form>
+
+      ${
+        !data.logs || !data.logs.length
+          ? emptyState({ title: '尚無稽核日誌', desc: '目前沒有符合篩選條件的系統稽核紀錄。' })
+          : `
+            <div class="table-wrap">
+              <table class="data" style="width:100%;min-width:1040px;table-layout:fixed">
+                <thead>
+                  <tr>
+                    <th style="width:150px;white-space:nowrap">時間</th>
+                    <th style="width:175px;white-space:nowrap">分類</th>
+                    <th style="width:130px;white-space:nowrap">執行人員</th>
+                    <th style="width:150px;white-space:nowrap">IP 位址</th>
+                    <th style="min-width:320px">說明詳情</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.logs
+                    .map(
+                      (l) => `
+                    <tr style="vertical-align:top">
+                      <td class="muted" style="white-space:nowrap">${esc(l.created_at)}</td>
+                      <td style="white-space:nowrap">
+                        <span class="tag draft" style="font-size:0.75rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle" title="${esc(categoryLabels[l.category] || l.category || '一般')}">${esc(categoryLabels[l.category] || l.category || '一般')}</span>
+                      </td>
+                      <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(l.user_name || '系統/訪客')}${l.user_username ? ` (@${esc(l.user_username)})` : ''}">
+                        <strong>${esc(l.user_name || '系統/訪客')}</strong>
+                        ${l.user_username ? `<span class="muted" style="font-size:0.78rem">(@${esc(l.user_username)})</span>` : ''}
+                      </td>
+                      <td style="white-space:nowrap"><code style="display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle" title="${esc(l.ip_address || '127.0.0.1')}">${esc(l.ip_address || '127.0.0.1')}</code></td>
+                      <td style="white-space:normal;word-break:break-word;line-height:1.5;color:#334155">${esc(l.description)}</td>
+                    </tr>`
+                    )
+                    .join('')}
+                </tbody>
+              </table>
+            </div>
+            
+            ${
+              data.totalPages > 1
+                ? `<div class="pagination">
+                    <button type="button" class="page-btn" id="btn-audit-prev" ${page <= 1 ? 'disabled' : ''}>上一頁</button>
+                    <span style="font-size:0.88rem;color:#475569;font-weight:600;padding:0 6px">第 ${page} / ${data.totalPages} 頁</span>
+                    <button type="button" class="page-btn" id="btn-audit-next" ${page >= data.totalPages ? 'disabled' : ''}>下一頁</button>
+                  </div>`
+                : ''
+            }
+          `
+      }
+    </div>
+  `;
+
+  $('#audit-filter-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    state.auditListQuery = {
+      q: String(fd.get('q') || '').trim(),
+      category: String(fd.get('category') || '').trim(),
+      dateFrom: String(fd.get('dateFrom') || '').trim(),
+      dateTo: String(fd.get('dateTo') || '').trim(),
+      page: 1,
+    };
+    renderAuditLogs(body);
+  });
+
+  $('#btn-audit-clear')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    state.auditListQuery = {};
+    renderAuditLogs(body);
+  });
+
+  $('#btn-audit-prev')?.addEventListener('click', () => {
+    if (page > 1) {
+      state.auditListQuery = { ...state.auditListQuery, page: page - 1 };
+      renderAuditLogs(body);
+    }
+  });
+
+  $('#btn-audit-next')?.addEventListener('click', () => {
+    if (page < data.totalPages) {
+      state.auditListQuery = { ...state.auditListQuery, page: page + 1 };
+      renderAuditLogs(body);
+    }
+  });
+}
+
+/**
+ * 畫面動態防偽浮水印（依需求：僅套用到 PDF，畫面網頁不顯示）
+ */
+function updateAppWatermark() {
+  const overlay = document.getElementById('app-watermark-overlay');
+  if (overlay) overlay.remove();
 }
 
 /** 休假明細（可休／已休皆手動） */
@@ -7935,11 +8742,14 @@ async function renderDepartments(body) {
           ${
             members.length
               ? `<div class="table-wrap">
-                  <table class="data">
+                  <table class="data" style="width:100%;min-width:600px;table-layout:fixed">
                     <thead>
                       <tr>
-                        <th>姓名</th><th>帳號</th><th>角色</th><th>隸屬部門</th>
-                        ${canManage ? '<th>操作</th>' : ''}
+                        <th style="width:120px;white-space:nowrap">姓名</th>
+                        <th style="width:140px;white-space:nowrap">帳號</th>
+                        <th style="width:120px;white-space:nowrap">角色</th>
+                        <th style="min-width:160px">隸屬部門</th>
+                        ${canManage ? '<th style="width:140px;text-align:center;white-space:nowrap">操作</th>' : ''}
                       </tr>
                     </thead>
                     <tbody>
@@ -8057,6 +8867,126 @@ async function renderDepartments(body) {
   });
 }
 
+/**
+ * 彈出手寫簽名視窗 (Signature Canvas Modal)
+ */
+function openSignaturePadModal(opts = {}) {
+  const { title = '手寫電子簽名', initialImage = null, onSave } = opts;
+  const html = `
+    <div style="max-width:520px;width:100%;margin:0 auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0">${esc(title)}</h3>
+        <button type="button" class="btn ghost sm" onclick="closeModal()">✕</button>
+      </div>
+      <p class="muted" style="margin:0 0 12px;font-size:0.88rem">
+        請在下方白板處以滑鼠或手指/觸控筆畫出您的簽名：
+      </p>
+      <div style="border:2px dashed #94a3b8;border-radius:12px;background:#fff;padding:6px;text-align:center;touch-action:none">
+        <canvas id="sig-pad-canvas" width="460" height="200" style="width:100%;max-width:460px;height:200px;display:block;margin:0 auto;cursor:crosshair;background:#ffffff;border-radius:8px;border:1px solid #e2e8f0"></canvas>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap">
+        <div>
+          <button type="button" class="btn outline sm" id="btn-sig-clear">🧹 清除重寫</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn ghost sm" onclick="closeModal()">取消</button>
+          <button type="button" class="btn primary sm" id="btn-sig-save">💾 確定儲存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  openModal(html);
+
+  const canvas = $('#sig-pad-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#0f172a';
+
+  let isDrawing = false;
+  let hasDrawn = false;
+  let lastX = 0;
+  let lastY = 0;
+
+  if (initialImage) {
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      hasDrawn = true;
+    };
+    img.src = initialImage;
+  }
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    if (e.touches && e.touches[0]) {
+      return {
+        x: (e.touches[0].clientX - rect.left) * scaleX,
+        y: (e.touches[0].clientY - rect.top) * scaleY,
+      };
+    }
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }
+
+  function startDraw(e) {
+    e.preventDefault();
+    isDrawing = true;
+    const p = getPos(e);
+    lastX = p.x;
+    lastY = p.y;
+  }
+
+  function drawMove(e) {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const p = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    lastX = p.x;
+    lastY = p.y;
+    hasDrawn = true;
+  }
+
+  function stopDraw(e) {
+    if (isDrawing) {
+      isDrawing = false;
+    }
+  }
+
+  canvas.addEventListener('mousedown', startDraw);
+  canvas.addEventListener('mousemove', drawMove);
+  canvas.addEventListener('mouseup', stopDraw);
+  canvas.addEventListener('mouseleave', stopDraw);
+
+  canvas.addEventListener('touchstart', startDraw, { passive: false });
+  canvas.addEventListener('touchmove', drawMove, { passive: false });
+  canvas.addEventListener('touchend', stopDraw);
+
+  $('#btn-sig-clear').onclick = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    hasDrawn = false;
+  };
+
+  $('#btn-sig-save').onclick = () => {
+    if (!hasDrawn && !initialImage) {
+      toast('請先在白板上手寫簽名', 'error');
+      return;
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    closeModal();
+    if (typeof onSave === 'function') onSave(dataUrl);
+  };
+}
+
 async function renderSettings(body) {
   const u = state.user || {};
   const depts =
@@ -8070,6 +9000,32 @@ async function renderSettings(body) {
   } catch {
     mailCfg = { enabled: false, ready: false };
   }
+
+  await loadUsers();
+  const allUsers = (state.users || []).filter((x) => x.active !== 0 && x.id !== u.id);
+
+  let delegationInfo = { activeDelegation: null, delegation: null, grantors: [] };
+  try {
+    delegationInfo = await api('/api/delegations/my');
+  } catch {
+    /* ignore */
+  }
+
+  let userSig = u.signature_image || null;
+  try {
+    const sigRes = await api('/api/users/me/signature');
+    userSig = sigRes.signature_image || userSig;
+  } catch {
+    /* ignore */
+  }
+
+  const activeDel = delegationInfo.activeDelegation;
+  const rawDel = delegationInfo.delegation;
+  const grantors = delegationInfo.grantors || [];
+
+  const grantorText = grantors.length
+    ? grantors.map((g) => `<strong>${esc(g.grantor_name)}</strong>`).join('、')
+    : '';
 
   body.innerHTML = `
     <div class="card" style="max-width:560px">
@@ -8132,6 +9088,125 @@ async function renderSettings(body) {
           <button type="submit" class="btn primary">儲存資料</button>
         </div>
       </form>
+    </div>
+
+    <!-- 客製化佈景主題 -->
+    <div class="card" style="max-width:560px">
+      <h3>🎨 客製化佈景主題</h3>
+      <p class="muted" style="margin-top:0">點選下方主題即可即時預覽畫面效果，儲存後於此裝置自動持久化套用。</p>
+      
+      <div id="theme-selector-grid" class="theme-grid">
+        ${THEMES.map((t) => {
+          const isSelected = t.id === (localStorage.getItem('approval_user_theme') || 'navy');
+          const activeStyle = isSelected
+            ? `background: linear-gradient(135deg, ${t.vars['--primary']} 0%, ${t.vars['--primary-hover']} 100%) !important; color: #ffffff !important; border-color: ${t.vars['--primary-hover']} !important; box-shadow: 0 4px 14px ${t.vars['--primary']}55 !important;`
+            : '';
+          return `
+          <button type="button" class="btn ${isSelected ? 'primary active' : ''} theme-card" data-theme-id="${t.id}" style="${activeStyle}">
+            <span class="theme-color-dot" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${isSelected ? '#ffffff' : t.vars['--primary']};box-shadow:0 0 0 1.5px rgba(255,255,255,0.6);"></span>
+            <span>${t.name}</span>
+          </button>
+        `;
+        }).join('')}
+      </div>
+
+      <div class="form-actions" style="margin-top:14px">
+        <button type="button" class="btn primary" id="btn-save-theme">🎨 儲存並套用主題</button>
+        <button type="button" class="btn outline" id="btn-reset-theme">還原預設藍調</button>
+      </div>
+    </div>
+
+    <!-- 簽核代理人設定 -->
+    <div class="card" style="max-width:560px">
+      <h3>🔄 簽核代理人機制</h3>
+      <p class="muted" style="margin-top:0">
+        出差或休假時，可設定代理同仁。代理期間到達後，原屬於您的待簽核單據將會自動出現在代理人的「待我簽核」清單中，並記錄代理簽核日誌。
+      </p>
+      ${
+        grantorText
+          ? `<div class="card" style="background:#eff6ff;border-color:#93c5fd;margin-bottom:14px;padding:12px">
+              <strong style="color:#1d4ed8">⚡ 代理授權通知</strong>
+              <div style="font-size:0.88rem;color:#1e40af;margin-top:4px">
+                下列同仁目前已將您設為簽核代理人：${grantorText}。<br/>
+                當對方有待簽核單據時，您可進入該單進行代理簽核。
+              </div>
+            </div>`
+          : ''
+      }
+      <form id="delegation-form" class="form-grid">
+        <div class="field">
+          <label>指定代理同仁 *</label>
+          <select name="delegate_user_id" required>
+            <option value="">請選擇代理同仁…</option>
+            ${allUsers
+              .map(
+                (usr) =>
+                  `<option value="${usr.id}" ${
+                    rawDel && rawDel.delegate_user_id === usr.id ? 'selected' : ''
+                  }>${esc(usr.name)}（${esc(usr.department || '未設部門')}）</option>`
+              )
+              .join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>代理開始時間（選填，留白即刻生效）</label>
+          <input type="datetime-local" name="start_time" value="${esc(
+            rawDel?.start_time ? String(rawDel.start_time).replace(' ', 'T') : ''
+          )}" />
+        </div>
+        <div class="field">
+          <label>代理結束時間（選填，留白永久生效）</label>
+          <input type="datetime-local" name="end_time" value="${esc(
+            rawDel?.end_time ? String(rawDel.end_time).replace(' ', 'T') : ''
+          )}" />
+        </div>
+        <div class="field" style="border:1px solid var(--border);border-radius:10px;padding:12px;background:#f8fafc">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
+            <input type="checkbox" name="active" value="1" ${
+              !rawDel || rawDel.active ? 'checked' : ''
+            } />
+            <span>
+              <strong>啟用代理簽核功能</strong>
+              <div class="muted" style="font-size:0.85rem;margin-top:2px">取消勾選可暫停代理授權</div>
+            </span>
+          </label>
+        </div>
+        <div class="form-actions" style="display:flex;gap:10px">
+          <button type="submit" class="btn primary">儲存代理設定</button>
+          ${
+            rawDel && rawDel.active
+              ? `<button type="button" class="btn danger outline" id="btn-cancel-delegation">取消代理設定</button>`
+              : ''
+          }
+        </div>
+      </form>
+    </div>
+
+    <!-- 個人電子簽名檔 -->
+    <div class="card" style="max-width:560px">
+      <h3>✍️ 個人電子簽名檔</h3>
+      <p class="muted" style="margin-top:0">
+        您可以先預設個人手寫電子簽名，簽核時系統將自動套用至簽核單與 exported PDF 檔案中；亦可選擇現場手寫。
+      </p>
+      <div style="border:1px dashed #cbd5e1;border-radius:10px;padding:16px;background:#f8fafc;text-align:center;margin-bottom:14px">
+        <div id="sig-preview-box">
+          ${
+            userSig
+              ? `<img src="${userSig}" style="max-height:90px;max-width:100%;object-fit:contain;background:#fff;padding:4px;border:1px solid #e2e8f0;border-radius:6px" alt="個人電子簽名" />`
+              : `<div class="muted" style="padding:20px 0">尚未設定個人電子簽名檔</div>`
+          }
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button type="button" class="btn primary sm" id="btn-draw-signature">✍️ 白板手寫簽名</button>
+        <button type="button" class="btn outline sm" id="btn-upload-sig-file">📁 上傳簽名圖檔</button>
+        <input type="file" id="sig-file-input" accept="image/*" class="hidden" />
+        ${
+          userSig
+            ? `<button type="button" class="btn danger outline sm" id="btn-clear-signature">🗑️ 清除預設簽名</button>`
+            : ''
+        }
+      </div>
     </div>
     <div class="card" style="max-width:560px">
       <h3>變更密碼</h3>
@@ -8229,6 +9304,48 @@ async function renderSettings(body) {
       })()}
     </div>`;
 
+  let selectedThemeId = localStorage.getItem('approval_user_theme') || 'navy';
+
+  // 點擊主題卡片即時切換與預覽（動態套用該主題專屬底色與白字）
+  document.querySelectorAll('.theme-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      selectedThemeId = card.dataset.themeId;
+      document.querySelectorAll('.theme-card').forEach((c) => {
+        c.classList.remove('active', 'primary');
+        c.removeAttribute('style');
+        const themeId = c.dataset.themeId;
+        const themeObj = THEMES.find((t) => t.id === themeId);
+        const dot = c.querySelector('.theme-color-dot');
+        if (dot && themeObj) dot.style.background = themeObj.vars['--primary'];
+      });
+
+      card.classList.add('active', 'primary');
+      const curThemeObj = THEMES.find((t) => t.id === selectedThemeId) || THEMES[0];
+      card.style.cssText = `background: linear-gradient(135deg, ${curThemeObj.vars['--primary']} 0%, ${curThemeObj.vars['--primary-hover']} 100%) !important; color: #ffffff !important; border-color: ${curThemeObj.vars['--primary-hover']} !important; box-shadow: 0 4px 14px ${curThemeObj.vars['--primary']}55 !important;`;
+      const activeDot = card.querySelector('.theme-color-dot');
+      if (activeDot) activeDot.style.background = '#ffffff';
+
+      applyUserTheme(selectedThemeId, false);
+    });
+  });
+
+  // 儲存主題
+  $('#btn-save-theme')?.addEventListener('click', () => {
+    applyUserTheme(selectedThemeId, true);
+    const themeObj = THEMES.find((t) => t.id === selectedThemeId) || THEMES[0];
+    toast(`已成功套用「${themeObj.name}」客製化主題！`, 'success');
+  });
+
+  // 還原預設主題
+  $('#btn-reset-theme')?.addEventListener('click', () => {
+    selectedThemeId = 'navy';
+    applyUserTheme('navy', true);
+    document.querySelectorAll('.theme-card').forEach((c) => {
+      c.classList.toggle('active', c.dataset.themeId === 'navy');
+    });
+    toast('已還原為預設經典藍調主題！', 'success');
+  });
+
   $('#profile-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -8253,6 +9370,104 @@ async function renderSettings(body) {
       toast(err.message, 'error');
     }
   };
+
+  // 簽核代理人表單
+  $('#delegation-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const delegateId = Number(fd.get('delegate_user_id'));
+    if (!delegateId) {
+      toast('請選擇代理同仁', 'error');
+      return;
+    }
+    const startTime = fd.get('start_time') ? String(fd.get('start_time')).replace('T', ' ') : null;
+    const endTime = fd.get('end_time') ? String(fd.get('end_time')).replace('T', ' ') : null;
+    const active = !!e.target.querySelector('input[name=active]')?.checked;
+
+    try {
+      const res = await api('/api/delegations/my', {
+        method: 'POST',
+        body: { delegate_user_id: delegateId, start_time: startTime, end_time: endTime, active },
+      });
+      toast(res.message || '代理設定已儲存', 'success');
+      navigate('settings');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  $('#btn-cancel-delegation')?.addEventListener('click', async () => {
+    if (!confirm('確定取消簽核代理設定？')) return;
+    try {
+      const res = await api('/api/delegations/my', { method: 'DELETE' });
+      toast(res.message || '已取消簽核代理設定', 'success');
+      navigate('settings');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  // 電子簽名檔
+  $('#btn-draw-signature')?.addEventListener('click', () => {
+    openSignaturePadModal({
+      title: '手寫個人電子簽名檔',
+      initialImage: userSig,
+      onSave: async (dataUrl) => {
+        try {
+          const res = await api('/api/users/me/signature', {
+            method: 'POST',
+            body: { signature_image: dataUrl },
+          });
+          state.user = { ...state.user, signature_image: dataUrl };
+          toast(res.message || '手寫電子簽名已儲存', 'success');
+          navigate('settings');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      },
+    });
+  });
+
+  $('#btn-upload-sig-file')?.addEventListener('click', () => {
+    $('#sig-file-input')?.click();
+  });
+
+  $('#sig-file-input')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast('請上傳圖檔（PNG / JPG）', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const dataUrl = evt.target.result;
+      try {
+        const res = await api('/api/users/me/signature', {
+          method: 'POST',
+          body: { signature_image: dataUrl },
+        });
+        state.user = { ...state.user, signature_image: dataUrl };
+        toast(res.message || '簽名圖檔上傳成功', 'success');
+        navigate('settings');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  $('#btn-clear-signature')?.addEventListener('click', async () => {
+    if (!confirm('確定清除預設電子簽名檔？')) return;
+    try {
+      const res = await api('/api/users/me/signature', { method: 'DELETE' });
+      state.user = { ...state.user, signature_image: null };
+      toast(res.message || '簽名檔已清除', 'success');
+      navigate('settings');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
 
   // 桌面通知設定
   $('#desktop-notify-form')?.addEventListener('submit', (e) => {
@@ -8327,6 +9542,234 @@ async function renderSettings(body) {
   };
 }
 
+/** LINE 設定表單 HTML（側欄頁與系統設定共用） */
+function lineSettingsFormHtml(cfg = {}, opts = {}) {
+  const showAccess = opts.showAccess !== false && isBuiltinAdmin();
+  const ev = cfg.events || {};
+  const access = cfg.configAccess || 'builtin_admin';
+  const statusText = cfg.ready
+    ? '已就緒（啟用且已設定服務網址與 API 金鑰）'
+    : cfg.enabled
+      ? '已啟用但尚未就緒（請檢查服務網址／API 金鑰）'
+      : '未啟用';
+  return `
+    <p class="muted" style="margin-top:0;line-height:1.55">
+      透過獨立服務 <code>line-notify</code>（預設埠 3850）推播 Messaging API。
+      Channel Token 只放在 LINE 專案 <code>.env</code>；此處只填<strong>服務網址</strong>與<strong>內部 API 金鑰</strong>。
+      成員需先對官方帳號傳送：<code>綁定 簽核帳號</code>。
+    </p>
+    <p style="margin:0 0 12px">
+      狀態：
+      <strong style="color:${cfg.ready ? '#15803d' : '#b45309'}">${esc(statusText)}</strong>
+      ${cfg.updatedAt ? `<span class="muted" style="margin-left:8px;font-size:0.85rem">更新：${esc(String(cfg.updatedAt).replace('T', ' ').replace(/\.\d+Z$/, ''))}</span>` : ''}
+    </p>
+    <form id="${esc(opts.formId || 'line-form')}" class="form-grid">
+      <div class="field check-row-box">
+        <label class="check-row">
+          <input type="checkbox" name="enabled" id="${esc((opts.formId || 'line-form') + '-enabled')}" ${cfg.enabled ? 'checked' : ''} />
+          <span><strong>啟用 LINE 推播通知</strong></span>
+        </label>
+      </div>
+      <div class="field">
+        <label>LINE 服務網址</label>
+        <input name="serviceUrl" value="${esc(cfg.serviceUrl || 'http://192.168.99.220:3850')}"
+          placeholder="http://192.168.99.220:3850" autocomplete="off" />
+        <span class="field-hint" style="color:#6b7280;font-size:0.82rem">正式 NAS 建議：http://192.168.99.220:3850（容器內可用 http://line-notify:3850）</span>
+      </div>
+      <div class="field">
+        <label>內部 API 金鑰（= line-notify 的 INTERNAL_API_KEY）</label>
+        <input name="apiKey" type="password" value="" autocomplete="new-password"
+          placeholder="${cfg.hasApiKey ? '已設定（留空則不變更）' : '尚未設定'}" />
+      </div>
+      ${
+        showAccess
+          ? `<div class="field">
+        <label>誰可以設定 LINE</label>
+        <select name="configAccess">
+          <option value="builtin_admin" ${access === 'builtin_admin' ? 'selected' : ''}>僅內建 Admin</option>
+          <option value="any_admin" ${access === 'any_admin' ? 'selected' : ''}>所有系統管理員</option>
+          <option value="permission" ${access === 'permission' ? 'selected' : ''}>具備「LINE 通知設定」權限者</option>
+        </select>
+        <span class="field-hint" style="color:#6b7280;font-size:0.82rem">僅內建 Admin 可變更此項</span>
+      </div>`
+          : ''
+      }
+      <div class="field">
+        <strong class="check-group-title" style="display:block;margin-bottom:8px">通知事件</strong>
+        <div class="check-group-box" style="background:#f8fafc">
+          <label class="check-row"><input type="checkbox" name="ev_pending" ${ev.pending !== false ? 'checked' : ''} /><span>待簽核（通知簽核人）</span></label>
+          <label class="check-row"><input type="checkbox" name="ev_submitted" ${ev.submitted !== false ? 'checked' : ''} /><span>申請已送出（通知申請人）</span></label>
+          <label class="check-row"><input type="checkbox" name="ev_approved" ${ev.approved !== false ? 'checked' : ''} /><span>已核准</span></label>
+          <label class="check-row"><input type="checkbox" name="ev_rejected" ${ev.rejected !== false ? 'checked' : ''} /><span>已駁回</span></label>
+          <label class="check-row"><input type="checkbox" name="ev_step" ${ev.step !== false ? 'checked' : ''} /><span>關卡進度更新</span></label>
+          <label class="check-row"><input type="checkbox" name="ev_remind" ${ev.remind !== false ? 'checked' : ''} /><span>催辦</span></label>
+        </div>
+      </div>
+      <div class="form-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button type="submit" class="btn primary">儲存 LINE 設定</button>
+        <button type="button" class="btn outline" id="${esc((opts.formId || 'line-form') + '-health')}">檢查服務</button>
+        <button type="button" class="btn outline" id="${esc((opts.formId || 'line-form') + '-test')}">測試推播給自己</button>
+      </div>
+    </form>
+    <div id="${esc((opts.formId || 'line-form') + '-bindings')}" class="muted" style="margin-top:14px;font-size:0.88rem;line-height:1.5"></div>
+  `;
+}
+
+function bindLineSettingsForm(opts = {}) {
+  const formId = opts.formId || 'line-form';
+  const form = document.getElementById(formId);
+  if (!form) return;
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      enabled: !!e.target.querySelector(`#${formId}-enabled`)?.checked,
+      serviceUrl: String(fd.get('serviceUrl') || '').trim(),
+      apiKey: String(fd.get('apiKey') || ''),
+      events: {
+        pending: !!e.target.querySelector('[name="ev_pending"]')?.checked,
+        submitted: !!e.target.querySelector('[name="ev_submitted"]')?.checked,
+        approved: !!e.target.querySelector('[name="ev_approved"]')?.checked,
+        rejected: !!e.target.querySelector('[name="ev_rejected"]')?.checked,
+        step: !!e.target.querySelector('[name="ev_step"]')?.checked,
+        remind: !!e.target.querySelector('[name="ev_remind"]')?.checked,
+      },
+    };
+    if (isBuiltinAdmin() && fd.get('configAccess')) {
+      body.configAccess = String(fd.get('configAccess'));
+    }
+    try {
+      const data = await api('/api/line/config', { method: 'PUT', body });
+      const cfg = data.config || data;
+      state.lineCanConfigure = true;
+      state.lineConfigAccess = cfg.configAccess || state.lineConfigAccess;
+      state.lineReady = !!cfg.ready;
+      state.lineEnabled = !!cfg.enabled;
+      applyRoleUi();
+      toast('LINE 設定已儲存', 'success');
+      if (typeof opts.onSaved === 'function') opts.onSaved(cfg);
+    } catch (err) {
+      toast(err.message || '儲存失敗', 'error');
+    }
+  };
+
+  document.getElementById(`${formId}-health`)?.addEventListener('click', async () => {
+    try {
+      const h = await api('/api/line/health');
+      if (h.ok) {
+        toast(
+          `服務正常${h.data?.version ? ' v' + h.data.version : ''}${
+            h.data?.lineConfigured === false ? '（Channel 尚未設定）' : ''
+          }`,
+          'success'
+        );
+      } else {
+        toast(h.error || `服務異常 HTTP ${h.status || ''}`, 'error');
+      }
+    } catch (err) {
+      toast(err.message || '無法連線 LINE 服務', 'error');
+    }
+  });
+
+  document.getElementById(`${formId}-test`)?.addEventListener('click', async () => {
+    try {
+      await api('/api/line/test', {
+        method: 'POST',
+        body: { username: state.user?.username || '' },
+      });
+      toast('已送出測試推播（請確認 LINE 已綁定簽核帳號）', 'success');
+    } catch (err) {
+      toast(err.message || '測試推播失敗', 'error');
+    }
+  });
+
+  // 綁定列表（選用）
+  const box = document.getElementById(`${formId}-bindings`);
+  if (box) {
+    api('/api/line/bindings')
+      .then((data) => {
+        const list = data.bindings || [];
+        if (!list.length) {
+          box.innerHTML =
+            '尚無綁定紀錄。請成員對 LINE 官方帳號傳送：<code>綁定 您的簽核帳號</code>';
+          return;
+        }
+        const rows = list
+          .slice(0, 30)
+          .map(
+            (b) =>
+              `<tr><td>${esc(b.username || '—')}</td><td style="font-family:monospace;font-size:0.8rem">${esc(
+                String(b.lineUserId || b.userId || '').slice(0, 24)
+              )}</td></tr>`
+          )
+          .join('');
+        box.innerHTML = `
+          <strong>已綁定帳號（前 ${Math.min(list.length, 30)} 筆）</strong>
+          <table class="data" style="margin-top:8px;font-size:0.85rem;width:100%">
+            <thead><tr><th>簽核帳號</th><th>LINE userId</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      })
+      .catch(() => {
+        box.innerHTML = '無法載入綁定列表（服務未就緒或 API 金鑰不符）';
+      });
+  }
+}
+
+/** 側欄「LINE 通知」完整設定頁 */
+async function renderLineSettings(body) {
+  if (!canConfigureLine()) {
+    body.innerHTML = `<div class="error-msg">您沒有 LINE 通知設定權限</div>`;
+    return;
+  }
+  let cfg = {
+    enabled: false,
+    ready: false,
+    serviceUrl: 'http://192.168.99.220:3850',
+    hasApiKey: false,
+    configAccess: 'builtin_admin',
+    events: {},
+  };
+  try {
+    const data = await api('/api/line/config');
+    if (!data.canConfigure) {
+      body.innerHTML = `<div class="error-msg">您沒有 LINE 通知設定權限</div>`;
+      return;
+    }
+    cfg = { ...cfg, ...data };
+    state.lineCanConfigure = true;
+    state.lineConfigAccess = cfg.configAccess;
+    state.lineReady = !!cfg.ready;
+    state.lineEnabled = !!cfg.enabled;
+  } catch (e) {
+    body.innerHTML = `<div class="error-msg">${esc(e.message || '無法載入 LINE 設定')}</div>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="system-settings-page">
+      <div class="card">
+        <h3>💬 LINE 通知設定</h3>
+        ${lineSettingsFormHtml(cfg, { formId: 'line-form', showAccess: true })}
+      </div>
+      <div class="card">
+        <h3>使用說明</h3>
+        <ol style="margin:0;padding-left:1.2rem;line-height:1.7;color:#334155">
+          <li>確認 LINE 服務在 NAS 執行：<code>http://192.168.99.220:3850/health</code></li>
+          <li>API 金鑰須與 <code>D:\\Line 專案</code>（或 NAS line-notify）的 <code>INTERNAL_API_KEY</code> 相同</li>
+          <li>Webhook 需公網 HTTPS 才能綁定（Messaging API）</li>
+          <li>成員私訊官方帳號：<code>綁定 帳號</code> 後才收得到推播</li>
+        </ol>
+      </div>
+    </div>`;
+
+  bindLineSettingsForm({
+    formId: 'line-form',
+    onSaved: () => navigate('line-settings'),
+  });
+}
+
 /** 系統設定（僅內建 Admin 帳號） */
 async function renderSystemSettings(body) {
   if (!isBuiltinAdmin()) {
@@ -8352,6 +9795,7 @@ async function renderSystemSettings(body) {
     hasPass: false,
     ready: false,
   };
+  let backupDir = '';
   let announcement = {
     enabled: false,
     active: false,
@@ -8371,6 +9815,7 @@ async function renderSystemSettings(body) {
     state.systemSettings = adminCfg;
     pdfSign = { ...pdfSign, ...(adminCfg.pdfSign || {}) };
     backupEncrypt = { ...backupEncrypt, ...(adminCfg.backupEncrypt || {}) };
+    backupDir = adminCfg.backupDir || '';
     announcement = { ...announcement, ...(adminCfg.announcement || {}) };
   } catch {
     try {
@@ -8386,6 +9831,26 @@ async function renderSystemSettings(body) {
     mailCfg = await api('/api/mail/config');
   } catch {
     mailCfg = { enabled: false, ready: false };
+  }
+
+  let lineCfg = {
+    enabled: false,
+    ready: false,
+    serviceUrl: 'http://192.168.99.220:3850',
+    hasApiKey: false,
+    configAccess: 'any_admin',
+    events: {},
+    canConfigure: true,
+  };
+  try {
+    const lc = await api('/api/line/config');
+    lineCfg = { ...lineCfg, ...lc };
+    state.lineCanConfigure = !!lc.canConfigure;
+    state.lineConfigAccess = lc.configAccess || state.lineConfigAccess;
+    state.lineReady = !!lc.ready;
+    state.lineEnabled = !!lc.enabled;
+  } catch {
+    /* keep defaults */
   }
 
   const logoUrl = brand.logoUrl || '/img/argo-logo.png';
@@ -8428,10 +9893,13 @@ async function renderSystemSettings(body) {
           純重啟（檔案未改）不重複記一筆。
         </p>
         <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:10px">
-          <table class="data" style="margin:0;font-size:0.85rem">
+          <table class="data" style="margin:0;font-size:0.85rem;width:100%;table-layout:fixed">
             <thead>
               <tr>
-                <th>時間</th><th>版本</th><th>類型</th><th>變更檔</th>
+                <th style="width:150px;white-space:nowrap">時間</th>
+                <th style="width:160px;white-space:nowrap">版本</th>
+                <th style="width:110px;white-space:nowrap">類型</th>
+                <th style="min-width:180px">變更檔</th>
               </tr>
             </thead>
             <tbody>
@@ -8470,7 +9938,7 @@ async function renderSystemSettings(body) {
 
   body.innerHTML = `
     <div class="system-settings-page">
-    <div class="card" style="max-width:640px;background:#eff6ff;border-color:#bfdbfe">
+    <div class="card" style="background:#eff6ff;border-color:#bfdbfe">
       <h3 style="margin-top:0">系統版本（自動）</h3>
       <p style="margin:0;font-size:1.35rem;font-weight:700;color:#1d4ed8;letter-spacing:0.04em">${esc(verLabel)}</p>
       <p class="muted" style="margin:8px 0 0;line-height:1.55;font-size:0.9rem">
@@ -8483,12 +9951,12 @@ async function renderSystemSettings(body) {
       </p>
     </div>
 
-    <div class="card" style="max-width:720px">
+    <div class="card">
       <h3 style="margin-top:0">自動部署修改紀錄</h3>
       ${deployLogHtml}
     </div>
 
-    <div class="card" style="max-width:640px">
+    <div class="card">
       <h3 style="margin-top:0">公司品牌</h3>
       <p class="muted" style="margin-top:0">設定後將顯示於登入頁、側欄與 PDF 抬頭。僅系統管理員可修改。</p>
       <form id="brand-form" class="form-grid">
@@ -8522,7 +9990,7 @@ async function renderSystemSettings(body) {
       </form>
     </div>
 
-    <div class="card" style="max-width:720px">
+    <div class="card">
       <h3 style="margin-top:0">總覽公告</h3>
       <p class="muted" style="margin-top:0;line-height:1.55">
         於<strong>總覽</strong>顯示一則公司公告卡。可上傳附件；同仁點「查看」可讀全文並開啟／下載附件。
@@ -8603,7 +10071,7 @@ async function renderSystemSettings(body) {
       </form>
     </div>
 
-    <div class="card" style="max-width:720px">
+    <div class="card">
       <h3>PDF 數位簽章（公司憑證）</h3>
       <p class="muted" style="margin-top:0;line-height:1.55">
         使用公司 <strong>PKCS#12（.p12／.pfx）</strong> 憑證對下載／備份的 PDF 做數位簽章，
@@ -8770,7 +10238,7 @@ async function renderSystemSettings(body) {
       </p>
     </div>
 
-    <div class="card" style="max-width:640px">
+    <div class="card">
       <h3>備份加密（AES-256）</h3>
       <p class="muted" style="margin-top:0;line-height:1.55">
         啟用後，<strong>備份資料</strong>一律以 <strong>AES-256 加密 ZIP</strong> 儲存（含僅 PDF、無附件的單據）。
@@ -8810,7 +10278,42 @@ async function renderSystemSettings(body) {
       </p>
     </div>
 
-    <div class="card" style="max-width:640px">
+    <div class="card">
+      <h3>備份儲存目錄</h3>
+      <p class="muted" style="margin-top:0;line-height:1.55">
+        設定備份檔案的儲存根目錄。留空則使用預設路徑（<code>data/backups</code>）。
+        Docker 環境請填寫容器內絕對路徑（如 <code>/mnt/nas-share/backups</code>）。
+      </p>
+      <form id="backup-dir-form" class="form-grid">
+        <div class="field">
+          <label for="backup-dir-input">備份目錄路徑</label>
+          <input id="backup-dir-input" name="backupDir" type="text"
+            value="${esc(backupDir)}"
+            placeholder="留空使用預設：data/backups" style="font-family:monospace" />
+          <span class="field-hint" style="color:#6b7280;font-size:0.82rem">
+            目前：<code>${esc(backupDir || '（預設）data/backups')}</code>
+          </span>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn primary" id="btn-backup-dir-save">儲存備份目錄</button>
+          <button type="button" class="btn outline" id="btn-backup-dir-reset">恢復預設</button>
+        </div>
+      </form>
+      <p class="muted" style="font-size:0.8rem;margin:12px 0 0;line-height:1.5">
+        ⚠️ 變更目錄後，<strong>已備份的歷史紀錄仍指向舊路徑</strong>，新備份才會寫入新目錄。<br/>
+        確認目錄存在且伺服器程序有寫入權限。不可使用 <code>..</code> 路徑穿越。
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>💬 LINE 通知設定</h3>
+      ${lineSettingsFormHtml(lineCfg, { formId: 'sys-line-form', showAccess: true })}
+      <p class="muted" style="margin:12px 0 0;font-size:0.85rem">
+        亦可從側欄「LINE 通知」進入同一套設定。
+      </p>
+    </div>
+
+    <div class="card">
       <h3>Email 設定（SMTP）</h3>
       <p class="muted" style="margin-top:0">設定 SMTP 後，申請人可收到進度通知，並可對簽核人寄送催辦信。</p>
       <form id="mail-form" class="form-grid">
@@ -8869,7 +10372,7 @@ async function renderSystemSettings(body) {
       </form>
     </div>
 
-    <div class="card" style="max-width:640px">
+    <div class="card">
       <h3>系統設定完整包</h3>
       <p class="muted" style="margin-top:0;line-height:1.55">
         一次匯出／匯入：部門、成員、簽核流程與申請表、Email 設定。
@@ -9237,6 +10740,46 @@ async function renderSystemSettings(body) {
     }
   });
 
+  // 備份目錄
+  $('#backup-dir-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const dir = String(fd.get('backupDir') || '').trim();
+    if (dir && dir.includes('..')) {
+      toast('備份目錄不可包含「..」路徑穿越', 'error');
+      return;
+    }
+    try {
+      await api('/api/system/settings', {
+        method: 'PUT',
+        body: { backupDir: dir },
+      });
+      toast('備份目錄已儲存' + (dir ? `：${dir}` : '（已恢復預設）'), 'success');
+      navigate('system-settings');
+    } catch (err) {
+      toast(err.message || '儲存失敗', 'error');
+    }
+  });
+
+  $('#btn-backup-dir-reset')?.addEventListener('click', async () => {
+    try {
+      await api('/api/system/settings', {
+        method: 'PUT',
+        body: { backupDir: '' },
+      });
+      toast('備份目錄已恢復為預設（data/backups）', 'success');
+      navigate('system-settings');
+    } catch (err) {
+      toast(err.message || '清除失敗', 'error');
+    }
+  });
+
+  // LINE（系統設定內嵌）
+  bindLineSettingsForm({
+    formId: 'sys-line-form',
+    onSaved: () => navigate('system-settings'),
+  });
+
   // Mail
   const mailForm = $('#mail-form');
   if (mailForm) {
@@ -9423,6 +10966,7 @@ function bindAuthUI() {
 }
 
 async function boot() {
+  initUserTheme();
   // 立刻顯示登入畫面，避免空白頁
   try {
     showAuth();

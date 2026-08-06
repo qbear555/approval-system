@@ -262,10 +262,58 @@ db.exec(`
   } catch (e) {
     console.warn('[db] pdf_layout_json migrate', e.message);
   }
+  // 電子手寫簽名檔（Base64 PNG/JPEG）
+  if (!userCols.includes('signature_image')) {
+    db.exec(`ALTER TABLE users ADD COLUMN signature_image TEXT`);
+  }
   const actionCols = db.prepare(`PRAGMA table_info(approval_actions)`).all().map((c) => c.name);
   if (!actionCols.includes('form_data')) {
     db.exec(`ALTER TABLE approval_actions ADD COLUMN form_data TEXT DEFAULT '{}'`);
   }
+  if (!actionCols.includes('signature_image')) {
+    db.exec(`ALTER TABLE approval_actions ADD COLUMN signature_image TEXT`);
+  }
+  if (!actionCols.includes('delegated_for_id')) {
+    db.exec(`ALTER TABLE approval_actions ADD COLUMN delegated_for_id INTEGER`);
+  }
+
+  // 簽核代理人設定表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_delegations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      delegate_user_id INTEGER NOT NULL,
+      start_time TEXT,
+      end_time TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (delegate_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_delegations_user ON user_delegations(user_id);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_delegations_delegate ON user_delegations(delegate_user_id);`);
+
+  // 系統進階稽核日誌表 (P3-1)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS system_audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      user_name TEXT DEFAULT '',
+      user_username TEXT DEFAULT '',
+      action_type TEXT NOT NULL,
+      category TEXT DEFAULT 'general',
+      description TEXT NOT NULL,
+      ip_address TEXT DEFAULT '',
+      target_id INTEGER,
+      detail_json TEXT DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_created ON system_audit_logs(created_at);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_user ON system_audit_logs(user_id);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_action ON system_audit_logs(action_type);`);
+
   const reqCols2 = db.prepare(`PRAGMA table_info(approval_requests)`).all().map((c) => c.name);
   if (!reqCols2.includes('approver_data_json')) {
     db.exec(`ALTER TABLE approval_requests ADD COLUMN approver_data_json TEXT DEFAULT '{}'`);

@@ -118,6 +118,9 @@ const ACTION_LABEL = {
   cancel: '取消',
   return: '退回',
   comment: '留言',
+  cosign: '加簽請託',
+  forward: '轉簽改派',
+  system: '動態跳關',
 };
 
 const AD_LABELS = {
@@ -918,10 +921,13 @@ function createSimpleTableKit(ctx, theme = {}) {
     y += headH;
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
+      const actorLabel = a.delegated_for_name
+        ? `${a.actor_name} (代 ${a.delegated_for_name})`
+        : (a.actor_name || '—');
       const cells = [
         `${a.step_order}${a.step_name ? ` · ${a.step_name}` : ''}`,
         ACTION_LABEL[a.action] || a.action,
-        a.actor_name || '—',
+        actorLabel,
         String(a.created_at || '').replace('T', ' ').slice(0, 16),
         a.comment || '—',
       ];
@@ -933,7 +939,7 @@ function createSimpleTableKit(ctx, theme = {}) {
         colW.comment,
       ];
       useFont();
-      let maxH = 22;
+      let maxH = a.signature_image ? 36 : 22;
       for (let j = 0; j < cells.length; j++) {
         const hh =
           doc.heightOfString(String(cells[j]), {
@@ -955,10 +961,20 @@ function createSimpleTableKit(ctx, theme = {}) {
             .lineWidth(0.35)
             .stroke();
         }
-        textAt(cells[j], x + 4, y + 5, widths[j] - 8, {
-          size: 9.5,
-          color: C.ink,
-        });
+        if (j === 2 && a.signature_image && typeof a.signature_image === 'string' && a.signature_image.startsWith('data:image/')) {
+          try {
+            const base64Data = a.signature_image.replace(/^data:image\/\w+;base64,/, '');
+            const imgBuf = Buffer.from(base64Data, 'base64');
+            doc.image(imgBuf, x + 2, y + 2, { fit: [widths[j] - 4, maxH - 4], align: 'center', valig: 'center' });
+          } catch {
+            textAt(cells[j], x + 4, y + 5, widths[j] - 8, { size: 9.5, color: C.ink });
+          }
+        } else {
+          textAt(cells[j], x + 4, y + 5, widths[j] - 8, {
+            size: 9.5,
+            color: C.ink,
+          });
+        }
         x += widths[j];
       }
       y += maxH;
@@ -2530,10 +2546,13 @@ function drawLeaveForm(ctx, request) {
 
     for (let i = 0; i < actions.length; i++) {
       const a = actions[i];
+      const actorLabel = a.delegated_for_name
+        ? `${a.actor_name} (代 ${a.delegated_for_name})`
+        : (a.actor_name || '—');
       const cells = [
         `${a.step_order}${a.step_name ? ` · ${a.step_name}` : ''}`,
         ACTION_LABEL[a.action] || a.action,
-        a.actor_name || '—',
+        actorLabel,
         String(a.created_at || '').replace('T', ' ').slice(0, 16),
         a.comment || '—',
       ];
@@ -2545,7 +2564,7 @@ function drawLeaveForm(ctx, request) {
         colW.comment,
       ];
       useFont();
-      let maxH = 24;
+      let maxH = a.signature_image ? 36 : 24;
       for (let j = 0; j < cells.length; j++) {
         const hh =
           doc.heightOfString(String(cells[j]), {
@@ -2567,10 +2586,20 @@ function drawLeaveForm(ctx, request) {
             .lineWidth(0.35)
             .stroke();
         }
-        textAt(cells[j], x + 4, y + 5, widths[j] - 8, {
-          size: 9.5,
-          color: C.ink,
-        });
+        if (j === 2 && a.signature_image && typeof a.signature_image === 'string' && a.signature_image.startsWith('data:image/')) {
+          try {
+            const base64Data = a.signature_image.replace(/^data:image\/\w+;base64,/, '');
+            const imgBuf = Buffer.from(base64Data, 'base64');
+            doc.image(imgBuf, x + 2, y + 2, { fit: [widths[j] - 4, maxH - 4], align: 'center', valig: 'center' });
+          } catch {
+            textAt(cells[j], x + 4, y + 5, widths[j] - 8, { size: 9.5, color: C.ink });
+          }
+        } else {
+          textAt(cells[j], x + 4, y + 5, widths[j] - 8, {
+            size: 9.5,
+            color: C.ink,
+          });
+        }
         x += widths[j];
       }
       y += maxH;
@@ -5072,6 +5101,35 @@ function writeApprovalPdf(request, destStream) {
           /* ignore */
         }
       }
+    }
+
+    function endPdfWithApprovedStamp(doc, request, useFont) {
+      if (request.watermarkText || request.requester_name) {
+        try {
+          const text = String(request.watermarkText || `檢視/列印防偽：${request.requester_name || '系統同仁'} · ${new Date().toISOString().replace('T', ' ').slice(0, 16)}`).trim();
+          const range = doc.bufferedPageRange();
+          for (let i = range.start; i < range.start + range.count; i++) {
+            doc.switchToPage(i);
+            doc.save();
+            if (fontReady) {
+              try { doc.font('CJK'); } catch {}
+            }
+            doc.fontSize(10).fillColor('#94a3b8').fillOpacity(0.14);
+            const centerX = doc.page.width / 2;
+            const centerY = doc.page.height / 2;
+            doc.rotate(-30, { origin: [centerX, centerY] });
+            for (let y = -200; y < doc.page.height + 400; y += 140) {
+              for (let x = -200; x < doc.page.width + 400; x += 240) {
+                doc.text(text, x, y, { lineBreak: false });
+              }
+            }
+            doc.restore();
+          }
+        } catch (e) {
+          console.warn('[pdf] watermark error:', e.message);
+        }
+      }
+      doc.end();
     }
 
     const pageW = doc.page.width;
