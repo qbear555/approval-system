@@ -6027,9 +6027,20 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   if (!fs.existsSync(abs)) return res.status(404).json({ error: '附件檔案不存在' });
 
   const downloadName = decodeUploadFilename(att.original_name || `file-${att.id}`);
+  const INLINE_PREVIEW_MIME = new Set([
+    'application/pdf',
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+  ]);
+  const inline = String(req.query.inline || '') === '1';
+  const disposition = contentDispositionAttachment(downloadName, `file-${att.id}`);
   res.setHeader(
     'Content-Disposition',
-    contentDispositionAttachment(downloadName, `file-${att.id}`)
+    inline && INLINE_PREVIEW_MIME.has(att.mime_type)
+      ? disposition.replace(/^attachment/i, 'inline')
+      : disposition
   );
   if (att.mime_type) res.setHeader('Content-Type', att.mime_type);
   fs.createReadStream(abs).pipe(res);
@@ -7564,6 +7575,22 @@ app.get('/api/stats', authMiddleware, (req, res) => {
 
   const pendingFinalNotify = getPendingFinalNotifyCount(uid);
 
+  const monthlyRequests = db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM approval_requests
+       WHERE requester_id = ? AND created_at >= date('now', 'start of month', 'localtime')`
+    )
+    .get(uid).c;
+  const avgRow = db
+    .prepare(
+      `SELECT AVG(julianday(completed_at) - julianday(created_at)) AS d
+       FROM approval_requests
+       WHERE requester_id = ? AND status = 'approved' AND completed_at IS NOT NULL`
+    )
+    .get(uid);
+  const avgApprovalDays =
+    avgRow?.d != null ? Math.round(avgRow.d * 10) / 10 : null;
+
   res.json({
     stats: {
       minePending,
@@ -7578,6 +7605,8 @@ app.get('/api/stats', authMiddleware, (req, res) => {
       pendingFinalNotify,
       users,
       workflows,
+      monthlyRequests,
+      avgApprovalDays,
     },
   });
 });

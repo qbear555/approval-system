@@ -1293,6 +1293,16 @@ async function renderDashboard(body) {
         go: 'mine',
         hint: '查看我的申請',
       })}
+      ${statCardHtml({
+        label: '本月申請',
+        value: stats.monthlyRequests ?? 0,
+        hint: '本月（1日起）我送出的申請數',
+      })}
+      ${statCardHtml({
+        label: '平均簽核天數',
+        value: stats.avgApprovalDays != null ? `${stats.avgApprovalDays} 天` : '—',
+        hint: '我已核准單據的平均簽核天數',
+      })}
 
       ${statCardHtml({
         label: '啟用中流程',
@@ -2993,6 +3003,49 @@ function bindHrLeaveTypeAutoRemain(root, labor) {
 }
 
 /** 人事簽核：申請人特休剩餘提示區塊 */
+let leaveBalanceReqSeq = 0;
+
+/** 新增申請頁：選到請假類流程時，載入並顯示我的請假餘額（僅供參考，實際以人事核定為準） */
+async function loadAndRenderLeaveBalance(box) {
+  if (!box) return;
+  const seq = ++leaveBalanceReqSeq;
+  box.innerHTML = `<div class="muted" style="font-size:0.85rem">載入請假餘額中…</div>`;
+  try {
+    const me = state.user?.id;
+    if (!me) {
+      box.innerHTML = '';
+      return;
+    }
+    const res = await api(`/api/users/${me}/labor`);
+    if (seq !== leaveBalanceReqSeq) return; // 使用者已切換流程，捨棄此結果
+    const balances = (res?.labor?.leaveBalances || []).filter(
+      (b) => b && (b.hasFixedQuota || b.canTrackManual)
+    );
+    if (!balances.length) {
+      box.innerHTML = '';
+      return;
+    }
+    box.innerHTML = `
+      <div class="card" style="background:#f0fdf4;border-color:#86efac;margin-bottom:12px;padding:12px">
+        <strong>我的請假餘額</strong>
+        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:0.88rem">
+          ${balances
+            .map(
+              (b) =>
+                `<span>${esc(b.name)}：剩餘 <strong style="color:#15803d">${esc(
+                  String(b.remainingLabel ?? b.remaining ?? '—')
+                )}</strong></span>`
+            )
+            .join('')}
+        </div>
+        <p class="muted" style="margin:6px 0 0;font-size:0.78rem">僅供參考；實際可休天數與扣除以人事核定為準。</p>
+      </div>`;
+  } catch (e) {
+    if (seq !== leaveBalanceReqSeq) return;
+    box.innerHTML = '';
+  }
+}
+
 function renderApplicantLaborBanner(labor, request) {
   if (!labor) return '';
   const sl = labor.specialLeave || {};
@@ -3264,64 +3317,6 @@ function bindFormTableEditors(root) {
       };
     });
   }
-}
-
-function renderAttachmentsBlock(attachments, opts = {}) {
-  const list = attachments || [];
-  if (!list.length) return '';
-  const ooOn = !!opts.onlyOfficeEnabled;
-  const reqStatus = String(opts.requestStatus || '');
-  const ooCanEdit = reqStatus === 'pending' || reqStatus === 'draft';
-  const fmtSize = (n) => {
-    if (!n) return '';
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  };
-  const getExtClass = (name) => {
-    const ext = (name || '').split('.').pop().toLowerCase();
-    if (ext === 'pdf') return 'pdf';
-    if (['doc', 'docx'].includes(ext)) return 'docx';
-    if (['xls', 'xlsx'].includes(ext)) return 'xlsx';
-    if (['png', 'jpg', 'jpeg', 'gif'].includes(ext)) return 'img';
-    return 'file';
-  };
-  return `
-    <h3 style="margin-top:20px;font-size:1.05rem;display:flex;align-items:center;gap:6px">📎 附件檔案 (${list.length})</h3>
-    ${
-      ooOn
-        ? `<p class="muted" style="font-size:0.82rem;margin:0 0 8px">${
-            ooCanEdit
-              ? 'Word／Excel 可「線上編輯」後自動回存（需 OnlyOffice）。'
-              : '簽核已完成，附件僅供「線上檢視」，無法再修改。'
-          }</p>`
-        : ''
-    }
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-      ${list
-        .map((a) => {
-          const office = ooOn && isOfficeFileName(a.original_name);
-          const ext = (a.original_name || '').split('.').pop().toLowerCase();
-          const badgeCls = getExtClass(a.original_name);
-          return `
-        <div class="attachment-pill">
-          <span class="file-type-badge ${badgeCls}">${esc(ext)}</span>
-          <button type="button" class="linkish" data-dl-att="${a.id}" data-dl-name="${esc(a.original_name || '')}" style="font-weight:500">${esc(a.original_name)}</button>
-          ${
-            office
-              ? `<button type="button" class="btn outline sm" data-oo-edit="${a.id}" style="padding:2px 8px;font-size:0.75rem">${
-                  ooCanEdit ? '線上編輯' : '線上檢視'
-                }</button>`
-              : ''
-          }
-          <span class="muted" style="font-size:0.78rem">
-            ${a.size_bytes ? `${fmtSize(a.size_bytes)}` : ''}
-            ${a.uploader_name ? ` · ${esc(a.uploader_name)}` : ''}
-          </span>
-        </div>`;
-        })
-        .join('')}
-    </div>`;
 }
 
 function collectFormData(root) {
@@ -3639,6 +3634,10 @@ function isOfficeFileName(name) {
   return /\.(docx?|xlsx?|pptx?|odt|ods|odp|csv|rtf)$/i.test(String(name || ''));
 }
 
+function isPreviewableAttachmentName(name) {
+  return /\.(pdf|png|jpe?g|gif|webp)$/i.test(String(name || ''));
+}
+
 function renderAttachmentsBlock(attachments, opts = {}) {
   const list = attachments || [];
   if (!list.length) return '';
@@ -3667,9 +3666,15 @@ function renderAttachmentsBlock(attachments, opts = {}) {
       ${list
         .map((a) => {
           const office = ooOn && isOfficeFileName(a.original_name);
+          const previewable = isPreviewableAttachmentName(a.original_name);
           return `
         <li style="margin:6px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
           <button type="button" class="linkish" data-dl-att="${a.id}" data-dl-name="${esc(a.original_name || '')}">${esc(a.original_name)}</button>
+          ${
+            previewable
+              ? `<button type="button" class="btn outline sm" data-preview-att="${a.id}" data-preview-name="${esc(a.original_name || '')}">預覽</button>`
+              : ''
+          }
           ${
             office
               ? `<button type="button" class="btn outline sm" data-oo-edit="${a.id}">${
@@ -3690,6 +3695,39 @@ function renderAttachmentsBlock(attachments, opts = {}) {
         })
         .join('')}
     </ul>`;
+}
+
+async function openAttachmentPreviewModal(attId, attName) {
+  openModal(`
+    <h3 style="margin-top:0">📎 ${esc(attName || '附件預覽')}</h3>
+    <div id="att-preview-box" class="muted" style="font-size:0.9rem">載入中…</div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button type="button" class="btn outline" data-close-modal>關閉</button>
+    </div>
+  `);
+  $('#modal-panel')?.classList.add('wide');
+  const box = $('#att-preview-box');
+  try {
+    const meta = await api(`/api/attachments/${attId}?inline=1`, {
+      expectBlob: true,
+      returnMeta: true,
+    });
+    const url = URL.createObjectURL(meta.blob);
+    const ct = String(meta.contentType || meta.blob.type || '').toLowerCase();
+    const name = String(meta.filename || attName || '');
+    const isPdf = ct.includes('pdf') || /\.pdf$/i.test(name);
+    if (box) {
+      if (isPdf) {
+        box.innerHTML = `<iframe src="${url}" title="附件預覽" style="width:100%;height:min(70vh,560px);border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>`;
+      } else {
+        box.innerHTML = `<img src="${url}" alt="附件預覽" style="max-width:100%;max-height:min(70vh,560px);border-radius:8px;display:block;margin:0 auto" />`;
+      }
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  } catch (err) {
+    if (box) box.innerHTML = '';
+    toast(err.message || '附件預覽失敗', 'error');
+  }
 }
 
 let onlyOfficeScriptPromise = null;
@@ -3959,6 +3997,7 @@ async function renderNewRequest(body) {
           </select>
         </div>
         <div id="wf-preview" class="muted"></div>
+        <div id="leave-balance-box"></div>
         <div class="field hidden" id="title-field-wrap">
           <label>主旨 *（僅一般簽呈）</label>
           <input name="title" id="req-title" maxlength="200" placeholder="請填寫簽呈主旨" />
@@ -4147,10 +4186,13 @@ async function renderNewRequest(body) {
     const w = workflows.find((x) => x.id === Number(sel.value));
     const titleWrap = $('#title-field-wrap');
     const titleInp = $('#req-title');
+    const leaveBox = $('#leave-balance-box');
     if (!w) {
       preview.innerHTML = '';
       formArea.classList.add('hidden');
       formFieldsBox.innerHTML = '';
+      if (leaveBox) leaveBox.innerHTML = '';
+      leaveBalanceReqSeq += 1;
       // 未選流程：先隱藏主旨，選定後再依類型顯示
       if (titleWrap) titleWrap.classList.add('hidden');
       if (titleInp) {
@@ -4161,6 +4203,14 @@ async function renderNewRequest(body) {
     }
 
     const leaveMode = isLeaveWorkflow(w);
+    if (leaveBox) {
+      if (leaveMode) {
+        loadAndRenderLeaveBalance(leaveBox);
+      } else {
+        leaveBox.innerHTML = '';
+        leaveBalanceReqSeq += 1;
+      }
+    }
     const needTitle = showTitleField(w);
     const plainTextMode = leaveMode || isItRepairWorkflow(w);
     if (titleWrap) titleWrap.classList.toggle('hidden', !needTitle);
@@ -5032,6 +5082,10 @@ async function renderDetail(body, id) {
         toast(e.message, 'error');
       }
     };
+  });
+  body.querySelectorAll('[data-preview-att]').forEach((btn) => {
+    btn.onclick = () =>
+      openAttachmentPreviewModal(btn.dataset.previewAtt, btn.dataset.previewName);
   });
   body.querySelectorAll('[data-oo-edit]').forEach((btn) => {
     btn.onclick = () => openOnlyOfficeEditor(btn.dataset.ooEdit, request.id);
