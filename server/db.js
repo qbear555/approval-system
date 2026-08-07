@@ -384,9 +384,12 @@ db.exec(`
   }
 
   // ── approval_actions：放寬 action 約束並允許系統動作 ──────────────────
-  // 原本 CHECK 僅允許 submit/approve/reject/cancel/return/comment，
-  // 但條件式分支跳關會寫入 action='system'、actor_id=0，
-  // CHECK 與外鍵（actor_id → users.id）皆會擋下，導致跳關直接拋例外。
+  // 原本 CHECK 僅允許 submit/approve/reject/cancel/return/comment，但程式碼
+  // 實際會寫入三種不在清單裡的動作，每一種都會直接拋 CHECK constraint failed：
+  //   - system ：條件式分支跳關、匯合、路徑判定（另外 actor_id=0 也違反外鍵）
+  //   - cosign ：加簽請託
+  //   - forward：轉簽改派
+  // 資料庫中這三種紀錄皆為 0 筆，代表這些功能自上線以來從未成功執行過。
   // SQLite 無法 ALTER CHECK，必須重建資料表。
   // 一併把 actor_id 改為可空（系統動作沒有操作者），step_order 亦放寬。
   {
@@ -394,7 +397,7 @@ db.exec(`
       db
         .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='approval_actions'`)
         .get()?.sql || '';
-    if (actionsSql && !/'system'/.test(actionsSql)) {
+    if (actionsSql && !/'cosign'/.test(actionsSql)) {
       db.exec('PRAGMA foreign_keys = OFF');
       try {
         db.exec('BEGIN');
@@ -406,29 +409,33 @@ db.exec(`
             step_name TEXT NOT NULL DEFAULT '',
             actor_id INTEGER,
             action TEXT NOT NULL CHECK(action IN
-              ('submit', 'approve', 'reject', 'cancel', 'return', 'comment', 'system')),
+              ('submit', 'approve', 'reject', 'cancel', 'return', 'comment',
+               'system', 'cosign', 'forward')),
             comment TEXT DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             form_data TEXT DEFAULT '{}',
             signature_image TEXT,
             delegated_for_id INTEGER,
+            node_id TEXT,
             FOREIGN KEY (request_id) REFERENCES approval_requests(id) ON DELETE CASCADE,
             FOREIGN KEY (actor_id) REFERENCES users(id)
           );
         `);
+        // node_id 由上面的 ALTER 先加上，重建時必須一併帶過去，
+        // 否則整欄資料會在 DROP 舊表時消失（下次啟動才又被 ALTER 加回空欄）
         db.exec(`
           INSERT INTO approval_actions_new
             (id, request_id, step_order, step_name, actor_id, action, comment,
-             created_at, form_data, signature_image, delegated_for_id)
+             created_at, form_data, signature_image, delegated_for_id, node_id)
           SELECT id, request_id, step_order, step_name, actor_id, action, comment,
-                 created_at, form_data, signature_image, delegated_for_id
+                 created_at, form_data, signature_image, delegated_for_id, node_id
           FROM approval_actions;
         `);
         db.exec(`DROP TABLE approval_actions;`);
         db.exec(`ALTER TABLE approval_actions_new RENAME TO approval_actions;`);
         db.exec(`CREATE INDEX IF NOT EXISTS idx_actions_request ON approval_actions(request_id);`);
         db.exec('COMMIT');
-        console.log('[db] approval_actions 已重建：允許 action=system、actor_id 可空');
+        console.log('[db] approval_actions 已重建：放寬 action 約束、actor_id 可空、保留 node_id');
       } catch (e) {
         try {
           db.exec('ROLLBACK');

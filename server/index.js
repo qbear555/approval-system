@@ -6814,9 +6814,53 @@ app.post('/api/requests/:id/cosign', authMiddleware, (req, res) => {
     if (detail.status !== 'pending') return res.status(400).json({ error: '此單據不在簽核中' });
 
     const steps = detail.steps || [];
-    const currentStep = findStepByOrder(steps, detail.current_step);
+    // 並行分支下 current_step 只指得到其中一關，改用這位使用者實際待簽的關卡
+    const currentStep = resolveActionableStep(detail, steps, req.user.id, id);
     if (!canUserApproveStep(req.user.id, currentStep, id)) {
       return res.status(403).json({ error: '您不是目前步驟的簽核人，無法進行加簽' });
+    }
+
+    // ── v2 圖模型：改這張單凍結的圖，不動流程定義 ──
+    const cosignGraph = getRequestGraph(detail);
+    if (cosignGraph) {
+      const anchorId = currentStep.nodeId || `n${currentStep.order}`;
+      const newNode = {
+        id: `cosign_${Date.now().toString(36)}`,
+        type: 'approval',
+        name: `加簽：${targetUser.name}`,
+        assignType: 'users',
+        mode: 'any',
+        approverIds: [targetId],
+        approverFields: [],
+        rejectTo: 'requester',
+      };
+      // v1 的 position=current 語意是「加簽者先簽，簽完才輪到原關卡」
+      const pos = position === 'after' ? 'after' : 'before';
+      const nextGraph = flowEngine.insertAdHoc(id, cosignGraph, anchorId, newNode, pos);
+      if (!nextGraph) return res.status(400).json({ error: '加簽失敗：流程圖更新錯誤' });
+
+      db.prepare(
+        `UPDATE approval_requests SET flow_snapshot_json = ?, updated_at = datetime('now','localtime') WHERE id = ?`
+      ).run(JSON.stringify(nextGraph), id);
+      flowEngine.syncCurrentStep(id, nextGraph);
+
+      db.prepare(
+        `INSERT INTO approval_actions (request_id, step_order, node_id, step_name, actor_id, action, comment, form_data)
+         VALUES (?, ?, ?, '加簽請託', ?, 'cosign', ?, '{}')`
+      ).run(
+        id, currentStep.order ?? null, anchorId, req.user.id,
+        `${req.user.name} 加簽給 ${targetUser.name}${comment ? `：${String(comment).trim()}` : ''}`
+      );
+
+      const afterG = getRequestDetail(id);
+      notifyCurrentApprovers(afterG, 'pending', req.user.name);
+      logAudit(req, {
+        action_type: 'cosign_request',
+        category: 'approval',
+        description: `加簽請託給 ${targetUser.name} (單號 #${id})`,
+        target_id: id,
+      });
+      return res.json({ ok: true, message: `已成功加簽給 ${targetUser.name}`, request: afterG });
     }
 
     const curOrder = Number(detail.current_step);
@@ -6913,9 +6957,50 @@ app.post('/api/requests/:id/forward', authMiddleware, (req, res) => {
 
     const steps = detail.steps || [];
     const curOrder = Number(detail.current_step);
-    const currentStep = findStepByOrder(steps, curOrder);
+    // 並行分支下 current_step 只指得到其中一關，改用這位使用者實際待簽的關卡
+    const currentStep = resolveActionableStep(detail, steps, req.user.id, id);
     if (!canUserApproveStep(req.user.id, currentStep, id)) {
       return res.status(403).json({ error: '您不是目前步驟的簽核人，無法進行轉簽' });
+    }
+
+    // ── v2 圖模型：轉簽不改流程結構，只換該節點的簽核人 ──
+    const fwdGraph = getRequestGraph(detail);
+    if (fwdGraph) {
+      const anchorId = currentStep.nodeId || `n${currentStep.order}`;
+      const nextGraph = {
+        ...fwdGraph,
+        nodes: fwdGraph.nodes.map((n) =>
+          n.id === anchorId
+            ? {
+                ...n,
+                approverIds: [targetId],
+                mode: 'any',
+                name: /改派:/.test(n.name || '') ? n.name : `${n.name} (改派: ${targetUser.name})`,
+              }
+            : n
+        ),
+      };
+      db.prepare(
+        `UPDATE approval_requests SET flow_snapshot_json = ?, updated_at = datetime('now','localtime') WHERE id = ?`
+      ).run(JSON.stringify(nextGraph), id);
+
+      db.prepare(
+        `INSERT INTO approval_actions (request_id, step_order, node_id, step_name, actor_id, action, comment, form_data)
+         VALUES (?, ?, ?, '轉簽改派', ?, 'forward', ?, '{}')`
+      ).run(
+        id, currentStep.order ?? null, anchorId, req.user.id,
+        `${req.user.name} 轉簽改派給 ${targetUser.name}${comment ? `：${String(comment).trim()}` : ''}`
+      );
+
+      const afterG = getRequestDetail(id);
+      notifyCurrentApprovers(afterG, 'pending', req.user.name);
+      logAudit(req, {
+        action_type: 'forward_request',
+        category: 'approval',
+        description: `轉簽改派給 ${targetUser.name} (單號 #${id})`,
+        target_id: id,
+      });
+      return res.json({ ok: true, message: `已成功轉簽給 ${targetUser.name}`, request: afterG });
     }
 
     const updatedSteps = steps.map((s) => {

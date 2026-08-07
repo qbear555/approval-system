@@ -120,7 +120,9 @@ const ACTION_LABEL = {
   comment: '留言',
   cosign: '加簽請託',
   forward: '轉簽改派',
-  system: '動態跳關',
+  // v1 只有條件跳關，v2 還有匯合與路徑判定，統一用中性標籤，
+  // 具體發生什麼由「意見」欄的內容說明
+  system: '系統',
 };
 
 const AD_LABELS = {
@@ -925,7 +927,7 @@ function createSimpleTableKit(ctx, theme = {}) {
         ? `${a.actor_name} (代 ${a.delegated_for_name})`
         : (a.actor_name || '—');
       const cells = [
-        `${a.step_order}${a.step_name ? ` · ${a.step_name}` : ''}`,
+        formatStepCell(a),
         ACTION_LABEL[a.action] || a.action,
         actorLabel,
         String(a.created_at || '').replace('T', ' ').slice(0, 16),
@@ -1759,6 +1761,17 @@ function pickFormValue(formData, formFields, ids, labelRe) {
 }
 
 /** 從簽核歷程取某步驟核准人（多人則以、串接）；matcher 可為 RegExp 或 (stepName)=>boolean */
+/**
+ * 簽核歷程「步驟」欄的顯示文字。
+ * v2 圖模型的系統動作（匯合、路徑判定）不屬於任何編號關卡，
+ * step_order 為 NULL，直接內插會在 PDF 上印出「null · 匯合」。
+ */
+function formatStepCell(a) {
+  const name = a.step_name ? String(a.step_name) : '';
+  if (a.step_order == null || a.step_order === '') return name || '—';
+  return `${a.step_order}${name ? ` · ${name}` : ''}`;
+}
+
 function actorsForStep(actions, matcher) {
   const match =
     typeof matcher === 'function'
@@ -2550,7 +2563,7 @@ function drawLeaveForm(ctx, request) {
         ? `${a.actor_name} (代 ${a.delegated_for_name})`
         : (a.actor_name || '—');
       const cells = [
-        `${a.step_order}${a.step_name ? ` · ${a.step_name}` : ''}`,
+        formatStepCell(a),
         ACTION_LABEL[a.action] || a.action,
         actorLabel,
         String(a.created_at || '').replace('T', ' ').slice(0, 16),

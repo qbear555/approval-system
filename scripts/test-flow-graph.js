@@ -50,9 +50,13 @@ const approvalNode = (id, name, extra = {}) => ({
 });
 
 const statusOf = (rid) => db.prepare('SELECT status, current_step FROM approval_requests WHERE id = ?').get(rid);
-const sysComments = (rid) =>
-  db.prepare(`SELECT comment FROM approval_actions WHERE request_id = ? AND action='system' ORDER BY id`)
-    .all(rid).map(r => r.comment);
+/** 系統稽核紀錄：斷言用 node_id 而非文字內容，避免改文案就壞測試 */
+const sysActions = (rid) =>
+  db.prepare(
+    `SELECT node_id, step_name, comment FROM approval_actions
+     WHERE request_id = ? AND action='system' ORDER BY id`
+  ).all(rid);
+const sysForNode = (rid, nodeId) => sysActions(rid).filter((a) => a.node_id === nodeId);
 
 cleanup();
 console.log('圖模型執行引擎測試');
@@ -101,7 +105,7 @@ try {
     engine.start(small, g, { amount: 5000 });
     r = engine.approve(small, g, 'A', { amount: 5000 });
     check('小額 → 跳過財務直達總經理', r.pending, ['G']);
-    check('有記錄條件分支決策', sysComments(small).some(c => /條件分支/.test(c)), true);
+    check('A 有留下路徑判定的稽核紀錄', sysForNode(small, 'A').length, 1);
   }
 
   /* ── 3. 並行分支與匯合 ───────────────────────────── */
@@ -127,7 +131,8 @@ try {
     check('尚未結案', statusOf(rid).status, 'pending');
     r = engine.approve(rid, g, 'F', {});
     check('兩邊都完成 → 通過匯合到總經理', r.pending, ['G']);
-    check('有記錄匯合', sysComments(rid).some(c => /匯合/.test(c)), true);
+    check('匯合節點有留下稽核紀錄', sysForNode(rid, 'J').length, 1);
+    check('匯合紀錄的步驟名稱不是內部 id', sysForNode(rid, 'J')[0].step_name, '匯合（全部）');
     r = engine.approve(rid, g, 'G', {});
     check('總經理核准 → 結案', r.status, 'approved');
   }

@@ -115,6 +115,19 @@ function makeEngine(db) {
     ),
   };
 
+  /**
+   * 節點的顯示名稱。
+   * join／start／end 沒有 name 欄位，直接用 node.name 會把節點 id
+   * 印進 PDF 與簽核歷程（出現「null · j」這種內部識別碼）。
+   */
+  function nodeLabel(node, fallbackId) {
+    if (!node) return fallbackId || '';
+    if (node.type === 'join') return node.mode === 'any' ? '匯合（任一）' : '匯合（全部）';
+    if (node.type === 'start') return '申請人';
+    if (node.type === 'end') return '完成';
+    return node.name || node.id || fallbackId || '';
+  }
+
   /** 節點索引 */
   function indexGraph(graph) {
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -187,8 +200,8 @@ function makeEngine(db) {
 
       q.insertState.run(requestId, nodeId, 'approved', 0);
       q.sysAction.run(
-        requestId, null, nodeId, '匯合',
-        `[匯合] ${done.length}/${sources.length} 條分支已完成，繼續後續流程`
+        requestId, null, nodeId, nodeLabel(node, nodeId),
+        `${done.length}/${sources.length} 條分支已完成，繼續後續流程`
       );
       traverseFrom(requestId, graph, idx, nodeId, formData, visited);
       return;
@@ -204,23 +217,25 @@ function makeEngine(db) {
     const passed = outs.filter((e) => evaluateEdge(e, formData));
     const hadConditions = outs.some((e) => e.condition);
 
+    const label = (id) => nodeLabel(idx.byId.get(id), id);
+
     if (hadConditions) {
-      const taken = passed.map((e) => `${e.to}${e.condition ? `（${describeCondition(e.condition)}）` : ''}`);
+      const taken = passed.map((e) => `${label(e.to)}${e.condition ? `（${describeCondition(e.condition)}）` : ''}`);
       const skipped = outs
         .filter((e) => !passed.includes(e))
-        .map((e) => `${e.to}（${describeCondition(e.condition)} 不成立）`);
+        .map((e) => `${label(e.to)}（${describeCondition(e.condition)} 不成立）`);
       q.sysAction.run(
-        requestId, null, nodeId, idx.byId.get(nodeId)?.name || nodeId,
-        `[條件分支] 走：${taken.join('、') || '無'}` +
-          (skipped.length ? `；未走：${skipped.join('、')}` : '')
+        requestId, null, nodeId, label(nodeId),
+        `路徑判定 → ${taken.join('、') || '無'}` +
+          (skipped.length ? `；略過 ${skipped.join('、')}` : '')
       );
     }
 
     if (!passed.length && outs.length) {
       // 所有出邊條件都不成立 → 這條分支走不下去，視為結束
       q.sysAction.run(
-        requestId, null, nodeId, idx.byId.get(nodeId)?.name || nodeId,
-        '[條件分支] 所有後續路徑條件皆不成立，此分支結束'
+        requestId, null, nodeId, label(nodeId),
+        '所有後續路徑條件皆不成立，此分支結束'
       );
       return;
     }
@@ -296,8 +311,8 @@ function makeEngine(db) {
     for (const id of downstream) del.run(requestId, id);
     q.insertState.run(requestId, target, 'pending', 0);
     q.sysAction.run(
-      requestId, null, nodeId, node?.name || nodeId,
-      `[駁回退件] 退回「${idx.byId.get(target)?.name || target}」重新簽核`
+      requestId, null, nodeId, nodeLabel(node, nodeId),
+      `駁回退件 → 退回「${nodeLabel(idx.byId.get(target), target)}」重新簽核`
     );
     syncCurrentStep(requestId, graph);
     return { done: false, status: 'pending', pending: pendingNodes(requestId) };
@@ -329,15 +344,58 @@ function makeEngine(db) {
     return out;
   }
 
-  /** 執行期動態插入節點（加簽／轉簽用） */
-  function insertAdHoc(requestId, graph, afterNodeId, node) {
-    const clean = flowGraph.normalizeGraph({
-      version: 2,
-      nodes: [...graph.nodes, node],
-      edges: [...graph.edges, { from: afterNodeId, to: node.id }],
-    });
+  /**
+   * 執行期動態插入節點（加簽／轉簽）。
+   *
+   * 加簽會改變流程結構，但不能改動流程「定義」——只改這張單據凍結的圖，
+   * 否則別的單據會被連帶影響。回傳新圖，呼叫端負責寫回 flow_snapshot_json。
+   *
+   * position:
+   *   'before'（對應 v1 的 current）：加簽者先簽，簽完才輪到原關卡
+   *     P → X  改成  P → C → X，X 退回未啟用
+   *   'after'：原關卡簽完才輪到加簽者
+   *     X → T  改成  X → C → T
+   *   'parallel'：與原關卡同時進行（轉簽的會簽情境）
+   *     P → X 之外再加 P → C，兩者並行
+   */
+  function insertAdHoc(requestId, graph, anchorNodeId, node, position = 'after') {
+    const anchor = graph.nodes.find((n) => n.id === anchorNodeId);
+    if (!anchor) return null;
+
+    const nodes = [...graph.nodes, { ...node, ui: node.ui || { ...(anchor.ui || { x: 0, y: 0 }) } }];
+    let edges = [...graph.edges];
+
+    if (position === 'before') {
+      const ins = edges.filter((e) => e.to === anchorNodeId);
+      edges = edges.filter((e) => e.to !== anchorNodeId);
+      for (const e of ins) edges.push({ ...e, to: node.id });
+      edges.push({ from: node.id, to: anchorNodeId });
+    } else if (position === 'parallel') {
+      const ins = graph.edges.filter((e) => e.to === anchorNodeId);
+      for (const e of ins) edges.push({ from: e.from, to: node.id, ...(e.condition ? { condition: e.condition } : {}) });
+      // 與原關卡並行，兩條路徑各自往下走
+      const outs = graph.edges.filter((e) => e.from === anchorNodeId);
+      for (const e of outs) edges.push({ from: node.id, to: e.to });
+    } else {
+      const outs = edges.filter((e) => e.from === anchorNodeId);
+      edges = edges.filter((e) => e.from !== anchorNodeId);
+      for (const e of outs) edges.push({ ...e, from: node.id });
+      edges.push({ from: anchorNodeId, to: node.id });
+    }
+
+    const clean = flowGraph.normalizeGraph({ version: 2, nodes, edges });
     if (!clean) return null;
-    q.insertState.run(requestId, node.id, 'pending', 1);
+
+    if (position === 'before') {
+      // 原關卡讓出當下的待簽狀態，等加簽者簽完再由引擎重新啟用
+      db.prepare(`DELETE FROM request_node_states WHERE request_id = ? AND node_id = ?`)
+        .run(requestId, anchorNodeId);
+      q.insertState.run(requestId, node.id, 'pending', 1);
+    } else if (position === 'parallel') {
+      q.insertState.run(requestId, node.id, 'pending', 1);
+    }
+    // 'after' 不需要立即建立狀態：原關卡核准後引擎會沿新的邊啟用它
+
     return clean;
   }
 

@@ -197,6 +197,89 @@ function cleanup() {
       check('升級後新單走圖引擎', ns, ['a']);
     }
 
+    console.log('\n[9] 加簽：執行期動態插入節點，只改這張單的圖');
+    {
+      const g = {
+        version: 2,
+        nodes: [{ id: 'start', type: 'start' },
+                { id: 'a', type: 'approval', name: '關卡A', assignType: 'users', mode: 'any', approverIds: [L.id] },
+                { id: 'b', type: 'approval', name: '關卡B', assignType: 'users', mode: 'any', approverIds: [G.id] },
+                { id: 'end', type: 'end' }],
+        edges: [{ from: 'start', to: 'a' }, { from: 'a', to: 'b' }, { from: 'b', to: 'end' }],
+      };
+      const wf2 = await api('/api/workflows', { method: 'POST',
+        body: JSON.stringify({ name: PREFIX + '加簽流程', flow: g, formFields: [] }) }, tAdmin);
+      const r2 = await api('/api/requests', { method: 'POST',
+        body: JSON.stringify({ workflow_id: wf2.workflow.id, title: PREFIX + '加簽單', content: 'x', form_data: {} }) }, tAdmin);
+      const rid = r2.request.id;
+      const pend = () => db.prepare(`SELECT node_id FROM request_node_states WHERE request_id=? AND state='pending' ORDER BY node_id`).all(rid).map(x => x.node_id);
+      check('起始停在 A', pend(), ['a']);
+
+      // A 的簽核人 L 加簽給 F（position=current → 加簽者先簽）
+      const tL2 = await login(L.username);
+      await api(`/api/requests/${rid}/cosign`, { method: 'POST',
+        body: JSON.stringify({ target_user_id: F.id, position: 'current', comment: '請協助確認' }) }, tL2);
+      const p1 = pend();
+      check('加簽後改由加簽者待簽（A 讓出）', p1.length, 1);
+      check('待簽的是新插入的加簽節點', /^cosign_/.test(p1[0]), true);
+
+      const wfRow = db.prepare('SELECT flow_json FROM workflows WHERE id=?').get(wf2.workflow.id);
+      check('流程定義未被改動（只改單據的圖）', JSON.parse(wfRow.flow_json).nodes.length, 4);
+      const reqGraph = JSON.parse(db.prepare('SELECT flow_snapshot_json FROM approval_requests WHERE id=?').get(rid).flow_snapshot_json);
+      check('單據的圖多了一個節點', reqGraph.nodes.length, 5);
+
+      // 加簽者簽完 → 回到原關卡 A
+      const tF2 = await login(F.username);
+      await api(`/api/requests/${rid}/action`, { method: 'POST', body: JSON.stringify({ action: 'approve', comment: '確認過了' }) }, tF2);
+      check('加簽簽完 → 輪回原關卡 A', pend(), ['a']);
+
+      // A 簽完 → B
+      await api(`/api/requests/${rid}/action`, { method: 'POST', body: JSON.stringify({ action: 'approve' }) }, tL2);
+      check('A 簽完 → 進入 B', pend(), ['b']);
+      const tG2 = await login(G.username);
+      await api(`/api/requests/${rid}/action`, { method: 'POST', body: JSON.stringify({ action: 'approve' }) }, tG2);
+      check('全部簽完 → 結案', db.prepare('SELECT status FROM approval_requests WHERE id=?').get(rid).status, 'approved');
+
+      const adHoc = db.prepare('SELECT COUNT(*) c FROM request_node_states WHERE request_id=? AND ad_hoc=1').get(rid).c;
+      check('加簽節點有標記 ad_hoc', adHoc, 1);
+    }
+
+    console.log('\n[10] 轉簽：換簽核人但不改流程結構');
+    {
+      const g = {
+        version: 2,
+        nodes: [{ id: 'start', type: 'start' },
+                { id: 'a', type: 'approval', name: '關卡A', assignType: 'users', mode: 'any', approverIds: [L.id] },
+                { id: 'end', type: 'end' }],
+        edges: [{ from: 'start', to: 'a' }, { from: 'a', to: 'end' }],
+      };
+      const wf3 = await api('/api/workflows', { method: 'POST',
+        body: JSON.stringify({ name: PREFIX + '轉簽流程', flow: g, formFields: [] }) }, tAdmin);
+      const r3 = await api('/api/requests', { method: 'POST',
+        body: JSON.stringify({ workflow_id: wf3.workflow.id, title: PREFIX + '轉簽單', content: 'x', form_data: {} }) }, tAdmin);
+      const rid = r3.request.id;
+
+      const tL3 = await login(L.username);
+      await api(`/api/requests/${rid}/forward`, { method: 'POST',
+        body: JSON.stringify({ target_user_id: G.id, comment: '我不便簽核' }) }, tL3);
+
+      const graph = JSON.parse(db.prepare('SELECT flow_snapshot_json FROM approval_requests WHERE id=?').get(rid).flow_snapshot_json);
+      check('節點數不變（無結構變動）', graph.nodes.length, 3);
+      const nodeA = graph.nodes.find(n => n.id === 'a');
+      check('簽核人已改派', nodeA.approverIds, [G.id]);
+      check('關卡名稱標註改派', /改派/.test(nodeA.name), true);
+
+      // 原簽核人已無權限，新簽核人可簽
+      let denied = false;
+      try {
+        await api(`/api/requests/${rid}/action`, { method: 'POST', body: JSON.stringify({ action: 'approve' }) }, tL3);
+      } catch (e) { denied = /403/.test(e.message); }
+      check('原簽核人已無法簽核', denied, true);
+      const tG3 = await login(G.username);
+      await api(`/api/requests/${rid}/action`, { method: 'POST', body: JSON.stringify({ action: 'approve' }) }, tG3);
+      check('改派對象可簽核並結案', db.prepare('SELECT status FROM approval_requests WHERE id=?').get(rid).status, 'approved');
+    }
+
   } catch (e) {
     fail++; failures.push('測試中斷：' + e.message);
     console.error('\n❌ 測試中斷：', e.message);
