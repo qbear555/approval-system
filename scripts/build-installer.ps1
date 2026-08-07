@@ -5,7 +5,14 @@
 
 .USAGE
   powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1
+
+.PARAMETER SkipBootCheck
+  略過啟動驗證。啟動驗證失敗時建置會中止，此參數可在確知環境問題
+  （例如埠被占用）時強制產包，請自行確認可啟動後再發布。
 #>
+param(
+  [switch]$SkipBootCheck
+)
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -143,9 +150,26 @@ try {
 }
 
 # --- Verify ---
+if ($SkipBootCheck) {
+  Write-Host '[5/6] Verify boot... 已略過（-SkipBootCheck）' -ForegroundColor Yellow
+  Write-Host '  ** 此安裝包未經啟動驗證，發布前請自行確認 **' -ForegroundColor Yellow
+} else {
 Write-Host '[5/6] Verify boot...' -ForegroundColor Yellow
-Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+# 清掉佔用驗證埠的殘留行程。
+# 舊寫法對任何佔用者無條件 Stop-Process -Force，若使用者剛好有別的程式
+# 在這個埠上（開發伺服器、其他服務），會被建置腳本直接強制砍掉。
+# 改為只清理 node，其他程式一律中止建置並要求使用者自行處理。
+foreach ($c in @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+  $owner = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
+  if (-not $owner) { continue }
+  if ($owner.ProcessName -eq 'node') {
+    Write-Host ("  清除殘留的 node 行程 PID {0}" -f $owner.Id) -ForegroundColor DarkGray
+    Stop-Process -Id $owner.Id -Force -ErrorAction SilentlyContinue
+  } else {
+    throw ("連接埠 $Port 被 {0}（PID {1}）占用，不是建置殘留的 node 行程。" -f $owner.ProcessName, $owner.Id) +
+          "建置已中止，未動到該程式。請自行關閉後重試，或加 -SkipBootCheck 略過啟動驗證。"
+  }
+}
 Start-Sleep -Seconds 1
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -183,11 +207,12 @@ try {
   } else {
     Write-Host ''
     Write-Host '  ****************************************************' -ForegroundColor Red
-    Write-Host ('  ** 警告：{0} 秒內無法啟動，未通過啟動驗證' -f [int]$sw.Elapsed.TotalSeconds) -ForegroundColor Red
+    Write-Host ('  ** {0} 秒內無法啟動，未通過啟動驗證' -f [int]$sw.Elapsed.TotalSeconds) -ForegroundColor Red
     Write-Host ("  ** 原因：$lastErr") -ForegroundColor Red
-    Write-Host '  ** 仍會繼續打包，但請勿直接發布，先自行確認可啟動' -ForegroundColor Red
     Write-Host '  ****************************************************' -ForegroundColor Red
     Write-Host ''
+    # 啟動不了的安裝包沒有發布價值，直接中止，不產生半成品
+    throw "啟動驗證失敗（$lastErr）。建置已中止，未產生安裝包。確認要略過請加 -SkipBootCheck 參數。"
   }
 } finally {
   if ($proc -and -not $proc.HasExited) {
@@ -197,6 +222,7 @@ try {
   Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 }
+} # end if (-not $SkipBootCheck)
 
 # Remove DBs created during verify (empty test DB)
 Get-ChildItem (Join-Path $appDir 'data') -Recurse -ErrorAction SilentlyContinue |
