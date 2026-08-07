@@ -82,14 +82,26 @@ function feValidate(g) {
     if (out.has(e.from)) out.get(e.from).push(e);
     if (inn.has(e.to)) inn.get(e.to).push(e);
   }
-  const dynamicAssign = ['dept_head', 'department', 'form_user', 'users_pick', 'cosign_pick'];
+  // 需要事先指定人員的類型，與後端 validateStepTemplate 保持一致：
+  //   users      指定人員 → 就是簽核人名單
+  //   users_pick 申請人自選 → approverIds 是「可選名單」，空的話申請人
+  //              無人可選，送單與存檔都會被後端擋下
+  // 其餘（dept_head／department／form_user／cosign_pick）於送單當下才決定人選。
+  const needApprovers = ['users', 'users_pick'];
   for (const n of g.nodes) {
     const label = n.name || n.id;
     if (n.type !== 'start' && !inn.get(n.id).length) errs.push('「' + label + '」沒有任何連入路徑');
     if (n.type !== 'end' && !out.get(n.id).length) errs.push('「' + label + '」沒有任何連出路徑');
     if (n.type === 'join' && inn.get(n.id).length < 2) errs.push('匯合節點至少需要兩條連入路徑');
-    if (n.type === 'approval' && !(n.approverIds || []).length && !dynamicAssign.includes(n.assignType)) {
-      errs.push('「' + label + '」尚未指定簽核人');
+    if (n.type === 'approval' && needApprovers.includes(n.assignType) && !(n.approverIds || []).length) {
+      errs.push(
+        n.assignType === 'users_pick'
+          ? '「' + label + '」是申請人自選，但可選名單是空的，請至少勾選一位候選簽核人'
+          : '「' + label + '」尚未指定簽核人'
+      );
+    }
+    if (n.type === 'approval' && n.assignType === 'department' && !String(n.department || '').trim()) {
+      errs.push('「' + label + '」請指定簽核單位／部門');
     }
   }
   if (starts.length === 1) {
