@@ -6050,9 +6050,12 @@ async function renderWorkflows(body) {
       await loadUsers();
       openFlowEditor(w, async (graph) => {
         try {
+          // api() 內部已會 JSON.stringify，這裡傳物件即可。
+          // 先 stringify 會變成雙重編碼，body-parser 解析失敗後由 express
+          // 預設錯誤處理回傳 HTML，前端取不到 error 欄位只會看到「請求失敗 (400)」
           await api(`/api/workflows/${w.id}`, {
             method: 'PUT',
-            body: JSON.stringify({ flow: graph }),
+            body: { flow: graph },
           });
           closeModal();
           toast('流程圖已儲存，此流程已改用圖模型執行');
