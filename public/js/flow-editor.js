@@ -243,13 +243,8 @@ function openFlowEditor(workflow, onSave) {
       }
     });
     svg.innerHTML = html;
-    svg.querySelectorAll('path[data-edge]').forEach((p) => {
-      p.onclick = (ev) => {
-        ev.stopPropagation();
-        selected = { kind: 'edge', index: Number(p.dataset.edge) };
-        render();
-      };
-    });
+    // 連線的選取統一由 canvas 的 pointerdown 處理（見該處註解），
+    // 這裡不再掛 click，避免兩套選取邏輯不一致
   }
 
   function userCheckboxes(n) {
@@ -390,6 +385,16 @@ function openFlowEditor(workflow, onSave) {
   }
 
   canvas.onpointerdown = (ev) => {
+    // 連線必須在 pointerdown 就處理：pointerdown 早於 click，
+    // 若這裡先當成「點空白處」而呼叫 render()，SVG 會整個重建，
+    // 那條 path 在 click 觸發前就已從 DOM 移除，等於永遠選不到連線。
+    const path = ev.target.closest ? ev.target.closest('path[data-edge]') : null;
+    if (path) {
+      selected = { kind: 'edge', index: Number(path.dataset.edge) };
+      render();
+      return;
+    }
+
     const el = ev.target.closest ? ev.target.closest('.fe-node') : null;
     if (!el) {
       if (linkFrom) {
