@@ -1781,6 +1781,8 @@ input[type="checkbox"], input[type="radio"] {
   #step-form-fields {
     grid-template-columns: 1fr !important;
   }
+}
+
 /* Theme Selector Buttons - Standardized System Button Style */
 .theme-grid {
   display: flex;
@@ -1804,3 +1806,218 @@ input[type="checkbox"], input[type="radio"] {
 
 
 
+
+/* ============================================================
+   簽核流程圖（flow chart）
+   共用於：申請詳情、新增申請預覽、流程編輯器
+   ============================================================ */
+.flow-chart {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  margin: 18px 0;
+  padding: 4px;
+}
+
+/* 節點 */
+.flow-node {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 132px;
+  max-width: 210px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.flow-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
+.flow-node .fn-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  line-height: 1.3;
+  color: var(--text);
+}
+.flow-node .fn-no {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #e2e8f0;
+  color: #475569;
+}
+.flow-node .fn-name {
+  word-break: break-word;
+}
+.flow-node .fn-who {
+  margin-top: 5px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+  word-break: break-word;
+}
+.flow-node .fn-meta {
+  margin-top: 5px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* 標籤（會簽／自選／條件式…） */
+.flow-node .fn-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.flow-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  white-space: nowrap;
+}
+.flow-tag.cond { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.flow-tag.cosign { background: #ffe4e6; color: #9f1239; border-color: #fecdd3; }
+.flow-tag.optional { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+
+/* 狀態：完成 */
+.flow-node.is-done {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+}
+.flow-node.is-done .fn-no { background: var(--success); color: #fff; }
+.flow-node.is-done .fn-head { color: #065f46; }
+
+/* 狀態：進行中 */
+.flow-node.is-current {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
+}
+.flow-node.is-current .fn-no { background: var(--warning); color: #fff; }
+.flow-node.is-current .fn-head { color: #92400e; }
+.flow-node.is-current::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--warning);
+  animation: pulse-dot 1.5s infinite;
+}
+
+/* 狀態：駁回 */
+.flow-node.is-rejected {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+.flow-node.is-rejected .fn-no { background: var(--danger); color: #fff; }
+.flow-node.is-rejected .fn-head { color: #991b1b; }
+
+/* 狀態：已跳過 */
+.flow-node.is-skipped {
+  border-style: dashed;
+  background: #f8fafc;
+  opacity: 0.72;
+}
+.flow-node.is-skipped .fn-head { color: var(--muted); }
+
+/* 狀態：未開始 */
+.flow-node.is-todo { background: #f8fafc; }
+.flow-node.is-todo .fn-head { color: #475569; }
+
+/* 起訖節點 */
+.flow-node.is-start,
+.flow-node.is-end {
+  min-width: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  align-self: center;
+}
+.flow-node.is-start { border-color: #bfdbfe; background: #eff6ff; }
+.flow-node.is-start .fn-head { color: #1d4ed8; }
+.flow-node.is-end.is-done { border-color: #6ee7b7; }
+.flow-node.is-end.is-rejected { border-color: #fca5a5; }
+
+/* 連接箭頭 */
+.flow-arrow {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 0 3px;
+  color: #cbd5e1;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+.flow-arrow.is-done { color: var(--success); }
+.flow-arrow.is-cond { color: var(--warning); }
+.flow-arrow::before { content: '→'; }
+
+/* 圖例 */
+.flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.flow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.flow-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1.5px solid var(--border);
+  display: inline-block;
+}
+.flow-legend i.done { background: #ecfdf5; border-color: #6ee7b7; }
+.flow-legend i.current { background: #fffbeb; border-color: #f59e0b; }
+.flow-legend i.todo { background: #f8fafc; border-color: #cbd5e1; }
+.flow-legend i.skipped { background: #f8fafc; border-color: #cbd5e1; border-style: dashed; }
+.flow-legend i.rejected { background: #fef2f2; border-color: #fca5a5; }
+
+/* 直向排列（窄容器／手機）*/
+@media (max-width: 760px) {
+  .flow-chart { flex-direction: column; align-items: stretch; }
+  .flow-node,
+  .flow-node.is-start,
+  .flow-node.is-end { max-width: none; width: 100%; align-self: stretch; }
+  .flow-node.is-start,
+  .flow-node.is-end { border-radius: 10px; }
+  .flow-arrow {
+    min-width: 0;
+    height: 20px;
+    padding: 2px 0;
+    transform: rotate(90deg);
+  }
+}

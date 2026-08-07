@@ -2276,6 +2276,221 @@ function stepAssignLabel(s) {
   return n ? `指定 ${n} 人` : '指定人員';
 }
 
+/* ============================================================
+   簽核流程圖（共用元件）
+   使用處：申請詳情、新增申請預覽、流程編輯器預覽
+   ============================================================ */
+
+/** 條件式分支 → 人看得懂的說明文字 */
+function flowConditionText(s) {
+  const c = s && s.condition;
+  if (!c || !c.enabled) return '';
+  const opText = {
+    '>=': '≥',
+    '>': '>',
+    '<=': '≤',
+    '<': '<',
+    '==': '=',
+    '!=': '≠',
+    contains: '包含',
+  };
+  const op = opText[c.operator] || c.operator || '';
+  const field = c.fieldId || '';
+  const val = c.value != null ? String(c.value) : '';
+  const cond = `${field} ${op} ${val}`.trim();
+  return c.action === 'skip' ? `符合「${cond}」則跳過` : `僅當「${cond}」才需簽核`;
+}
+
+/** 單一步驟 → 標籤陣列（會簽／自選／條件式…） */
+function flowStepTags(s) {
+  const tags = [];
+  const condText = flowConditionText(s);
+  if (condText) tags.push({ cls: 'cond', text: `🔀 條件式`, title: condText });
+  if (s.assignType === 'cosign_pick') {
+    tags.push({ cls: 'cosign', text: '會簽', title: '申請時可勾選多位會簽人員，皆須核准' });
+    tags.push({ cls: 'optional', text: '可略過', title: '未勾選任何人時跳過此關卡' });
+  } else if (s.mode === 'all' && (s.approverIds || []).length > 1) {
+    tags.push({ cls: 'cosign', text: '需全簽', title: '此關卡所有簽核人都核准後才進入下一關' });
+  } else if ((s.approverIds || []).length > 1) {
+    tags.push({ cls: '', text: '任一人簽', title: '任一位簽核人核准即可進入下一關' });
+  }
+  if (s.assignType === 'dept_head') {
+    tags.push({ cls: 'optional', text: '可略過', title: '由簽核人自選成員，或直接略過此關卡' });
+  }
+  if (s.assignType === 'users_pick') {
+    tags.push({ cls: '', text: '申請人自選', title: '送出申請時由申請人挑選簽核人' });
+  }
+  if (s.assignType === 'form_user') {
+    tags.push({ cls: '', text: '表單指定', title: '簽核人取自表單欄位的填寫內容' });
+  }
+  return tags;
+}
+
+/** 步驟的簽核人描述（優先顯示實際簽核者） */
+function flowStepWho(s, ctx) {
+  const nameOf =
+    ctx.userName ||
+    ((id) => {
+      const u = (state.users || []).find((x) => x.id === Number(id));
+      return u ? u.name : `#${id}`;
+    });
+  const acted = (ctx.actionsByStep && ctx.actionsByStep.get(Number(s.order))) || [];
+  const approved = acted.filter((a) => a.action === 'approve' || a.action === 'reject');
+  if (approved.length) {
+    return approved
+      .map((a) =>
+        a.delegated_for_name
+          ? `${a.actor_name}（代理 ${a.delegated_for_name}）`
+          : a.actor_name
+      )
+      .join('、');
+  }
+  const ids = s.approverIds || [];
+  if (ids.length) {
+    const names = ids.map(nameOf);
+    // 人數多時只列前 3 位，避免節點過長
+    return names.length > 3
+      ? `${names.slice(0, 3).join('、')} 等 ${names.length} 人`
+      : names.join('、');
+  }
+  if (s.assignType === 'department') return `單位：${s.department || '未指定'}`;
+  if (s.assignType === 'form_user') return `表單「${s.formFieldId || 'agent'}」欄位`;
+  return '';
+}
+
+/**
+ * 產生簽核流程圖 HTML
+ * @param {Array} steps 流程步驟（workflow.steps 或 request.steps）
+ * @param {Object} opts
+ *   - request：申請單（有則顯示實際進度）
+ *   - showLegend：是否顯示圖例
+ *   - userName：id → 姓名 的函式
+ */
+function flowChartHtml(steps, opts = {}) {
+  const list = Array.isArray(steps) ? steps : [];
+  const req = opts.request || null;
+  const status = req ? String(req.status || '') : '';
+  const curStep = req ? Number(req.current_step) : NaN;
+
+  // 依步驟彙整已發生的簽核動作
+  const actionsByStep = new Map();
+  for (const a of (req && req.actions) || []) {
+    const k = Number(a.step_order);
+    if (!actionsByStep.has(k)) actionsByStep.set(k, []);
+    actionsByStep.get(k).push(a);
+  }
+  const ctx = { actionsByStep, userName: opts.userName };
+
+  const parts = [];
+
+  // 起點：申請人
+  const startDone = !req || status !== 'draft';
+  parts.push(`
+    <div class="flow-node is-start ${startDone ? 'is-done' : 'is-todo'}">
+      <div class="fn-head"><span class="fn-no">${startDone ? '✓' : '0'}</span><span class="fn-name">申請人</span></div>
+      ${
+        req
+          ? `<div class="fn-who">${esc(req.requester_name || '')}</div>`
+          : ''
+      }
+    </div>`);
+
+  list.forEach((s, i) => {
+    const order = Number(s.order != null ? s.order : i + 1);
+    const acted = actionsByStep.get(order) || [];
+    const hasApprove = acted.some((a) => a.action === 'approve');
+    const hasReject = acted.some((a) => a.action === 'reject');
+
+    // 判斷節點狀態
+    let cls = 'is-todo';
+    let icon = String(order);
+    if (!req) {
+      cls = 'is-todo';
+    } else if (hasReject) {
+      cls = 'is-rejected';
+      icon = '✕';
+    } else if (status === 'approved' || order < curStep) {
+      // 走過但沒有核准紀錄 → 條件式分支或自選略過
+      cls = hasApprove ? 'is-done' : 'is-skipped';
+      icon = hasApprove ? '✓' : '⤳';
+    } else if (status === 'pending' && order === curStep) {
+      cls = 'is-current';
+    } else if (status === 'rejected' && order === curStep) {
+      cls = 'is-rejected';
+      icon = '✕';
+    }
+
+    // 連接箭頭（走過的路徑標綠色，條件式標橘色）
+    const arrowDone = req && (status === 'approved' || order <= curStep);
+    const arrowCond = !!(s.condition && s.condition.enabled);
+    parts.push(
+      `<div class="flow-arrow ${arrowDone ? 'is-done' : ''} ${arrowCond ? 'is-cond' : ''}"${
+        arrowCond ? ` title="${esc(flowConditionText(s))}"` : ''
+      }></div>`
+    );
+
+    const who = flowStepWho(s, ctx);
+    const tags = flowStepTags(s);
+    // 完成時間（取該關卡最後一筆核准／駁回）
+    const lastAct = [...acted].reverse().find((a) => a.action === 'approve' || a.action === 'reject');
+    const metaBits = [];
+    if (lastAct && lastAct.created_at) metaBits.push(esc(String(lastAct.created_at).slice(0, 16)));
+    if (cls === 'is-skipped') metaBits.push('已略過');
+
+    parts.push(`
+      <div class="flow-node ${cls}"${
+        flowConditionText(s) ? ` title="${esc(flowConditionText(s))}"` : ''
+      }>
+        <div class="fn-head">
+          <span class="fn-no">${esc(icon)}</span>
+          <span class="fn-name">${esc(s.name || `關卡 ${order}`)}</span>
+        </div>
+        ${who ? `<div class="fn-who">${esc(who)}</div>` : ''}
+        ${
+          tags.length
+            ? `<div class="fn-tags">${tags
+                .map(
+                  (t) =>
+                    `<span class="flow-tag ${t.cls}"${t.title ? ` title="${esc(t.title)}"` : ''}>${esc(t.text)}</span>`
+                )
+                .join('')}</div>`
+            : ''
+        }
+        ${metaBits.length ? `<div class="fn-meta">${metaBits.join('　')}</div>` : ''}
+      </div>`);
+  });
+
+  // 終點
+  const endDone = status === 'approved';
+  const endRejected = status === 'rejected';
+  const endCancelled = status === 'cancelled';
+  const endCls = endDone ? 'is-done' : endRejected ? 'is-rejected' : 'is-todo';
+  const endText = endRejected ? '已駁回' : endCancelled ? '已取消' : '完成';
+  parts.push(
+    `<div class="flow-arrow ${endDone ? 'is-done' : ''}"></div>`,
+    `<div class="flow-node is-end ${endCls}">
+      <div class="fn-head"><span class="fn-no">${endDone ? '✓' : endRejected ? '✕' : '🏁'}</span><span class="fn-name">${esc(endText)}</span></div>
+      ${
+        req && req.completed_at
+          ? `<div class="fn-who">${esc(String(req.completed_at).slice(0, 16))}</div>`
+          : ''
+      }
+    </div>`
+  );
+
+  const legend = opts.showLegend
+    ? `<div class="flow-legend">
+        <span><i class="done"></i>已完成</span>
+        <span><i class="current"></i>簽核中</span>
+        <span><i class="todo"></i>未開始</span>
+        <span><i class="skipped"></i>已略過</span>
+        <span><i class="rejected"></i>駁回</span>
+      </div>`
+    : '';
+
+  return `<div class="flow-chart">${parts.join('')}</div>${legend}`;
+}
+
 /** 申請人同部門成員 + 其他人員（供部門主管自選） */
 function splitUsersForDeptHeadChooser() {
   const me = state.user;
@@ -4224,15 +4439,7 @@ async function renderNewRequest(body) {
 
     preview.innerHTML = `
       <div class="muted" style="margin-bottom:8px">簽核層級：申請人送出 → 下列步驟依序簽核</div>
-      <div class="steps-progress">
-        <span class="sp done">0. 申請人</span>
-        ${w.steps
-          .map(
-            (s, i) =>
-              `<span class="sp">${i + 1}. ${esc(s.name)}（${esc(stepAssignLabel(s))}）</span>`
-          )
-          .join('')}
-      </div>
+      ${flowChartHtml(w.steps || [], { showLegend: false })}
       <div class="muted">${esc(w.description || '')}</div>`;
     // 請假表單：確保有「小時」欄（接在天數後）
     let fields = [...(w.formFields || [])];
@@ -4623,31 +4830,12 @@ async function renderDetail(body, id) {
     const u = (state.users || []).find((x) => x.id === Number(id));
     return u ? u.name : `#${id}`;
   };
-  const progress = [
-    `<span class="sp done">✓ 0. 申請人（${esc(request.requester_name || '')}）</span>`,
-    ...steps.map((s) => {
-      let cls = '';
-      let icon = '';
-      if (request.status === 'approved' || Number(s.order) < Number(request.current_step)) {
-        cls = 'done';
-        icon = '✓ ';
-      } else if (
-        request.status === 'pending' &&
-        Number(s.order) === Number(request.current_step)
-      ) {
-        cls = 'current';
-      } else if (
-        request.status === 'rejected' &&
-        Number(s.order) === Number(request.current_step)
-      ) {
-        cls = 'current';
-      }
-      const who = (s.approverIds || []).map(userName).join('、');
-      const modeHint =
-        s.mode === 'all' && (s.approverIds || []).length > 1 ? '（需全簽）' : '';
-      return `<span class="sp ${cls}">${icon}${s.order}. ${esc(s.name)}${modeHint}${who ? `：${esc(who)}` : ''}</span>`;
-    }),
-  ].join('');
+  // 簽核流程圖（含實際進度：已完成／簽核中／已略過／駁回）
+  const progress = flowChartHtml(steps, {
+    request,
+    userName,
+    showLegend: true,
+  });
 
   const coApproverBanner =
     coApprovers &&
@@ -4874,7 +5062,7 @@ async function renderDetail(body, id) {
             ${statusTag(request.status)}
           </div>
         </div>
-        <div class="steps-progress">${progress}</div>
+        ${progress}
         <dl class="kv" style="margin-top:16px">
           <dt>流程</dt><dd>${esc(request.workflow_name)}</dd>
           <dt>申請人</dt><dd>${esc(request.requester_name)}${request.requester_dept ? `（${esc(request.requester_dept)}）` : ''}</dd>
@@ -6046,6 +6234,24 @@ function openWorkflowEditor(workflow = null) {
         steps[i].approverIds = [...set];
       };
     });
+    // 條件式分支：勾選時展開設定面板，並即時反映到流程圖
+    box.querySelectorAll('[data-cond-enable]').forEach((cb) => {
+      cb.onchange = () => {
+        const i = cb.dataset.condEnable;
+        const panel = box.querySelector(`[data-cond-panel="${i}"]`);
+        if (panel) panel.classList.toggle('hidden', !cb.checked);
+        syncStepsFromDom();
+        syncFlowPathFromSteps();
+      };
+    });
+    box
+      .querySelectorAll('[data-cond-field],[data-cond-op],[data-cond-val],[data-cond-action]')
+      .forEach((el) => {
+        el.onchange = el.oninput = () => {
+          syncStepsFromDom();
+          syncFlowPathFromSteps();
+        };
+      });
     syncFlowPathFromSteps();
   };
 
@@ -6088,7 +6294,11 @@ function openWorkflowEditor(workflow = null) {
     const nameEl = document.querySelector('#wf-form [name="name"]');
     const preview = document.querySelector('#flow-path-preview');
     if (descEl) descEl.value = path;
-    if (preview) preview.textContent = path;
+    if (preview) {
+      // 流程圖 + 底下保留文字路徑（與「說明」欄位一致）
+      preview.innerHTML = `${flowChartHtml(steps, { showLegend: false })}
+        <div class="muted" style="margin-top:4px">${esc(path)}</div>`;
+    }
     if (nameEl) {
       const cur = String(nameEl.value || '').trim();
       // 僅在名稱空白、或名稱本身就是路徑字串時自動改寫，避免蓋掉「請假申請」等專名
@@ -6275,8 +6485,9 @@ function openWorkflowEditor(workflow = null) {
       </div>
       <div class="field" style="grid-column:1/-1">
         <label>目前簽核路徑</label>
-        <div id="flow-path-preview" style="padding:10px 12px;background:#f1f5f9;border-radius:8px;font-weight:600;color:#1e3a5f;line-height:1.5">
-          ${esc(workflow?.description || '申請人')}
+        <div id="flow-path-preview" style="padding:6px 12px 10px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;color:#1e3a5f;line-height:1.5">
+          ${flowChartHtml(workflow?.steps || [], { showLegend: false })}
+          <div class="muted" style="margin-top:4px">${esc(workflow?.description || '申請人')}</div>
         </div>
       </div>
       <div style="grid-column:1/-1;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#f8fafc">
