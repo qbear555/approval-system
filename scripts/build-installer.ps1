@@ -157,16 +157,37 @@ $psi.CreateNoWindow = $true
 $psi.EnvironmentVariables['PORT'] = "$Port"
 $proc = [System.Diagnostics.Process]::Start($psi)
 try {
-  Start-Sleep -Seconds 3
+  # 輪詢至多 30 秒，而非固定睡 3 秒後單次請求。
+  # 剛跑完 npm install（315 個套件）時，防毒即時掃描會拖慢首次啟動，
+  # 固定 3 秒常常不夠，導致正常的建置被誤報 API check failed。
   $ok = $false
-  try {
-    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 5
-    if ($r.StatusCode -eq 200) { $ok = $true }
-  } catch { $ok = $false }
+  $lastErr = ''
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  while ($sw.Elapsed.TotalSeconds -lt 30) {
+    if ($proc.HasExited) {
+      $lastErr = "伺服器行程已結束（exit code $($proc.ExitCode)）"
+      break
+    }
+    try {
+      $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 5
+      if ($r.StatusCode -eq 200) { $ok = $true; break }
+      $lastErr = "HTTP $($r.StatusCode)"
+    } catch {
+      $lastErr = $_.Exception.Message
+    }
+    Start-Sleep -Seconds 1
+  }
+  $sw.Stop()
   if ($ok) {
-    Write-Host '  OK: HTTP 200' -ForegroundColor Green
+    Write-Host ('  OK: HTTP 200 （{0:N1} 秒）' -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
   } else {
-    Write-Host '  WARN: API check failed, continue packing' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  ****************************************************' -ForegroundColor Red
+    Write-Host ('  ** 警告：{0} 秒內無法啟動，未通過啟動驗證' -f [int]$sw.Elapsed.TotalSeconds) -ForegroundColor Red
+    Write-Host ("  ** 原因：$lastErr") -ForegroundColor Red
+    Write-Host '  ** 仍會繼續打包，但請勿直接發布，先自行確認可啟動' -ForegroundColor Red
+    Write-Host '  ****************************************************' -ForegroundColor Red
+    Write-Host ''
   }
 } finally {
   if ($proc -and -not $proc.HasExited) {
@@ -208,18 +229,14 @@ if (Test-Path (Join-Path $seedDir 'workflows')) {
   if (Test-Path $seedOut) { Remove-Item -Recurse -Force $seedOut }
   Copy-Item -Recurse -Force $seedDir $seedOut
 }
-# Optional: account excel if present on desktop / project
-$acctCandidates = @(
-  (Join-Path ([Environment]::GetFolderPath('Desktop')) '線上簽核系統_帳號密碼.xlsx'),
-  'F:\TsuMing\Desktop\線上簽核系統_帳號密碼.xlsx',
-  'C:\Users\TsuMing\Desktop\線上簽核系統_帳號密碼.xlsx'
-)
-foreach ($ac in $acctCandidates) {
-  if ($ac -and (Test-Path $ac)) {
-    Copy-Item -Force $ac (Join-Path $OutDir '帳號密碼清冊.xlsx')
-    Copy-Item -Force $ac (Join-Path $DistRoot '帳號密碼清冊.xlsx')
-    Write-Host "  Included account list: $ac"
-    break
+# 安全性：一鍵安裝包「不得」含帳號密碼清冊。
+# 舊版會自動把桌面的「線上簽核系統_帳號密碼.xlsx」複製成「帳號密碼清冊.xlsx」
+# 打包進 zip，任何人拿到安裝包即等同取得全體使用者密碼，已移除。
+# 若殘留舊建置產物，一併清除。
+foreach ($stale in @((Join-Path $OutDir '帳號密碼清冊.xlsx'), (Join-Path $DistRoot '帳號密碼清冊.xlsx'))) {
+  if (Test-Path $stale) {
+    Remove-Item -Force $stale
+    Write-Host "  Removed stale account list: $stale" -ForegroundColor Yellow
   }
 }
 Write-Host '  Seed data packed into app/data + seed-data' -ForegroundColor Green
