@@ -2021,3 +2021,198 @@ input[type="checkbox"], input[type="radio"] {
     transform: rotate(90deg);
   }
 }
+
+/* ============================================================
+   簽核流程圖 — 圖模型（v2）分層版面
+   以「層」為欄，同層節點垂直堆疊 = 並行分支
+   ============================================================ */
+.flow-graph {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 18px 0;
+  padding: 4px;
+  overflow-x: auto;
+}
+
+.flow-layer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+/* 層與層之間的連接區 */
+.flow-link {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 34px;
+  position: relative;
+}
+.flow-link::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: #cbd5e1;
+}
+.flow-link::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-left: 6px solid #cbd5e1;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.flow-link.is-done::before { background: var(--success); }
+.flow-link.is-done::after { border-left-color: var(--success); }
+.flow-link.is-cond::before {
+  background: repeating-linear-gradient(90deg, var(--warning) 0 5px, transparent 5px 9px);
+}
+.flow-link.is-cond::after { border-left-color: var(--warning); }
+
+/* 並行分支：層內有多個節點時，加一條垂直匯流線示意 */
+.flow-layer.is-parallel {
+  position: relative;
+  padding-left: 8px;
+}
+.flow-layer.is-parallel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 18px;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 2px;
+  background: #c7d2fe;
+}
+
+/* 匯合節點 */
+.flow-node.is-join {
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border-style: dashed;
+  border-color: #a5b4fc;
+  background: #eef2ff;
+  align-self: center;
+}
+.flow-node.is-join .fn-head { color: #4338ca; font-size: 0.8rem; }
+
+/* 條件標籤掛在連接線上 */
+.flow-edge-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -140%);
+  white-space: nowrap;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .flow-graph { flex-direction: column; align-items: stretch; }
+  .flow-layer { width: 100%; }
+  .flow-link {
+    min-height: 26px;
+    align-self: center;
+    width: 100%;
+  }
+  .flow-link::before {
+    left: 50%; right: auto; top: 0; bottom: 0;
+    width: 2px; height: auto;
+  }
+  .flow-link::after {
+    right: auto; left: 50%; top: auto; bottom: 2px;
+    transform: translateX(-50%);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #cbd5e1;
+    border-bottom: none;
+  }
+  .flow-link.is-done::after { border-top-color: var(--success); }
+  .flow-link.is-cond::after { border-top-color: var(--warning); }
+  .flow-layer.is-parallel::before { display: none; }
+}
+
+/* ============================================================
+   流程圖畫布編輯器（Phase 3）
+   ============================================================ */
+.fe-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.fe-toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 8px 10px; background: #f8fafc;
+  border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px;
+}
+.fe-toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
+.fe-hint { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+
+.fe-canvas-wrap {
+  position: relative; flex: 1; min-height: 380px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(148,163,184,.10) 1px, transparent 1px) 0 0/20px 20px,
+    linear-gradient(rgba(148,163,184,.10) 1px, transparent 1px) 0 0/20px 20px,
+    #fff;
+  overflow: auto;
+}
+.fe-canvas { position: relative; width: 1600px; height: 900px; }
+.fe-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.fe-edges path { pointer-events: stroke; cursor: pointer; }
+
+.fe-node {
+  position: absolute; width: 150px; padding: 8px 10px;
+  border: 2px solid var(--border); border-radius: 10px; background: #fff;
+  box-shadow: 0 1px 4px rgba(15,23,42,.08);
+  cursor: grab; user-select: none; font-size: 0.82rem;
+}
+.fe-node:active { cursor: grabbing; }
+.fe-node.selected { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.2); }
+.fe-node.linking-src { border-color: var(--warning); box-shadow: 0 0 0 3px rgba(245,158,11,.25); }
+.fe-node .fe-title { font-weight: 700; line-height: 1.3; word-break: break-word; }
+.fe-node .fe-sub { color: var(--muted); font-size: 0.72rem; margin-top: 3px; }
+.fe-node.t-start { background: #eff6ff; border-color: #bfdbfe; width: 110px; border-radius: 999px; text-align: center; }
+.fe-node.t-end   { background: #ecfdf5; border-color: #a7f3d0; width: 110px; border-radius: 999px; text-align: center; }
+.fe-node.t-join  { background: #eef2ff; border-color: #a5b4fc; width: 120px; border-radius: 999px; text-align: center; border-style: dashed; }
+
+.fe-side {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  background: #f8fafc; margin-top: 8px; font-size: 0.85rem;
+}
+.fe-side h4 { margin: 0 0 8px; font-size: 0.9rem; }
+.fe-side .fe-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.fe-side label { min-width: 74px; color: var(--muted); font-size: 0.78rem; }
+.fe-side input[type="text"], .fe-side select, .fe-side input[type="number"] {
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.82rem;
+}
+.fe-approvers {
+  max-height: 130px; overflow: auto; border: 1px solid var(--border);
+  border-radius: 6px; background: #fff; padding: 6px; width: 100%;
+}
+.fe-approvers label {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  color: var(--text); font-size: 0.8rem; padding: 2px 0;
+}
+.fe-errors {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; font-size: 0.8rem;
+}
+.fe-errors ul { margin: 4px 0 0; padding-left: 18px; }
+.fe-ok {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; font-size: 0.8rem;
+}

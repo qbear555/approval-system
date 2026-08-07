@@ -2358,6 +2358,192 @@ function flowStepWho(s, ctx) {
   return '';
 }
 
+/* ── v2 圖模型渲染 ────────────────────────────────────────
+   線性版把節點排成一列；圖模型需要表達分岔與並行，
+   作法是把節點依「離開始節點的最長距離」分層：
+   同一層 = 可同時進行的並行分支，垂直堆疊；層與層之間畫箭頭。
+   ─────────────────────────────────────────────────────── */
+
+/** 依最長路徑分層（DAG） */
+function flowGraphLayers(graph) {
+  const nodes = graph.nodes || [];
+  const edges = graph.edges || [];
+  const inMap = new Map(nodes.map((n) => [n.id, []]));
+  const outMap = new Map(nodes.map((n) => [n.id, []]));
+  for (const e of edges) {
+    if (inMap.has(e.to)) inMap.get(e.to).push(e);
+    if (outMap.has(e.from)) outMap.get(e.from).push(e);
+  }
+  const depth = new Map();
+  const visit = (id, seen) => {
+    if (depth.has(id)) return depth.get(id);
+    if (seen.has(id)) return 0; // 防禦：理論上不該有環
+    seen.add(id);
+    const ins = inMap.get(id) || [];
+    const d = ins.length ? Math.max(...ins.map((e) => visit(e.from, seen) + 1)) : 0;
+    depth.set(id, d);
+    return d;
+  };
+  for (const n of nodes) visit(n.id, new Set());
+
+  const maxD = Math.max(0, ...[...depth.values()]);
+  const layers = Array.from({ length: maxD + 1 }, () => []);
+  for (const n of nodes) layers[depth.get(n.id) || 0].push(n);
+  return { layers, inMap, outMap };
+}
+
+/** 單一節點狀態 → CSS class 與圖示 */
+function flowGraphNodeState(node, states, request) {
+  const st = states ? states[node.id] : null;
+  if (node.type === 'start') return { cls: 'is-start is-done', icon: '✓' };
+  if (node.type === 'end') {
+    if (request?.status === 'rejected') return { cls: 'is-end is-rejected', icon: '✕' };
+    if (st?.state === 'approved' || request?.status === 'approved') {
+      return { cls: 'is-end is-done', icon: '✓' };
+    }
+    return { cls: 'is-end is-todo', icon: '🏁' };
+  }
+  if (node.type === 'join') {
+    return { cls: st?.state === 'approved' ? 'is-join is-done' : 'is-join is-todo', icon: '⋈' };
+  }
+  if (!st) return { cls: 'is-todo', icon: '' };
+  if (st.state === 'approved') return { cls: 'is-done', icon: '✓' };
+  if (st.state === 'rejected') return { cls: 'is-rejected', icon: '✕' };
+  if (st.state === 'skipped') return { cls: 'is-skipped', icon: '⤳' };
+  return { cls: 'is-current', icon: '' };
+}
+
+/**
+ * 產生 v2 圖模型流程圖
+ * @param {Object} graph { nodes, edges }
+ * @param {Object} opts { request, nodeStates, showLegend, userName }
+ */
+function flowGraphHtml(graph, opts = {}) {
+  if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.length) return '';
+  const states = opts.nodeStates || null;
+  const request = opts.request || null;
+  const { layers, inMap } = flowGraphLayers(graph);
+
+  const nameOf =
+    opts.userName ||
+    ((id) => {
+      const u = (state.users || []).find((x) => x.id === Number(id));
+      return u ? u.name : `#${id}`;
+    });
+
+  const nodeHtml = (node) => {
+    const { cls, icon } = flowGraphNodeState(node, states, request);
+    const st = states ? states[node.id] : null;
+
+    if (node.type === 'start') {
+      return `<div class="flow-node ${cls}">
+        <div class="fn-head"><span class="fn-no">${icon}</span><span class="fn-name">申請人</span></div>
+        ${request?.requester_name ? `<div class="fn-who">${esc(request.requester_name)}</div>` : ''}
+      </div>`;
+    }
+    if (node.type === 'end') {
+      const label = request?.status === 'rejected' ? '已駁回' : request?.status === 'cancelled' ? '已取消' : '完成';
+      return `<div class="flow-node ${cls}">
+        <div class="fn-head"><span class="fn-no">${icon}</span><span class="fn-name">${esc(label)}</span></div>
+        ${request?.completed_at ? `<div class="fn-who">${esc(String(request.completed_at).slice(0, 16))}</div>` : ''}
+      </div>`;
+    }
+    if (node.type === 'join') {
+      const n = (inMap.get(node.id) || []).length;
+      const title = node.mode === 'any' ? `任一分支完成即繼續（共 ${n} 條）` : `${n} 條分支全部完成才繼續`;
+      return `<div class="flow-node ${cls}" title="${esc(title)}">
+        <div class="fn-head"><span class="fn-no">${icon}</span><span class="fn-name">匯合${node.mode === 'any' ? '（任一）' : '（全部）'}</span></div>
+      </div>`;
+    }
+
+    // approval
+    const ids = node.approverIds || [];
+    let who = '';
+    if (ids.length) {
+      const names = ids.map(nameOf);
+      who = names.length > 3 ? `${names.slice(0, 3).join('、')} 等 ${names.length} 人` : names.join('、');
+    } else if (node.assignType === 'department') {
+      who = `單位：${node.department || '未指定'}`;
+    } else if (node.assignType === 'form_user') {
+      who = `表單「${node.formFieldId || 'agent'}」欄位`;
+    }
+    const tags = flowStepTags({
+      assignType: node.assignType,
+      mode: node.mode,
+      approverIds: ids,
+    });
+    const metaBits = [];
+    if (st?.completed_at) metaBits.push(esc(String(st.completed_at).slice(0, 16)));
+    if (st?.state === 'skipped') metaBits.push('已略過');
+    if (st?.ad_hoc) metaBits.push('加簽');
+
+    return `<div class="flow-node ${cls}">
+      <div class="fn-head">
+        <span class="fn-no">${esc(icon || String(node.name || '').slice(0, 1))}</span>
+        <span class="fn-name">${esc(node.name || node.id)}</span>
+      </div>
+      ${who ? `<div class="fn-who">${esc(who)}</div>` : ''}
+      ${
+        tags.length
+          ? `<div class="fn-tags">${tags
+              .map((t) => `<span class="flow-tag ${t.cls}"${t.title ? ` title="${esc(t.title)}"` : ''}>${esc(t.text)}</span>`)
+              .join('')}</div>`
+          : ''
+      }
+      ${metaBits.length ? `<div class="fn-meta">${metaBits.join('　')}</div>` : ''}
+    </div>`;
+  };
+
+  const parts = [];
+  layers.forEach((layer, li) => {
+    if (li > 0) {
+      // 這一層所有連入邊：若有條件則標示，若來源都已完成則轉綠
+      const incoming = layer.flatMap((n) => inMap.get(n.id) || []);
+      const conds = incoming.filter((e) => e.condition);
+      const allDone =
+        states &&
+        incoming.length > 0 &&
+        incoming.every((e) => {
+          const s = states[e.from];
+          return s && (s.state === 'approved' || s.state === 'skipped');
+        });
+      const label =
+        conds.length === 1
+          ? `${conds[0].condition.fieldId} ${flowOpSymbol(conds[0].condition.operator)} ${conds[0].condition.value}`
+          : conds.length > 1
+            ? `${conds.length} 個條件`
+            : '';
+      parts.push(
+        `<div class="flow-link ${allDone ? 'is-done' : ''} ${conds.length ? 'is-cond' : ''}"${
+          label ? ` title="${esc(label)}"` : ''
+        }>${label ? `<span class="flow-edge-label">${esc(label)}</span>` : ''}</div>`
+      );
+    }
+    parts.push(
+      `<div class="flow-layer ${layer.length > 1 ? 'is-parallel' : ''}">${layer.map(nodeHtml).join('')}</div>`
+    );
+  });
+
+  const legend = opts.showLegend
+    ? `<div class="flow-legend">
+        <span><i class="done"></i>已完成</span>
+        <span><i class="current"></i>簽核中</span>
+        <span><i class="todo"></i>未開始</span>
+        <span><i class="skipped"></i>已略過</span>
+        <span><i class="rejected"></i>駁回</span>
+      </div>`
+    : '';
+
+  return `<div class="flow-graph">${parts.join('')}</div>${legend}`;
+}
+
+function flowOpSymbol(op) {
+  return (
+    { '>=': '≥', '>': '>', '<=': '≤', '<': '<', '==': '=', '!=': '≠', contains: '包含', not_contains: '不包含' }[op] ||
+    op
+  );
+}
+
 /**
  * 產生簽核流程圖 HTML
  * @param {Array} steps 流程步驟（workflow.steps 或 request.steps）
@@ -2365,8 +2551,23 @@ function flowStepWho(s, ctx) {
  *   - request：申請單（有則顯示實際進度）
  *   - showLegend：是否顯示圖例
  *   - userName：id → 姓名 的函式
+ *   - flow：v2 流程圖；有的話改用圖模型渲染
+ *   - nodeStates：v2 各節點實際狀態
  */
 function flowChartHtml(steps, opts = {}) {
+  // v2：有流程圖就用圖模型渲染（可表達分岔與並行）
+  const graph = opts.flow || opts.request?.flow || null;
+  if (graph && Array.isArray(graph.nodes) && graph.nodes.length) {
+    return flowGraphHtml(graph, {
+      ...opts,
+      nodeStates: opts.nodeStates || opts.request?.nodeStates || null,
+    });
+  }
+  return flowChartLinearHtml(steps, opts);
+}
+
+/** v1 線性版渲染（原本的實作，供舊流程與舊單據沿用） */
+function flowChartLinearHtml(steps, opts = {}) {
   const list = Array.isArray(steps) ? steps : [];
   const req = opts.request || null;
   const status = req ? String(req.status || '') : '';
@@ -4439,7 +4640,7 @@ async function renderNewRequest(body) {
 
     preview.innerHTML = `
       <div class="muted" style="margin-bottom:8px">簽核層級：申請人送出 → 下列步驟依序簽核</div>
-      ${flowChartHtml(w.steps || [], { showLegend: false })}
+      ${flowChartHtml(w.steps || [], { showLegend: false, flow: w.flow || null })}
       <div class="muted">${esc(w.description || '')}</div>`;
     // 請假表單：確保有「小時」欄（接在天數後）
     let fields = [...(w.formFields || [])];
@@ -5817,6 +6018,7 @@ async function renderWorkflows(body) {
                 <td style="text-align:center;white-space:nowrap">
                   <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center">
                     <button type="button" class="btn sm outline" data-edit="${w.id}">編輯</button>
+                    <button type="button" class="btn sm outline" data-flow="${w.id}" title="以流程圖方式編輯，可建立分支與並行簽核">🔀 流程圖</button>
                     <button type="button" class="btn sm outline" data-export-one="${w.id}">匯出</button>
                     ${
                       !isOn
@@ -5837,6 +6039,28 @@ async function renderWorkflows(body) {
     btn.onclick = () => {
       const w = workflows.find((x) => x.id === Number(btn.dataset.edit));
       openWorkflowEditor(w);
+    };
+  });
+
+  // 流程圖編輯器（v2）：儲存後該流程即升級為圖模型
+  body.querySelectorAll('[data-flow]').forEach((btn) => {
+    btn.onclick = async () => {
+      const w = workflows.find((x) => x.id === Number(btn.dataset.flow));
+      if (!w) return;
+      await loadUsers();
+      openFlowEditor(w, async (graph) => {
+        try {
+          await api(`/api/workflows/${w.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ flow: graph }),
+          });
+          closeModal();
+          toast('流程圖已儲存，此流程已改用圖模型執行');
+          renderWorkflows(body);
+        } catch (e) {
+          toast(e.message || '儲存失敗', 'error');
+        }
+      });
     };
   });
 
