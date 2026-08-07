@@ -10,28 +10,34 @@ const SFTP_DIR = '/docker/approval-system';
 const REMOTE_DIR = '/volume1/docker/approval-system';
 const ROOT = path.join(__dirname, '..');
 
-const FILES = [
+// 根目錄要部署的單檔
+const ROOT_FILES = [
   'Dockerfile',
   'docker-compose.yml',
+  'docker-entrypoint.sh',
   'package.json',
   'package-lock.json',
-  'server/index.js',
-  'server/db.js',
-  'server/auth.js',
-  'server/pdf.js',
-  'server/mail.js',
-  'server/line-notify.js',
-  'server/backup.js',
-  'server/system-package.js',
-  'server/import-workflows.js',
-  'server/export-workflows.js',
-  'server/labor.js',
-  'server/leave-report.js',
-  'public/js/app.js',
-  'public/js/tw-calendar.js',
-  'public/css/style.css',
-  'public/index.html',
 ];
+
+// 整個目錄遞迴部署（不再用手寫白名單，避免漏檔造成模組半套）
+const CODE_DIRS = ['server', 'public'];
+
+/** 遞迴列出目錄下所有檔案，回傳相對於 ROOT 的 posix 路徑 */
+function walk(relDir) {
+  const abs = path.join(ROOT, relDir);
+  if (!fs.existsSync(abs)) return [];
+  const out = [];
+  for (const name of fs.readdirSync(abs)) {
+    if (name.startsWith('.') || name === 'node_modules') continue;
+    const relPath = relDir + '/' + name;
+    const st = fs.statSync(path.join(ROOT, relPath));
+    if (st.isDirectory()) out.push(...walk(relPath));
+    else out.push(relPath);
+  }
+  return out;
+}
+
+const FILES = [...ROOT_FILES, ...CODE_DIRS.flatMap((d) => walk(d))];
 
 function exec(conn, cmd, sudo = false) {
   return new Promise((resolve, reject) => {

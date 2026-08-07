@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   將簽核系統程式同步到 D:\一鍵安裝包 三個平台。
