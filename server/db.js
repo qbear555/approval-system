@@ -338,6 +338,109 @@ db.exec(`
   } catch {
     /* ignore */
   }
+
+  // ── v2 流程圖（nodes/edges）─────────────────────────────────────────
+  // flow_version：1 = 舊的線性 steps_json；2 = flow_json 圖模型
+  // 兩者並存，舊流程不強制轉換，執行引擎依 flow_version 分派
+  if (!wfCols.includes('flow_json')) {
+    db.exec(`ALTER TABLE workflows ADD COLUMN flow_json TEXT`);
+  }
+  if (!wfCols.includes('flow_version')) {
+    db.exec(`ALTER TABLE workflows ADD COLUMN flow_version INTEGER NOT NULL DEFAULT 1`);
+  }
+  // 送單時凍結的流程圖（對應 steps_snapshot_json，圖模型版本）
+  if (!reqCols.includes('flow_snapshot_json')) {
+    db.exec(`ALTER TABLE approval_requests ADD COLUMN flow_snapshot_json TEXT`);
+  }
+
+  // 圖模型的執行狀態：取代 current_step 成為「目前在哪」的真相來源。
+  // 單一整數游標無法表達並行分支（同時停在兩個節點），故改為每節點一列。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS request_node_states (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id   INTEGER NOT NULL,
+      node_id      TEXT    NOT NULL,
+      state        TEXT    NOT NULL
+        CHECK(state IN ('pending', 'approved', 'rejected', 'skipped')),
+      entered_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+      completed_at TEXT,
+      ad_hoc       INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(request_id, node_id),
+      FOREIGN KEY (request_id) REFERENCES approval_requests(id) ON DELETE CASCADE
+    );
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_node_states_request ON request_node_states(request_id);`
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_node_states_pending ON request_node_states(request_id, state);`
+  );
+
+  // approval_actions 增加 node_id：圖模型的關卡識別是字串節點 id，
+  // step_order 整數保留供 v1 單據與 PDF 排版相容
+  const actCols = db.prepare(`PRAGMA table_info(approval_actions)`).all().map((c) => c.name);
+  if (!actCols.includes('node_id')) {
+    db.exec(`ALTER TABLE approval_actions ADD COLUMN node_id TEXT`);
+  }
+
+  // ── approval_actions：放寬 action 約束並允許系統動作 ──────────────────
+  // 原本 CHECK 僅允許 submit/approve/reject/cancel/return/comment，
+  // 但條件式分支跳關會寫入 action='system'、actor_id=0，
+  // CHECK 與外鍵（actor_id → users.id）皆會擋下，導致跳關直接拋例外。
+  // SQLite 無法 ALTER CHECK，必須重建資料表。
+  // 一併把 actor_id 改為可空（系統動作沒有操作者），step_order 亦放寬。
+  {
+    const actionsSql =
+      db
+        .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='approval_actions'`)
+        .get()?.sql || '';
+    if (actionsSql && !/'system'/.test(actionsSql)) {
+      db.exec('PRAGMA foreign_keys = OFF');
+      try {
+        db.exec('BEGIN');
+        db.exec(`
+          CREATE TABLE approval_actions_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL,
+            step_order INTEGER,
+            step_name TEXT NOT NULL DEFAULT '',
+            actor_id INTEGER,
+            action TEXT NOT NULL CHECK(action IN
+              ('submit', 'approve', 'reject', 'cancel', 'return', 'comment', 'system')),
+            comment TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            form_data TEXT DEFAULT '{}',
+            signature_image TEXT,
+            delegated_for_id INTEGER,
+            FOREIGN KEY (request_id) REFERENCES approval_requests(id) ON DELETE CASCADE,
+            FOREIGN KEY (actor_id) REFERENCES users(id)
+          );
+        `);
+        db.exec(`
+          INSERT INTO approval_actions_new
+            (id, request_id, step_order, step_name, actor_id, action, comment,
+             created_at, form_data, signature_image, delegated_for_id)
+          SELECT id, request_id, step_order, step_name, actor_id, action, comment,
+                 created_at, form_data, signature_image, delegated_for_id
+          FROM approval_actions;
+        `);
+        db.exec(`DROP TABLE approval_actions;`);
+        db.exec(`ALTER TABLE approval_actions_new RENAME TO approval_actions;`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_actions_request ON approval_actions(request_id);`);
+        db.exec('COMMIT');
+        console.log('[db] approval_actions 已重建：允許 action=system、actor_id 可空');
+      } catch (e) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        console.error('[db] approval_actions 重建失敗，維持原結構：', e.message);
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON');
+      }
+    }
+  }
 })();
 
 // Seed default departments (idempotent)

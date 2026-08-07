@@ -40,6 +40,8 @@ const mail = require('./mail');
 const lineNotify = require('./line-notify');
 const { importPayload } = require('./import-workflows');
 const workflowModule = require('./workflow-module');
+const flowGraph = require('./flow-graph');
+const flowEngineFactory = require('./flow-engine');
 const systemPackage = require('./system-package');
 const labor = require('./labor');
 const leaveReport = require('./leave-report');
@@ -1093,11 +1095,34 @@ function parseSteps(json) {
           : [],
         mode: s.mode === 'all' ? 'all' : 'any',
         approverFields,
+        // 關卡條件式動態分支。舊版此處未保留 condition，編輯器設定完存檔即被
+        // 靜默丟棄，導致條件式分支永遠無法生效（正式環境 0 個流程啟用）。
+        condition: parseStepCondition(s.condition),
+        // v2 圖模型的節點 id；v1 流程為 undefined
+        nodeId: s.nodeId ? String(s.nodeId).trim().slice(0, 60) : undefined,
       };
     });
   } catch {
     return null;
   }
+}
+
+const COND_OPERATORS = ['>=', '>', '<=', '<', '==', '!=', 'contains'];
+
+/** 正規化關卡條件；無效或未啟用一律回傳 { enabled: false } */
+function parseStepCondition(c) {
+  if (!c || typeof c !== 'object' || !c.enabled) return { enabled: false };
+  const fieldId = String(c.fieldId || '').trim().slice(0, 40);
+  const operator = COND_OPERATORS.includes(c.operator) ? c.operator : '';
+  // 條件不完整就視同未啟用，避免存進半套設定後執行期行為難以預期
+  if (!fieldId || !operator) return { enabled: false };
+  return {
+    enabled: true,
+    fieldId,
+    operator,
+    value: c.value != null ? String(c.value).trim().slice(0, 100) : '',
+    action: c.action === 'skip' ? 'skip' : 'require',
+  };
 }
 
 /** 台灣勞基法／性別工作平等法常見假別 */
@@ -1690,6 +1715,9 @@ function resolveStepsForRequest(requester, formData, templateSteps) {
         approverIds,
         resolveNote,
         approverFields: Array.isArray(s.approverFields) ? s.approverFields : [],
+        // 條件式分支必須帶進 snapshot：執行引擎讀的是 snapshot 而非流程定義
+        condition: s.condition && s.condition.enabled ? s.condition : { enabled: false },
+        nodeId: s.nodeId,
       });
       continue;
     } else if (s.assignType === 'department') {
@@ -1722,6 +1750,9 @@ function resolveStepsForRequest(requester, formData, templateSteps) {
       approverIds,
       resolveNote,
       approverFields: Array.isArray(s.approverFields) ? s.approverFields : [],
+      // 條件式分支必須帶進 snapshot：執行引擎讀的是 snapshot 而非流程定義
+      condition: s.condition && s.condition.enabled ? s.condition : { enabled: false },
+      nodeId: s.nodeId,
     });
   }
 
@@ -1974,18 +2005,129 @@ function serializeWorkflow(r) {
   const finalNotify = enrichFinalNotifyUsers(
     workflowModule.parseFinalNotifyJson(r.final_notify_json)
   );
+  // v2 圖模型：flow_json 為真相來源；steps 仍供既有 UI／PDF 使用
+  const flowVersion = Number(r.flow_version) === 2 ? 2 : 1;
+  const flow =
+    flowVersion === 2 ? flowGraph.normalizeGraph(r.flow_json) : null;
   return {
     ...r,
     steps: parseSteps(r.steps_json) || [],
     formFields: parseFormFields(r.form_fields_json),
     pdfLayout,
     finalNotify,
+    flowVersion,
+    flow,
     steps_json: undefined,
     form_fields_json: undefined,
     pdf_layout_json: undefined,
     final_notify_json: undefined,
+    flow_json: undefined,
   };
 }
+
+/** 依 flow_version 取出可執行的流程圖（v1 自動轉成直線圖） */
+function getWorkflowGraph(row) {
+  if (Number(row.flow_version) === 2) {
+    const g = flowGraph.normalizeGraph(row.flow_json);
+    if (g) return g;
+  }
+  return flowGraph.linearToGraph(parseSteps(row.steps_json) || []);
+}
+
+/**
+ * 把「已解析出實際簽核人」的結果寫回流程圖節點。
+ * 動態指派（部門主管、表單人員、申請人自選…）在送單當下才知道是誰，
+ * 沿用既有 resolveStepsForRequest 的解析結果，再依 nodeId 對回節點。
+ */
+function buildResolvedGraph(wfRow, resolvedSteps) {
+  const graph = getWorkflowGraph(wfRow);
+  const byNodeId = new Map();
+  for (const s of resolvedSteps || []) {
+    if (s.nodeId) byNodeId.set(s.nodeId, s);
+  }
+  // v1 轉出的圖節點 id 為 n<order>，解析結果沒有 nodeId 時用 order 對應
+  const byOrder = new Map((resolvedSteps || []).map((s) => [Number(s.order), s]));
+
+  const nodes = graph.nodes.map((n) => {
+    if (n.type !== 'approval') return n;
+    const r =
+      byNodeId.get(n.id) ||
+      (n.legacyOrder != null ? byOrder.get(Number(n.legacyOrder)) : null);
+    if (!r) return n;
+    return {
+      ...n,
+      approverIds: Array.isArray(r.approverIds) ? r.approverIds : n.approverIds,
+      mode: r.mode || n.mode,
+      resolveNote: r.resolveNote || '',
+      approverFields: r.approverFields || n.approverFields,
+    };
+  });
+  return flowGraph.normalizeGraph({ version: 2, nodes, edges: graph.edges });
+}
+
+/**
+ * 取單據當下應使用的流程圖：送單時凍結的快照。
+ * getRequestDetail 已把 flow_snapshot_json 正規化成 detail.flow，
+ * 並將原始欄位設為 undefined，故這裡讀 detail.flow。
+ */
+function getRequestGraph(detail) {
+  if (detail?.flow) {
+    const g = flowGraph.normalizeGraph(detail.flow);
+    if (g) return g;
+  }
+  if (detail?.flow_snapshot_json) {
+    return flowGraph.normalizeGraph(detail.flow_snapshot_json);
+  }
+  return null;
+}
+
+/** 此單據是否走 v2 圖引擎 */
+function isGraphRequest(detail) {
+  return !!getRequestGraph(detail);
+}
+
+/**
+ * 找出這位使用者目前實際可簽的關卡。
+ * v1：就是 current_step 指到的那一關。
+ * v2：可能有多個並行待簽節點，取這位使用者有權簽的那個；
+ *     都沒有權限時退回 current_step，讓後續權限檢查給出正確錯誤訊息。
+ */
+function resolveActionableStep(detail, steps, userId, requestId) {
+  const fallback = findStepByOrder(steps, detail.current_step);
+  const graph = getRequestGraph(detail);
+  if (!graph) return fallback;
+
+  const pending = flowEngine.pendingNodes(requestId);
+  if (!pending.length) return fallback;
+
+  const idx = flowEngine.indexGraph(graph);
+  const candidates = pending
+    .map((nid) => {
+      const node = idx.byId.get(nid);
+      if (!node || node.type !== 'approval') return null;
+      // 轉成 v1 step 形狀，讓既有的權限檢查／簽核流程完全沿用
+      const legacy = steps.find((s) => s.nodeId === nid);
+      return {
+        order: legacy?.order ?? node.legacyOrder ?? 0,
+        name: node.name,
+        assignType: node.assignType,
+        formFieldId: node.formFieldId,
+        department: node.department,
+        approverIds: node.approverIds || [],
+        mode: node.mode,
+        approverFields: node.approverFields || [],
+        nodeId: nid,
+      };
+    })
+    .filter(Boolean);
+
+  for (const c of candidates) {
+    if (checkUserApprovalRight(userId, c, requestId).canApprove) return c;
+  }
+  return candidates[0] || fallback;
+}
+
+const flowEngine = flowEngineFactory.makeEngine(db);
 
 function getRequestDetail(id) {
   const row = db
@@ -2004,10 +2146,12 @@ function getRequestDetail(id) {
 
   const actions = db
     .prepare(
+      // LEFT JOIN：系統動作（條件式跳關）沒有操作者，actor_id 為 NULL，
+      // 用 INNER JOIN 會讓這些稽核紀錄整筆消失
       `SELECT a.*, u.name AS actor_name, u.username AS actor_username,
               du.name AS delegated_for_name, du.username AS delegated_for_username
        FROM approval_actions a
-       JOIN users u ON u.id = a.actor_id
+       LEFT JOIN users u ON u.id = a.actor_id
        LEFT JOIN users du ON du.id = a.delegated_for_id
        WHERE a.request_id = ?
        ORDER BY a.created_at ASC, a.id ASC`
@@ -2172,6 +2316,11 @@ function getRequestDetail(id) {
   );
   const finalNotifyReceipts = loadFinalNotifyReceiptsForRequest(id);
 
+  // v2 圖模型：附上凍結的流程圖與各節點實際狀態，供前端畫流程圖
+  const graph = row.flow_snapshot_json
+    ? flowGraph.normalizeGraph(row.flow_snapshot_json)
+    : null;
+
   return {
     ...row,
     form_data: formDataDisplay,
@@ -2184,11 +2333,14 @@ function getRequestDetail(id) {
     pdfLayout,
     finalNotify,
     finalNotifyReceipts,
+    flow: graph,
+    nodeStates: graph ? flowEngine.nodeStates(id) : null,
     form_schema_json: undefined,
     form_fields_json: undefined,
     pdf_layout_json: undefined,
     final_notify_json: undefined,
     steps_snapshot_json: undefined,
+    flow_snapshot_json: undefined,
     approver_data_json: undefined,
     notify_prefs_json: undefined,
   };
@@ -2386,10 +2538,11 @@ function advanceToNextEligibleStep(id, detail, steps, currentStep) {
       finalNextStep = candidate;
       break;
     } else {
-      // 記錄系統自動略過動作
+      // 記錄系統自動略過動作（actor_id 為 NULL：非人為操作，
+      // 舊版寫 0 會違反 users 外鍵，加上 CHECK 不含 'system'，跳關必定拋例外）
       db.prepare(
         `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
-         VALUES (?, ?, ?, 0, 'system', ?, '{}')`
+         VALUES (?, ?, ?, NULL, 'system', ?, '{}')`
       ).run(id, Number(candidate.order), candidate.name, `[動態條件跳關] ${cond.reason}`);
       nextIdx++;
     }
@@ -4769,11 +4922,31 @@ app.get('/api/workflows/:id', authMiddleware, (req, res) => {
   res.json({ workflow: serializeWorkflow(r) });
 });
 
+/**
+ * 若請求帶了 v2 流程圖，驗證並回傳 { graph, steps }。
+ * steps 由圖線性化而來，供既有 UI／PDF 排版沿用。
+ * 回傳 { error } 代表驗證失敗。
+ */
+function acceptFlowGraph(body) {
+  if (!body || body.flow == null) return null;
+  const graph = flowGraph.normalizeGraph(body.flow);
+  if (!graph) return { error: '流程圖格式無效' };
+  const errs = flowGraph.validateGraph(graph);
+  if (errs.length) return { error: '流程圖驗證未通過：' + errs.join('；') };
+  return { graph, steps: flowGraph.graphToLinear(graph) };
+}
+
 app.post('/api/workflows', authMiddleware, requirePerm('workflows'), (req, res) => {
-  const { name, description, steps, formFields } = req.body || {};
+  const { name, description, formFields } = req.body || {};
+  let { steps } = req.body || {};
   if (!name || !String(name).trim()) {
     return res.status(400).json({ error: '請輸入流程名稱' });
   }
+  // v2：以流程圖為準，steps 由圖推導
+  const fromGraph = acceptFlowGraph(req.body);
+  if (fromGraph?.error) return res.status(400).json({ error: fromGraph.error });
+  if (fromGraph) steps = fromGraph.steps;
+
   const parsed = parseSteps(steps);
   if (!parsed) {
     return res.status(400).json({ error: '請至少設定一個簽核步驟' });
@@ -4813,8 +4986,9 @@ app.post('/api/workflows', authMiddleware, requirePerm('workflows'), (req, res) 
   const finalNotifyJson = resolveFinalNotifyJson((req.body || {}).finalNotify);
   const info = db
     .prepare(
-      `INSERT INTO workflows (name, description, created_by, steps_json, form_fields_json, pdf_layout_json, final_notify_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflows (name, description, created_by, steps_json, form_fields_json,
+                              pdf_layout_json, final_notify_json, flow_json, flow_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       wfName,
@@ -4823,7 +4997,9 @@ app.post('/api/workflows', authMiddleware, requirePerm('workflows'), (req, res) 
       JSON.stringify(parsed),
       JSON.stringify(fields),
       pdfLayoutJson,
-      finalNotifyJson
+      finalNotifyJson,
+      fromGraph ? JSON.stringify(fromGraph.graph) : null,
+      fromGraph ? 2 : 1
     );
   const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ workflow: serializeWorkflow(workflow) });
@@ -4833,8 +5009,13 @@ app.put('/api/workflows/:id', authMiddleware, requirePerm('workflows'), (req, re
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: '找不到流程' });
-  const { name, description, steps, formFields, active, pdfLayout, finalNotify } =
+  const { name, description, formFields, active, pdfLayout, finalNotify } =
     req.body || {};
+  let { steps } = req.body || {};
+  // v2：以流程圖為準，steps 由圖推導
+  const fromGraph = acceptFlowGraph(req.body);
+  if (fromGraph?.error) return res.status(400).json({ error: fromGraph.error });
+  if (fromGraph) steps = fromGraph.steps;
   let stepsJson = existing.steps_json;
   let fieldsJson = existing.form_fields_json || '[]';
   let pdfLayoutJson =
@@ -4896,6 +5077,8 @@ app.put('/api/workflows/:id', authMiddleware, requirePerm('workflows'), (req, re
       form_fields_json = ?,
       pdf_layout_json = ?,
       final_notify_json = ?,
+      flow_json = COALESCE(?, flow_json),
+      flow_version = COALESCE(?, flow_version),
       active = COALESCE(?, active),
       updated_at = datetime('now', 'localtime')
      WHERE id = ?`
@@ -4906,6 +5089,8 @@ app.put('/api/workflows/:id', authMiddleware, requirePerm('workflows'), (req, re
     fieldsJson,
     pdfLayoutJson,
     finalNotifyJson,
+    fromGraph ? JSON.stringify(fromGraph.graph) : null,
+    fromGraph ? 2 : null,
     typeof active === 'number' || typeof active === 'boolean' ? (active ? 1 : 0) : null,
     id
   );
@@ -5870,13 +6055,28 @@ app.post('/api/requests', authMiddleware, upload.array('attachments', 20), (req,
   }
 
   let detail = getRequestDetail(requestId);
-  const initialSteps = detail.steps || [];
-  if (initialSteps.length > 0) {
-    const firstStep = initialSteps[0];
-    const cond = evaluateStepCondition(firstStep, detail);
-    if (!cond.required) {
-      advanceToNextEligibleStep(requestId, detail, initialSteps, { order: 0 });
-      detail = getRequestDetail(requestId);
+
+  if (Number(wf.flow_version) === 2) {
+    // ── v2 圖模型 ──
+    // 送單時把「已解析出實際簽核人」的圖凍結進 flow_snapshot_json，
+    // 之後改流程定義不影響進行中的單據（與 steps_snapshot_json 同一設計）
+    const graph = buildResolvedGraph(wf, resolved.steps);
+    db.prepare(`UPDATE approval_requests SET flow_snapshot_json = ? WHERE id = ?`).run(
+      JSON.stringify(graph),
+      requestId
+    );
+    flowEngine.start(requestId, graph, fullFormData || {});
+    detail = getRequestDetail(requestId);
+  } else {
+    // ── v1 線性引擎（既有行為完全不變）──
+    const initialSteps = detail.steps || [];
+    if (initialSteps.length > 0) {
+      const firstStep = initialSteps[0];
+      const cond = evaluateStepCondition(firstStep, detail);
+      if (!cond.required) {
+        advanceToNextEligibleStep(requestId, detail, initialSteps, { order: 0 });
+        detail = getRequestDetail(requestId);
+      }
     }
   }
   // Email／LINE：通知目前步驟簽核人；申請人確認送出（若有開通知）
@@ -6235,7 +6435,9 @@ app.post(
   }
 
   const steps = detail.steps;
-  const step = findStepByOrder(steps, detail.current_step);
+  // v2 並行分支時可能同時有多個待簽關卡，current_step 只指得到其中一個，
+  // 必須改由「這位使用者實際待簽的節點」決定，否則另一條分支的簽核人會被擋
+  const step = resolveActionableStep(detail, steps, req.user.id, id);
   const check = checkUserApprovalRight(req.user.id, step, id);
   if (!check.canApprove) {
     return res.status(403).json({ error: '您不是目前步驟的簽核人，或已簽核過' });
@@ -6374,15 +6576,22 @@ app.post(
     }
   }
 
+  const reqGraph = getRequestGraph(detail);
+
   if (action === 'reject') {
+    if (reqGraph) {
+      // v2：由引擎決定是整單駁回或退回指定節點
+      flowEngine.reject(id, reqGraph, step.nodeId || `n${step.order}`);
+    } else {
+      db.prepare(
+        `UPDATE approval_requests SET status = 'rejected', completed_at = datetime('now', 'localtime'),
+         updated_at = datetime('now', 'localtime') WHERE id = ?`
+      ).run(id);
+    }
     db.prepare(
-      `UPDATE approval_requests SET status = 'rejected', completed_at = datetime('now', 'localtime'),
-       updated_at = datetime('now', 'localtime') WHERE id = ?`
-    ).run(id);
-    db.prepare(
-      `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data, signature_image, delegated_for_id)
-       VALUES (?, ?, ?, ?, 'reject', ?, ?, ?, ?)`
-    ).run(id, step.order, step.name, req.user.id, finalComment, actionFormJson, sigImgToSave, delegatedForId);
+      `INSERT INTO approval_actions (request_id, step_order, node_id, step_name, actor_id, action, comment, form_data, signature_image, delegated_for_id)
+       VALUES (?, ?, ?, ?, ?, 'reject', ?, ?, ?, ?)`
+    ).run(id, step.order, step.nodeId || null, step.name, req.user.id, finalComment, actionFormJson, sigImgToSave, delegatedForId);
     const after = getRequestDetail(id);
     const actor = db.prepare(`SELECT name FROM users WHERE id = ?`).get(req.user.id);
     fireAndForgetMail(
@@ -6406,16 +6615,26 @@ app.post(
 
   // approve
   db.prepare(
-    `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data, signature_image, delegated_for_id)
-     VALUES (?, ?, ?, ?, 'approve', ?, ?, ?, ?)`
-  ).run(id, step.order, step.name, req.user.id, finalComment, actionFormJson, sigImgToSave, delegatedForId);
+    `INSERT INTO approval_actions (request_id, step_order, node_id, step_name, actor_id, action, comment, form_data, signature_image, delegated_for_id)
+     VALUES (?, ?, ?, ?, ?, 'approve', ?, ?, ?, ?)`
+  ).run(id, step.order, step.nodeId || null, step.name, req.user.id, finalComment, actionFormJson, sigImgToSave, delegatedForId);
 
   let mailEvent = null; // approved | step | waiting_co
   let nextStepName = '';
   if (isStepComplete(id, step)) {
-    const adv = advanceToNextEligibleStep(id, detail, steps, step);
-    mailEvent = adv.mailEvent;
-    nextStepName = adv.nextStepName;
+    if (reqGraph) {
+      // v2：圖引擎推進，可能同時開啟多個並行關卡
+      const r = flowEngine.approve(id, reqGraph, step.nodeId || `n${step.order}`, detail.form_data || {});
+      mailEvent = r.status === 'approved' ? 'approved' : 'step';
+      const idx = flowEngine.indexGraph(reqGraph);
+      nextStepName = (r.pending || [])
+        .map((nid) => idx.byId.get(nid)?.name || nid)
+        .join('、');
+    } else {
+      const adv = advanceToNextEligibleStep(id, detail, steps, step);
+      mailEvent = adv.mailEvent;
+      nextStepName = adv.nextStepName;
+    }
   } else {
     db.prepare(
       `UPDATE approval_requests SET updated_at = datetime('now', 'localtime') WHERE id = ?`
