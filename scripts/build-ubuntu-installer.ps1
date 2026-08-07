@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   建置 Ubuntu 一鍵安裝包
   用法（專案根目錄）:

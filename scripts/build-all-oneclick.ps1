@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   建置 Windows / Ubuntu / NAS 一鍵安裝包（含完整種子資料）
   輸出：D:\一鍵安裝包\

@@ -1,4 +1,4 @@
-# 打包 data 目錄，供搬到 Ubuntu / NAS
+﻿# 打包 data 目錄，供搬到 Ubuntu / NAS
 # 用法：在專案根目錄
 #   powershell -ExecutionPolicy Bypass -File scripts\export-data-bundle.ps1
 $ErrorActionPreference = 'Stop'
