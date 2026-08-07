@@ -66,6 +66,9 @@ docker compose up -d --build
 # 瀏覽 http://NAS的IP:3847
 ```
 
+HTTPS 使用 Let's Encrypt 正式憑證時，**DSM 續期不會自動同步到容器**，
+請依 **[docs/HTTPS憑證-自動續期.md](docs/HTTPS憑證-自動續期.md)** 設定排程（腳本：`fix-cert.sh`）。
+
 ## 一鍵部署包（給其他電腦安裝）
 
 在本機專案目錄執行：
