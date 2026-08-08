@@ -37,9 +37,9 @@ Start-Sleep -Seconds 4
 
 Write-Host "Task:" (Get-ScheduledTask -TaskName $taskName).State
 Write-Host "Ports:"
-netstat -ano | findstr "LISTENING" | findstr ":8080"
+netstat -ano | findstr "LISTENING" | findstr ":3847"
 try {
-  $r = Invoke-WebRequest 'http://127.0.0.1:8080/' -UseBasicParsing -TimeoutSec 5
+  $r = Invoke-WebRequest 'http://127.0.0.1:3847/' -UseBasicParsing -TimeoutSec 5
   Write-Host "HTTP OK" $r.StatusCode
 } catch {
   Write-Host "HTTP FAIL" $_.Exception.Message
@@ -47,7 +47,7 @@ try {
   Start-Process -FilePath $node -ArgumentList "`"$launchJs`"" -WorkingDirectory $proj -WindowStyle Minimized
   Start-Sleep -Seconds 3
   try {
-    $r2 = Invoke-WebRequest 'http://127.0.0.1:8080/' -UseBasicParsing -TimeoutSec 5
+    $r2 = Invoke-WebRequest 'http://127.0.0.1:3847/' -UseBasicParsing -TimeoutSec 5
     Write-Host "HTTP OK after fallback" $r2.StatusCode
   } catch {
     Write-Host "STILL FAIL" $_.Exception.Message

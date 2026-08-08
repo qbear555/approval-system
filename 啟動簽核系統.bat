@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 set "NODE=C:\Program Files\nodejs\node.exe"
 if not exist "%NODE%" set "NODE=node"
-set "URL=http://127.0.0.1:8080/"
+set "URL=http://127.0.0.1:3847/"
 
 cls
 echo.

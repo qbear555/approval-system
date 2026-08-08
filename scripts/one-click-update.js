@@ -365,7 +365,7 @@ function stopLocal8080() {
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
-        "Get-NetTCPConnection -LocalPort 8080 -State Listen -EA SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -EA SilentlyContinue }",
+        "Get-NetTCPConnection -LocalPort 3847 -State Listen -EA SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -EA SilentlyContinue }",
       ],
       { stdio: 'ignore', windowsHide: true }
     );
@@ -394,11 +394,11 @@ function startLocal() {
     let tries = 0;
     const tick = () => {
       tries++;
-      const req = http.get('http://127.0.0.1:8080/', (res) => {
+      const req = http.get('http://127.0.0.1:3847/', (res) => {
         res.resume();
-        log('[OK] 本機已啟動 http://127.0.0.1:8080/  status=', res.statusCode);
+        log('[OK] 本機已啟動 http://127.0.0.1:3847/  status=', res.statusCode);
         try {
-          spawn('cmd', ['/c', 'start', '', 'http://127.0.0.1:8080/'], {
+          spawn('cmd', ['/c', 'start', '', 'http://127.0.0.1:3847/'], {
             detached: true,
             stdio: 'ignore',
             windowsHide: true,
@@ -457,7 +457,7 @@ async function main() {
   log('======== 一鍵更新結束 ========');
   if (opts.nas) log('NAS: 請 Ctrl+F5 確認總覽公告／系統設定');
   if (opts.packages) log('一鍵包: D:\\一鍵安裝包 已更新');
-  if (opts.local) log('本機: http://127.0.0.1:8080/');
+  if (opts.local) log('本機: http://127.0.0.1:3847/');
 }
 
 main().catch((e) => {

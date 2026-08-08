@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-echo 正在停止線上簽核系統（埠 8080 / 3847）...
+echo 正在停止線上簽核系統（埠 3847 / 3847）...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "foreach ($port in 8080,3847) { ^
      $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; ^

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # 建立「線上簽核」本機啟用／停用／控制台 桌面捷徑
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -39,7 +39,7 @@ if (-not (Test-Path $stopBat)) { $stopBat = Join-Path $Root '本機簽核系統-
 foreach ($desk in $desks) {
   # 中文檔名
   New-Shortcut (Join-Path $desk '線上簽核-本機控制台.lnk') $consoleBat $null $Root '啟用／停用本機簽核 Server'
-  New-Shortcut (Join-Path $desk '線上簽核-本機啟用.lnk') $startBat $null $Root '啟動本機簽核 http://127.0.0.1:8080'
+  New-Shortcut (Join-Path $desk '線上簽核-本機啟用.lnk') $startBat $null $Root '啟動本機簽核 http://127.0.0.1:3847'
   New-Shortcut (Join-Path $desk '線上簽核-本機停用.lnk') $stopBat $null $Root '停止本機簽核 Server'
   # 英文檔名（相容）
   New-Shortcut (Join-Path $desk 'Approval-Local-Console.lnk') $consoleBat $null $Root 'Approval Local Console'
@@ -53,4 +53,4 @@ Write-Host '  · 線上簽核-本機控制台  /  Approval-Local-Console'
 Write-Host '  · 線上簽核-本機啟用    /  Approval-Local-Start'
 Write-Host '  · 線上簽核-本機停用    /  Approval-Local-Stop'
 Write-Host "目錄: $Root"
-Write-Host '網址: http://127.0.0.1:8080/'
+Write-Host '網址: http://127.0.0.1:3847/'

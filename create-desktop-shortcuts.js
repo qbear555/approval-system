@@ -91,4 +91,4 @@ for (const desk of uniqueDesks) {
 
 console.log(`Done. ok=${ok} fail=${fail}`);
 console.log('Desktops:', uniqueDesks.join(' | '));
-console.log('URL: http://127.0.0.1:8080/');
+console.log('URL: http://127.0.0.1:3847/');

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   線上簽核系統 — 本機 Server 啟用／停用控制台
@@ -8,7 +8,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Port = 8080
+$Port = 3847
 $Node = $null
 foreach ($c in @(
   "$env:ProgramFiles\nodejs\node.exe",

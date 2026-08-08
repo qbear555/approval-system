@@ -2,7 +2,7 @@
 # Start approval system as fully independent process (survives parent shell exit)
 $ErrorActionPreference = 'SilentlyContinue'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$Port = 8080
+$Port = 3847
 $Node = 'C:\Program Files\nodejs\node.exe'
 if (-not (Test-Path $Node)) {
   $cmd = Get-Command node -ErrorAction SilentlyContinue
@@ -25,7 +25,8 @@ $dataDir = Join-Path $Root 'data'
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
 
 # Prefer WMI Create so process is not tied to this shell's job object
-$cmdLine = '"' + $Node + '" "' + $serverJs + '"'
+# PORT=3847 via start-server.js default; also pass on command line for clarity
+$cmdLine = 'cmd /c "set PORT=3847&& set HTTPS_ENABLED=0&& "' + $Node + '" "' + $serverJs + '"'
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine     = $cmdLine
   CurrentDirectory = $Root

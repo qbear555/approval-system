@@ -5383,17 +5383,25 @@ async function renderDetail(body, id) {
               }
               <div class="field" style="margin-bottom:12px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:#f8fafc">
                 <label style="font-weight:600;margin-bottom:6px;display:block">✍️ 電子簽名檔選擇</label>
+                <p class="muted" style="margin:0 0 8px;font-size:0.85rem">預設使用「個人預設簽名」；核准時若未另選現場手寫，將自動套用帳號設定中的簽名。</p>
                 <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
                   <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                    <input type="radio" name="sig_mode" value="default" ${state.user?.signature_image ? 'checked' : ''} />
-                    <span>使用預設個人簽名 ${state.user?.signature_image ? '✅' : '（未設定）'}</span>
+                    <input type="radio" name="sig_mode" value="default" checked />
+                    <span>使用預設個人簽名 ${state.user?.signature_image ? '✅' : '（尚未設定，請至帳號設定）'}</span>
                   </label>
                   <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                    <input type="radio" name="sig_mode" value="draw" ${!state.user?.signature_image ? 'checked' : ''} />
+                    <input type="radio" name="sig_mode" value="draw" />
                     <span>現場白板手寫簽名</span>
                   </label>
                 </div>
-                <div id="draw-sig-wrap" style="margin-top:10px;${!state.user?.signature_image ? '' : 'display:none'}">
+                <div id="default-sig-preview" style="margin-top:10px">
+                  ${
+                    state.user?.signature_image
+                      ? `<img src="${state.user.signature_image}" alt="預設簽名" style="max-height:70px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:2px" />`
+                      : `<span class="muted" style="font-size:0.85rem">尚未設定個人簽名，可至「帳號設定」建立，或改選現場手寫。</span>`
+                  }
+                </div>
+                <div id="draw-sig-wrap" style="margin-top:10px;display:none">
                   <button type="button" class="btn outline sm" id="btn-open-spot-sig">✏️ 點此開始手寫簽名</button>
                   <div id="spot-sig-preview" style="margin-top:8px"></div>
                 </div>
@@ -5409,12 +5417,31 @@ async function renderDetail(body, id) {
   if (canApprove) {
     const sigRadios = body.querySelectorAll('input[name=sig_mode]');
     const drawWrap = $('#draw-sig-wrap');
+    const defaultPrev = $('#default-sig-preview');
     const spotPreview = $('#spot-sig-preview');
+    const syncSigModeUi = () => {
+      const mode = body.querySelector('input[name=sig_mode]:checked')?.value || 'default';
+      if (drawWrap) drawWrap.style.display = mode === 'draw' ? '' : 'none';
+      if (defaultPrev) defaultPrev.style.display = mode === 'default' ? '' : 'none';
+    };
     sigRadios.forEach((r) => {
-      r.addEventListener('change', () => {
-        if (drawWrap) drawWrap.style.display = r.value === 'draw' ? '' : 'none';
-      });
+      r.addEventListener('change', syncSigModeUi);
     });
+    syncSigModeUi();
+    // 進詳情時確保個人預設簽名是最新（登入 token 不含簽名圖）
+    (async () => {
+      try {
+        const sigRes = await api('/api/users/me/signature');
+        if (sigRes?.signature_image) {
+          state.user = { ...(state.user || {}), signature_image: sigRes.signature_image };
+          if (defaultPrev && body.querySelector('input[name=sig_mode][value=default]')?.checked) {
+            defaultPrev.innerHTML = `<img src="${sigRes.signature_image}" alt="預設簽名" style="max-height:70px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:2px" />`;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
     $('#btn-open-spot-sig')?.addEventListener('click', () => {
       openSignaturePadModal({
         title: '現場手寫簽名',
@@ -5505,6 +5532,7 @@ async function renderDetail(body, id) {
 
     let finalSignatureImage = null;
     if (action === 'approve') {
+      // 預設一律用個人預設簽名；僅明確選「現場手寫」才用白板
       const selectedMode = body.querySelector('input[name=sig_mode]:checked')?.value || 'default';
       if (selectedMode === 'draw') {
         if (!spotSignatureImage) {
@@ -5512,8 +5540,21 @@ async function renderDetail(body, id) {
           return;
         }
         finalSignatureImage = spotSignatureImage;
-      } else if (state.user?.signature_image) {
-        finalSignatureImage = state.user.signature_image;
+      } else {
+        // default：優先記憶體中的個人簽名，否則再拉一次 API
+        finalSignatureImage = state.user?.signature_image || null;
+        if (!finalSignatureImage) {
+          try {
+            const sigRes = await api('/api/users/me/signature');
+            finalSignatureImage = sigRes?.signature_image || null;
+            if (finalSignatureImage) {
+              state.user = { ...(state.user || {}), signature_image: finalSignatureImage };
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        // 未設定時仍可核准；後端也會再從 DB 套用預設簽名
       }
     }
 

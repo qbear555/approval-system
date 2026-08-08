@@ -6454,10 +6454,22 @@ app.post(
     finalComment = action === 'approve' ? '同意' : '駁回';
   }
 
-  // 簽名檔處置（優先使用傳入的簽名檔 Base64；若無則自動帶入個人預設簽名）
+  // 簽名檔處置：優先本次上傳；否則一律帶入「個人預設簽名」（JWT 無簽名欄，須查 DB）
   let sigImgToSave = signatureImage || null;
-  if (!sigImgToSave && req.user.signature_image) {
-    sigImgToSave = req.user.signature_image;
+  if (sigImgToSave && typeof sigImgToSave === 'string') {
+    sigImgToSave = String(sigImgToSave).trim() || null;
+  } else {
+    sigImgToSave = null;
+  }
+  if (!sigImgToSave) {
+    try {
+      const uSig = db
+        .prepare(`SELECT signature_image FROM users WHERE id = ?`)
+        .get(req.user.id);
+      if (uSig?.signature_image) sigImgToSave = uSig.signature_image;
+    } catch {
+      /* ignore */
+    }
   }
 
   // 中間步驟可隨簽核一併上傳附件；最終審核者不可
@@ -7081,14 +7093,18 @@ app.post('/api/requests/bulk-action', authMiddleware, async (req, res) => {
       const finalComment = comment ? String(comment).trim() : defaultComment;
 
       if (action === 'approve') {
-        db.prepare(
-          `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
-           VALUES (?, ?, ?, ?, 'approve', ?, '{}')`
-        ).run(id, stepOrder, stepName, req.user.id, finalComment);
-
-        if (signature_image) {
-          db.prepare(`UPDATE users SET signature_image = ? WHERE id = ?`).run(String(signature_image), req.user.id);
+        // 批次核准：優先本次簽名，否則個人預設簽名（查 DB）
+        let sigImg = signature_image ? String(signature_image).trim() : '';
+        if (!sigImg) {
+          const uSig = db
+            .prepare(`SELECT signature_image FROM users WHERE id = ?`)
+            .get(req.user.id);
+          if (uSig?.signature_image) sigImg = uSig.signature_image;
         }
+        db.prepare(
+          `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data, signature_image)
+           VALUES (?, ?, ?, ?, 'approve', ?, '{}', ?)`
+        ).run(id, stepOrder, stepName, req.user.id, finalComment, sigImg || null);
 
         advanceToNextEligibleStep(id, detail, steps, step);
         const after = getRequestDetail(id);
