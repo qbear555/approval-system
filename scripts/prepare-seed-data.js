@@ -47,6 +47,75 @@ function copyDir(src, dest, { skipFiles = false } = {}) {
   return n;
 }
 
+/**
+ * 全新安裝用的種子淨化：只留簽核流程定義，不帶任何員工個資。
+ *
+ * 為什麼需要：purgeTransactionalData 的保留清單含 users，種子會帶著
+ * 全公司帳號（姓名、部門、密碼雜湊）出貨；流程的 approverIds 與
+ * 最終通知名單也存著真實使用者 id 與姓名。安裝到新環境時這些 id
+ * 指向不存在的人，功能不正確，個資也不該散佈。
+ */
+function sanitizeForFreshInstall(dbPath) {
+  const { hashPassword } = require(path.join(Root, 'server', 'auth'));
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = OFF');
+
+  // 1. 使用者：只留預設 admin
+  const before = db.prepare('SELECT COUNT(*) c FROM users').get().c;
+  db.exec('DELETE FROM users');
+  try { db.exec('DELETE FROM user_departments'); } catch { /* 表可能不存在 */ }
+  db.prepare(
+    `INSERT INTO users (id, username, password_hash, name, email, department, role)
+     VALUES (1, 'admin', ?, '系統管理員', 'admin@example.com', '管理部', 'admin')`
+  ).run(hashPassword('admin123'));
+  try {
+    db.exec(`INSERT OR IGNORE INTO user_departments (user_id, department) VALUES (1, '管理部')`);
+  } catch { /* ignore */ }
+  console.log(`  使用者 ${before} → 1（僅預設 admin）`);
+
+  // 2. 不出貨的流程：已標記永久刪除的、以及測試流程
+  for (const w of db.prepare("SELECT id, name FROM workflows WHERE purged = 1 OR name = 'TEST'").all()) {
+    db.prepare('DELETE FROM workflows WHERE id = ?').run(w.id);
+    console.log(`  移除流程 #${w.id} ${w.name}`);
+  }
+
+  // 3. 流程：清空簽核人與最終通知名單，版本統一為 v1
+  const upd = db.prepare(
+    `UPDATE workflows SET steps_json = ?, flow_json = NULL, flow_version = 1,
+            final_notify_json = ?, created_by = 1 WHERE id = ?`
+  );
+  let clearedAppr = 0;
+  let clearedNotify = 0;
+  for (const w of db.prepare('SELECT id, steps_json, final_notify_json FROM workflows').all()) {
+    let steps = [];
+    try { steps = JSON.parse(w.steps_json || '[]'); } catch { steps = []; }
+    for (const s of steps) {
+      clearedAppr += (s.approverIds || []).length;
+      s.approverIds = [];
+      if (Array.isArray(s.approvers)) s.approvers = [];
+    }
+    let fn = { enabled: false, userIds: [] };
+    if (w.final_notify_json) {
+      try {
+        fn = JSON.parse(w.final_notify_json);
+        clearedNotify += (fn.userIds || []).length + (fn.applicantUserIds || []).length;
+        fn.userIds = [];
+        fn.applicantUserIds = [];
+        fn.users = [];
+        fn.applicants = [];
+        // 沒有收件人卻標記啟用，安裝後通知會靜默失效
+        fn.enabled = false;
+      } catch { fn = { enabled: false, userIds: [] }; }
+    }
+    upd.run(JSON.stringify(steps), JSON.stringify(fn), w.id);
+  }
+  console.log(`  清空簽核人 ${clearedAppr} 筆、最終通知名單 ${clearedNotify} 筆，流程版本統一為 v1`);
+
+  db.exec('PRAGMA foreign_keys = ON');
+  db.exec('VACUUM');
+  db.close();
+}
+
 /** 清空簽核相關表，保留 users / departments / workflows 等設定 */
 function purgeTransactionalData(dbPath) {
   const db = new DatabaseSync(dbPath);
@@ -158,6 +227,10 @@ src.close();
 console.log('Purging approval records from seed DB...');
 purgeTransactionalData(destDbPath);
 
+// 全新安裝：只保留簽核流程定義，不帶任何員工個資
+console.log('Sanitizing seed for fresh install...');
+sanitizeForFreshInstall(destDbPath);
+
 // 不複製 uploads / backups / mail-outbox 內容（僅空目錄）
 // calendar 保留（若有辦公日曆）
 const nUp = 0;
@@ -233,6 +306,51 @@ if (exp.stdout) process.stdout.write(exp.stdout);
 if (exp.stderr) process.stderr.write(exp.stderr);
 if (exp.status !== 0) {
   console.warn('export-workflows exit', exp.status);
+}
+
+// export-workflows.js 讀的是現行 data/approval.db（那是 app 匯出功能的正確行為），
+// 因此產出的 JSON 仍帶著真實簽核人 id 與姓名。種子用的檔案必須再淨化一次，
+// 否則安裝包會透過這條路徑外洩員工個資。
+sanitizeExportedWorkflowJson(OutWfDir);
+
+function sanitizeExportedWorkflowJson(dir) {
+  if (!fs.existsSync(dir)) return;
+  const stripOne = (w) => {
+    for (const s of w.steps || []) {
+      s.approverIds = [];
+      if (Array.isArray(s.approvers)) s.approvers = [];
+    }
+    if (w.finalNotify) {
+      w.finalNotify.userIds = [];
+      w.finalNotify.applicantUserIds = [];
+      w.finalNotify.users = [];
+      w.finalNotify.applicants = [];
+      w.finalNotify.enabled = false;
+    }
+    if (w.flow && Array.isArray(w.flow.nodes)) {
+      for (const n of w.flow.nodes) if (Array.isArray(n.approverIds)) n.approverIds = [];
+    }
+    return w;
+  };
+  let removed = 0;
+  let cleaned = 0;
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.json')) continue;
+    const p = path.join(dir, f);
+    let j;
+    try { j = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { continue; }
+    // 測試流程不出貨
+    if (j.name === 'TEST') { fs.unlinkSync(p); removed++; continue; }
+    if (Array.isArray(j.workflows)) {
+      j.workflows = j.workflows.filter((w) => w.name !== 'TEST').map(stripOne);
+      j.count = j.workflows.length;
+    } else {
+      stripOne(j);
+    }
+    fs.writeFileSync(p, JSON.stringify(j, null, 2), 'utf8');
+    cleaned++;
+  }
+  console.log(`  流程 JSON 淨化：清理 ${cleaned} 檔、移除測試流程 ${removed} 檔`);
 }
 
 // Members CSV (UTF-8 BOM for Excel)

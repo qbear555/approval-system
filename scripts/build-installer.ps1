@@ -228,13 +228,21 @@ try {
 }
 } # end if (-not $SkipBootCheck)
 
-# Remove DBs created during verify (empty test DB)
+# Remove artifacts created during verify (empty test DB)
+# 啟動驗證會實際跑起服務，deploy-log 會寫入部署歷史與自動修改紀錄。
+# 全新安裝不該帶這些紀錄，且它們含建置機器的版本指紋，一併清掉。
 Get-ChildItem (Join-Path $appDir 'data') -Recurse -ErrorAction SilentlyContinue |
   Where-Object {
     $_.Name -like 'approval.db*' -or $_.Name -like '*.log' -or
-    $_.Extension -eq '.pdf'
+    $_.Extension -eq '.pdf' -or
+    $_.Name -eq 'deploy-history.json' -or $_.Name -eq '修改紀錄-自動.md' -or
+    $_.Name -eq 'version-state.json'
   } |
   Remove-Item -Force -ErrorAction SilentlyContinue
+foreach ($f in @('docs\修改紀錄-自動.md', 'docs\修改紀錄.md')) {
+  $p = Join-Path $appDir $f
+  if (Test-Path $p) { Remove-Item -Force $p -ErrorAction SilentlyContinue }
+}
 
 # --- Seed data: all members + 5 workflows ---
 Write-Host '[5b/7] Prepare seed data (users + 5 forms)...' -ForegroundColor Yellow
