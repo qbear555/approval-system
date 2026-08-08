@@ -4245,13 +4245,13 @@ async function openOnlyOfficeEditor(attachmentId, requestId) {
       panel.classList.remove('wide', 'modal-panel-wide');
     }
 
+    // 高度由 CSS 的 flex 撐滿（.oo-editor-host { flex:1 }），
+    // 這裡量實際可用高度傳給 DocsAPI —— 它需要明確的 px 值。
+    // 原本用 window.innerHeight 沒扣掉標題列，會超出視窗高度。
     const host = document.getElementById('onlyoffice-placeholder');
     const barH = document.querySelector('.oo-editor-bar')?.offsetHeight || 52;
-    const editorH = Math.max(480, window.innerHeight - barH);
-    if (host) {
-      host.style.height = `${editorH}px`;
-      host.style.width = '100%';
-    }
+    const editorH = Math.max(480, (host?.clientHeight || window.innerHeight - barH));
+    if (host) host.style.width = '100%';
 
     const cfg = {
       ...data.config,
