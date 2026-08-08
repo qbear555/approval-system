@@ -311,25 +311,36 @@ function openFlowEditor(workflow, onSave) {
   }
 
   /**
-   * 從節點中心朝目標方向，取節點外框上的交點。
-   * 線條若直接畫到節點中心，箭頭會被節點方塊蓋住而看不見方向，
-   * 所以兩端都要收到外框上；終點再往回退一點留給箭頭本身。
+   * 計算連線的起訖錨點與貝茲控制點。
+   *
+   * 錨點必須和曲線的進出方向一致，否則會「貼不緊」：
+   * 若用中心到中心的直線去求外框交點，斜向連線會落在節點的上／下緣，
+   * 但曲線是水平進出的，箭頭就會停在離線條很遠的邊上。
+   *
+   * 作法：比較水平與垂直距離，取主要方向決定接在左右邊或上下緣，
+   * 控制點也朝同一方向拉出，曲線就會垂直於該邊進出。
    */
-  function borderPoint(node, towardX, towardY, pullBack) {
-    const w = nodeWidth(node) / 2;
+  function edgeAnchors(a, b) {
+    const ca = centerOf(a);
+    const cb = centerOf(b);
+    const wa = nodeWidth(a) / 2;
+    const wb = nodeWidth(b) / 2;
     const h = FE_NODE_H / 2;
-    const c = centerOf(node);
-    const dx = towardX - c.x;
-    const dy = towardY - c.y;
-    if (!dx && !dy) return c;
-    // 射線與矩形邊界的交點：取水平／垂直方向較先碰到的那個
-    const scale = Math.min(
-      dx ? w / Math.abs(dx) : Infinity,
-      dy ? h / Math.abs(dy) : Infinity
-    );
-    const len = Math.sqrt(dx * dx + dy * dy) * scale;
-    const back = pullBack ? Math.max(0, (len - pullBack) / len) : 1;
-    return { x: c.x + dx * scale * back, y: c.y + dy * scale * back };
+    const dx = cb.x - ca.x;
+    const dy = cb.y - ca.y;
+
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      const s = dx >= 0 ? 1 : -1;
+      const p1 = { x: ca.x + s * wa, y: ca.y };
+      const p2 = { x: cb.x - s * wb, y: cb.y };
+      const k = Math.max(40, Math.abs(p2.x - p1.x) * 0.45);
+      return { p1: p1, p2: p2, c1: { x: p1.x + s * k, y: p1.y }, c2: { x: p2.x - s * k, y: p2.y } };
+    }
+    const s = dy >= 0 ? 1 : -1;
+    const p1 = { x: ca.x, y: ca.y + s * h };
+    const p2 = { x: cb.x, y: cb.y - s * h };
+    const k = Math.max(40, Math.abs(p2.y - p1.y) * 0.45);
+    return { p1: p1, p2: p2, c1: { x: p1.x, y: p1.y + s * k }, c2: { x: p2.x, y: p2.y - s * k } };
   }
 
   function renderEdges() {
@@ -345,13 +356,16 @@ function openFlowEditor(workflow, onSave) {
       const a = nodeById(e.from);
       const b = nodeById(e.to);
       if (!a || !b) return;
-      const ca = centerOf(a);
-      const cb = centerOf(b);
-      // 兩端收到節點外框；終點多退 4px，箭頭尖端才不會壓在方塊邊上
-      const p1 = borderPoint(a, cb.x, cb.y, 0);
-      const p2 = borderPoint(b, ca.x, ca.y, 4);
-      const dx = Math.max(40, Math.abs(p2.x - p1.x) * 0.45);
-      const d = 'M ' + p1.x + ' ' + p1.y + ' C ' + (p1.x + dx) + ' ' + p1.y + ', ' + (p2.x - dx) + ' ' + p2.y + ', ' + p2.x + ' ' + p2.y;
+      // 錨點與控制點一起算，確保曲線垂直於節點邊界進出、箭頭貼緊外框
+      const an = edgeAnchors(a, b);
+      const p1 = an.p1;
+      const p2 = an.p2;
+      const c1 = an.c1;
+      const c2 = an.c2;
+      const d = 'M ' + p1.x.toFixed(1) + ' ' + p1.y.toFixed(1) +
+        ' C ' + c1.x.toFixed(1) + ' ' + c1.y.toFixed(1) +
+        ', ' + c2.x.toFixed(1) + ' ' + c2.y.toFixed(1) +
+        ', ' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1);
       const isSel = selected && selected.kind === 'edge' && selected.index === i;
       const color = isSel ? '#2563eb' : e.condition ? '#d97706' : '#94a3b8';
       const marker = isSel ? 'fe-arrow-s' : e.condition ? 'fe-arrow-c' : 'fe-arrow';
@@ -360,8 +374,6 @@ function openFlowEditor(workflow, onSave) {
         'marker-end="url(#' + marker + ')" data-edge="' + i + '"></path>';
 
       // 線段中央再放一個方向指標：長線條或彎折時，只靠終點箭頭不容易一眼看出流向
-      const c1 = { x: p1.x + dx, y: p1.y };
-      const c2 = { x: p2.x - dx, y: p2.y };
       const mid = {
         x: (p1.x + 3 * c1.x + 3 * c2.x + p2.x) / 8,
         y: (p1.y + 3 * c1.y + 3 * c2.y + p2.y) / 8,
