@@ -10,6 +10,7 @@
  */
 
 const FE_NODE_W = 150;
+const FE_HINT = '拖曳節點可移動；拖曳空白處平移畫布；Ctrl + 滾輪縮放';
 const FE_NODE_H = 56;
 
 function feUid(prefix) {
@@ -168,9 +169,10 @@ function openFlowEditor(workflow, onSave) {
   let selected = null;
   let linkFrom = null;
   let drag = null;
+  let pan = null;
 
   openModal(
-    '<div class="fe-wrap" style="min-width:min(1100px,92vw)">' +
+    '<div class="fe-wrap">' +
       '<h3 style="margin:0 0 10px">流程圖編輯器' +
       (workflow && workflow.name ? ' — ' + esc(workflow.name) : '') +
       '</h3>' +
@@ -183,11 +185,21 @@ function openFlowEditor(workflow, onSave) {
         '<button type="button" class="btn sm outline danger" id="fe-del">🗑 刪除選取</button>' +
         '<span class="sep"></span>' +
         '<button type="button" class="btn sm outline" id="fe-tidy">⇄ 自動排版</button>' +
-        '<span class="fe-hint" id="fe-hint">拖曳節點可移動；點節點或連線可編輯屬性</span>' +
+        '<span class="fe-hint" id="fe-hint">拖曳節點可移動；拖曳空白處平移畫布；Ctrl + 滾輪縮放</span>' +
       '</div>' +
-      '<div class="fe-canvas-wrap"><div class="fe-canvas" id="fe-canvas">' +
-        '<svg class="fe-edges" id="fe-edges"></svg>' +
-      '</div></div>' +
+      '<div class="fe-canvas-wrap" id="fe-canvas-wrap">' +
+        '<div class="fe-canvas-sizer" id="fe-canvas-sizer">' +
+          '<div class="fe-canvas" id="fe-canvas">' +
+            '<svg class="fe-edges" id="fe-edges"></svg>' +
+          '</div>' +
+        '</div>' +
+        '<div class="fe-zoom">' +
+          '<button type="button" id="fe-zoom-out" title="縮小（Ctrl + 滾輪）">−</button>' +
+          '<span class="fe-zoom-val" id="fe-zoom-val" title="點一下回到 100%">100%</span>' +
+          '<button type="button" id="fe-zoom-in" title="放大（Ctrl + 滾輪）">＋</button>' +
+          '<button type="button" id="fe-zoom-fit" title="縮放至剛好顯示全部節點">⤢</button>' +
+        '</div>' +
+      '</div>' +
       '<div class="fe-side" id="fe-side"></div>' +
       '<div id="fe-check"></div>' +
       '<div class="modal-actions" style="margin-top:10px">' +
@@ -197,9 +209,73 @@ function openFlowEditor(workflow, onSave) {
     '</div>'
   );
 
+  // openModal 會把 className 重設為 'modal-panel'，這裡再補上編輯器專用的
+  // 近全螢幕樣式，畫布才有足夠的操作空間
+  const panel = document.getElementById('modal-panel');
+  if (panel) panel.classList.add('fe-modal');
+
   const canvas = document.getElementById('fe-canvas');
+  const wrap = document.getElementById('fe-canvas-wrap');
+  const sizer = document.getElementById('fe-canvas-sizer');
   const svg = document.getElementById('fe-edges');
   const nodeById = (id) => g.nodes.find((n) => n.id === id);
+
+  /* ── 縮放與平移 ─────────────────────────────────────────
+     fe-canvas 用 transform: scale() 縮放，fe-canvas-sizer 同步撐出
+     縮放後的尺寸，捲軸才會反映真正的內容大小。
+     所有滑鼠座標換算都要除以 zoom，否則拖曳節點會跟著倍率飄掉。
+     ──────────────────────────────────────────────────── */
+  const CANVAS_W = 2400;
+  const CANVAS_H = 1500;
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 2.5;
+  let zoom = 1;
+
+  function applyZoom() {
+    canvas.style.transform = 'scale(' + zoom + ')';
+    sizer.style.width = Math.round(CANVAS_W * zoom) + 'px';
+    sizer.style.height = Math.round(CANVAS_H * zoom) + 'px';
+    const el = document.getElementById('fe-zoom-val');
+    if (el) el.textContent = Math.round(zoom * 100) + '%';
+  }
+
+  /** 以 wrap 內某個定點為錨點縮放，讓該點在畫面上位置不變 */
+  function setZoom(next, anchorClientX, anchorClientY) {
+    const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+    if (z === zoom) return;
+    const r = wrap.getBoundingClientRect();
+    const ax = anchorClientX == null ? r.width / 2 : anchorClientX - r.left;
+    const ay = anchorClientY == null ? r.height / 2 : anchorClientY - r.top;
+    // 錨點在畫布座標系的位置（縮放前後必須相同）
+    const cx = (wrap.scrollLeft + ax) / zoom;
+    const cy = (wrap.scrollTop + ay) / zoom;
+    zoom = z;
+    applyZoom();
+    wrap.scrollLeft = cx * zoom - ax;
+    wrap.scrollTop = cy * zoom - ay;
+  }
+
+  /** 縮放並置中，讓所有節點剛好進得了畫面 */
+  function zoomToFit() {
+    if (!g.nodes.length) return;
+    const xs = g.nodes.map((n) => (n.ui && n.ui.x) || 0);
+    const ys = g.nodes.map((n) => (n.ui && n.ui.y) || 0);
+    const minX = Math.min.apply(null, xs);
+    const minY = Math.min.apply(null, ys);
+    const maxX = Math.max.apply(null, xs) + FE_NODE_W;
+    const maxY = Math.max.apply(null, ys) + FE_NODE_H;
+    const pad = 40;
+    const r = wrap.getBoundingClientRect();
+    const z = Math.min(
+      (r.width - pad * 2) / Math.max(1, maxX - minX),
+      (r.height - pad * 2) / Math.max(1, maxY - minY)
+    );
+    zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+    applyZoom();
+    wrap.scrollLeft = minX * zoom - pad;
+    wrap.scrollTop = minY * zoom - pad;
+  }
+
 
   function nodeLabel(n) {
     if (!n) return '';
@@ -396,7 +472,9 @@ function openFlowEditor(workflow, onSave) {
     runCheck();
   }
 
-  canvas.onpointerdown = (ev) => {
+  // 掛在 wrap 而非 canvas：縮小時 wrap 內會有 canvas 以外的空白區域，
+  // 點在那裡也應該要能平移或取消選取
+  wrap.onpointerdown = (ev) => {
     // 連線必須在 pointerdown 就處理：pointerdown 早於 click，
     // 若這裡先當成「點空白處」而呼叫 render()，SVG 會整個重建，
     // 那條 path 在 click 觸發前就已從 DOM 移除，等於永遠選不到連線。
@@ -411,10 +489,17 @@ function openFlowEditor(workflow, onSave) {
     if (!el) {
       if (linkFrom) {
         linkFrom = null;
-        document.getElementById('fe-hint').textContent = '拖曳節點可移動；點節點或連線可編輯屬性';
+        document.getElementById('fe-hint').textContent = FE_HINT;
       }
-      selected = null;
-      render();
+      // 空白處按住拖曳 = 平移畫布
+      pan = {
+        x: ev.clientX,
+        y: ev.clientY,
+        sl: wrap.scrollLeft,
+        st: wrap.scrollTop,
+        moved: false,
+      };
+      wrap.classList.add('is-panning');
       return;
     }
     const n = nodeById(el.dataset.id);
@@ -425,31 +510,83 @@ function openFlowEditor(workflow, onSave) {
         g.edges.push({ from: linkFrom, to: n.id });
       }
       linkFrom = null;
-      document.getElementById('fe-hint').textContent = '拖曳節點可移動；點節點或連線可編輯屬性';
+      document.getElementById('fe-hint').textContent = FE_HINT;
       render();
       return;
     }
     selected = { kind: 'node', id: n.id };
-    const r = el.getBoundingClientRect();
-    drag = { id: n.id, dx: ev.clientX - r.left, dy: ev.clientY - r.top };
-    try { el.setPointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
+    // 記錄起始的「節點座標」與「滑鼠螢幕座標」，移動時只用兩者的差值換算。
+    // 不可依賴即時的 canvas.getBoundingClientRect()：pointerdown 會觸發
+    // render()，側欄與檢查訊息重繪會改變版面高度，畫布位置跟著位移，
+    // 用即時 rect 換算就會產生固定偏移。
+    drag = {
+      id: n.id,
+      ox: (n.ui && n.ui.x) || 0,
+      oy: (n.ui && n.ui.y) || 0,
+      sx: ev.clientX,
+      sy: ev.clientY,
+    };
+    // 捕捉在 wrap 上（移動與放開的 handler 也在 wrap）；
+    // 若捕捉在節點上，render() 重建節點時捕捉會中斷，拖曳就會卡住
+    try { wrap.setPointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
     render();
   };
 
-  canvas.onpointermove = (ev) => {
+  // 平移與拖曳都掛在 wrap 上：節點被拖出畫布邊界時，
+  // 事件仍需持續收到，掛在 canvas 上會在游標離開時斷掉
+  wrap.onpointermove = (ev) => {
+    if (pan) {
+      const dx = ev.clientX - pan.x;
+      const dy = ev.clientY - pan.y;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) pan.moved = true;
+      wrap.scrollLeft = pan.sl - dx;
+      wrap.scrollTop = pan.st - dy;
+      return;
+    }
     if (!drag) return;
     const n = nodeById(drag.id);
     if (!n) return;
-    const rect = canvas.getBoundingClientRect();
+    // 螢幕位移 ÷ 縮放倍率 = 畫布位移
     n.ui = {
-      x: Math.max(0, Math.round(ev.clientX - rect.left - drag.dx)),
-      y: Math.max(0, Math.round(ev.clientY - rect.top - drag.dy)),
+      x: Math.max(0, Math.round(drag.ox + (ev.clientX - drag.sx) / zoom)),
+      y: Math.max(0, Math.round(drag.oy + (ev.clientY - drag.sy) / zoom)),
     };
     const el = canvas.querySelector('.fe-node[data-id="' + (window.CSS && CSS.escape ? CSS.escape(n.id) : n.id) + '"]');
     if (el) { el.style.left = n.ui.x + 'px'; el.style.top = n.ui.y + 'px'; }
     renderEdges();
   };
-  canvas.onpointerup = () => { drag = null; };
+
+  wrap.onpointerup = () => {
+    if (pan) {
+      const wasClick = !pan.moved;
+      pan = null;
+      wrap.classList.remove('is-panning');
+      // 只有「點一下沒拖動」才視為點空白處取消選取，
+      // 否則平移完會把使用者原本選好的節點清掉
+      if (wasClick && selected) {
+        selected = null;
+        render();
+      }
+      return;
+    }
+    drag = null;
+  };
+  wrap.onpointerleave = () => {
+    if (pan) { pan = null; wrap.classList.remove('is-panning'); }
+    drag = null;
+  };
+
+  // Ctrl／⌘ + 滾輪縮放（單純滾輪維持捲動，符合一般預期）
+  wrap.onwheel = (ev) => {
+    if (!ev.ctrlKey && !ev.metaKey) return;
+    ev.preventDefault();
+    setZoom(zoom * (ev.deltaY < 0 ? 1.12 : 1 / 1.12), ev.clientX, ev.clientY);
+  };
+
+  document.getElementById('fe-zoom-in').onclick = () => setZoom(zoom * 1.2);
+  document.getElementById('fe-zoom-out').onclick = () => setZoom(zoom / 1.2);
+  document.getElementById('fe-zoom-fit').onclick = () => zoomToFit();
+  document.getElementById('fe-zoom-val').onclick = () => setZoom(1);
 
   document.getElementById('fe-add-approval').onclick = () => {
     const id = feUid('n');
@@ -504,4 +641,7 @@ function openFlowEditor(workflow, onSave) {
   };
 
   render();
+  applyZoom();
+  // 開啟時自動縮放到看得見全部節點
+  setTimeout(zoomToFit, 0);
 }

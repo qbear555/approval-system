@@ -2153,6 +2153,18 @@ input[type="checkbox"], input[type="radio"] {
    流程圖畫布編輯器（Phase 3）
    ============================================================ */
 .fe-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* 流程圖編輯器用近全螢幕的視窗，畫布才有足夠操作空間 */
+.modal-panel.fe-modal {
+  width: min(1680px, 96vw);
+  max-height: 94vh;
+  height: 94vh;
+  padding: 18px 20px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.modal-panel.fe-modal .fe-wrap { flex: 1; min-height: 0; }
 .fe-toolbar {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 8px 10px; background: #f8fafc;
@@ -2162,15 +2174,43 @@ input[type="checkbox"], input[type="radio"] {
 .fe-hint { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
 
 .fe-canvas-wrap {
-  position: relative; flex: 1; min-height: 380px;
+  position: relative; flex: 1; min-height: 320px;
   border: 1px solid var(--border); border-radius: 8px;
   background:
     linear-gradient(90deg, rgba(148,163,184,.10) 1px, transparent 1px) 0 0/20px 20px,
     linear-gradient(rgba(148,163,184,.10) 1px, transparent 1px) 0 0/20px 20px,
     #fff;
   overflow: auto;
+  overscroll-behavior: contain;
 }
-.fe-canvas { position: relative; width: 1600px; height: 900px; }
+.fe-canvas-wrap.is-panning { cursor: grabbing; }
+/* sizer 撐出捲動範圍（畫布尺寸 x 縮放倍率）；fe-canvas 只負責 transform，
+   兩者分開才能讓捲軸正確反映縮放後的內容大小 */
+.fe-canvas-sizer { position: relative; }
+.fe-canvas {
+  position: relative; width: 2400px; height: 1500px;
+  transform-origin: 0 0;
+}
+
+/* 縮放控制列 */
+.fe-zoom {
+  position: absolute; right: 12px; bottom: 12px; z-index: 5;
+  display: flex; align-items: center; gap: 2px;
+  background: rgba(255,255,255,.94);
+  border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(15,23,42,.12);
+  padding: 3px;
+}
+.fe-zoom button {
+  width: 28px; height: 26px; border: 0; background: transparent;
+  border-radius: 6px; cursor: pointer; font-size: 0.95rem; line-height: 1;
+  color: var(--text);
+}
+.fe-zoom button:hover { background: #f1f5f9; }
+.fe-zoom .fe-zoom-val {
+  min-width: 50px; text-align: center; font-size: 0.76rem;
+  color: var(--muted); font-variant-numeric: tabular-nums; cursor: pointer;
+}
 .fe-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .fe-edges path { pointer-events: stroke; cursor: pointer; }
 
