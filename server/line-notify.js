@@ -2,6 +2,7 @@
  * LINE 通知（呼叫獨立服務 D:\Line 專案 /api/push）
  * 設定檔：data/line-config.json（執行期，不進一鍵安裝包）
  */
+const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 
@@ -73,7 +74,7 @@ function saveConfig(partial = {}) {
   }
   next.configAccess = access;
   next.enabled = !!next.enabled;
-  next.updatedAt = new Date().toISOString();
+  next.updatedAt = tz.nowIso();
   ensureDir();
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
   return next;

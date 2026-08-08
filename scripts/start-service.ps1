@@ -26,7 +26,8 @@ if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | O
 
 # Prefer WMI Create so process is not tied to this shell's job object
 # PORT=3847 via start-server.js default; also pass on command line for clarity
-$cmdLine = 'cmd /c "set PORT=3847&& set HTTPS_ENABLED=0&& "' + $Node + '" "' + $serverJs + '"'
+# TZ 必須在行程啟動前設定：SQLite 的 datetime('now','localtime') 於啟動時綁定時區
+$cmdLine = 'cmd /c "set PORT=3847&& set HTTPS_ENABLED=0&& set TZ=Asia/Taipei&& "' + $Node + '" "' + $serverJs + '"'
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine     = $cmdLine
   CurrentDirectory = $Root

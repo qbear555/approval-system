@@ -1,3 +1,6 @@
+// 時區必須最先載入：它會設定 process.env.TZ，
+// 之後 db 的 datetime('now','localtime') 才會是台灣時間
+const tz = require('./tz');
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -2358,7 +2361,7 @@ function getActiveDelegationForUser(grantorUserId) {
     )
     .get(Number(grantorUserId));
   if (!row) return null;
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  const now = tz.nowMinute();
   if (row.start_time && row.start_time > now) return null;
   if (row.end_time && row.end_time < now) return null;
   return row;
@@ -2374,7 +2377,7 @@ function getGrantorUserIdsForDelegate(delegateUserId) {
        WHERE d.delegate_user_id = ? AND d.active = 1 AND u.active = 1`
     )
     .all(Number(delegateUserId));
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  const now = tz.nowMinute();
   const activeList = [];
   for (const r of rows) {
     if (r.start_time && r.start_time > now) continue;
@@ -4325,7 +4328,7 @@ app.post('/api/users/export', authMiddleware, adminOnly, (req, res) => {
     passwordMap,
   });
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-  const fname = `成員名單_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const fname = `成員名單_${tz.today()}.xlsx`;
   res.setHeader(
     'Content-Type',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -4653,7 +4656,7 @@ function buildWorkflowExportItem(row) {
     steps: stepsEnriched,
     pdfLayout,
     finalNotify,
-    exportedAt: new Date().toISOString(),
+    exportedAt: tz.nowIso(),
   });
 }
 
@@ -4674,11 +4677,11 @@ app.get('/api/workflows/export', authMiddleware, requirePerm('workflows'), (req,
     version: 2,
     module: 'workflow+form+pdfLayout+finalNotify',
     note: '僅含簽核流程模組（表單欄位＋步驟＋PDF 排版＋最終核准通知）；不含系統設定／Email／使用者／歷史單據',
-    exportedAt: new Date().toISOString(),
+    exportedAt: tz.nowIso(),
     count: rows.length,
     workflows: rows.map(buildWorkflowExportItem),
   };
-  const fname = `全部簽核流程_可匯入_${new Date().toISOString().slice(0, 10)}.json`;
+  const fname = `全部簽核流程_可匯入_${tz.today()}.json`;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader(
     'Content-Disposition',
@@ -4746,7 +4749,7 @@ app.get('/api/system/package/export', authMiddleware, builtinAdminOnly, (req, re
     );
     const pack = systemPackage.buildPackage({ includeHistory, includeMailSecrets });
     const tag = includeHistory ? '完整含歷史' : '設定';
-    const fname = `簽核系統_${tag}包_${new Date().toISOString().slice(0, 10)}.json`;
+    const fname = `簽核系統_${tag}包_${tz.today()}.json`;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
@@ -6579,7 +6582,7 @@ app.post(
         step_name: step.name,
         data: validated.data || {},
         by: req.user.id,
-        at: new Date().toISOString(),
+        at: tz.nowIso(),
       };
       Object.assign(merged, validated.data || {});
       db.prepare(
@@ -7415,7 +7418,7 @@ app.get('/api/requests/:id/pdf', authMiddleware, async (req, res) => {
       .all(detail.id);
 
     const clientIp = getClientIp(req);
-    const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const nowStr = tz.nowMinute();
     const watermarkText = `檢視防偽：${req.user.name} (${req.user.username}) · ${nowStr} · IP: ${clientIp}`;
     const detailEnriched = { ...detail, watermarkText };
 
@@ -7721,7 +7724,7 @@ app.get('/api/system/audit-logs/export', authMiddleware, (req, res) => {
   const csvContent = BOM + [headers.join(','), ...rows.map((r) => r.map((cell) => `"${cell}"`).join(','))].join('\r\n');
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="system_audit_logs_${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="system_audit_logs_${tz.today()}.csv"`);
   res.send(csvContent);
 });
 
@@ -7991,6 +7994,9 @@ listenDual(server, PORT, '線上簽核系統 HTTP', [
     console.log(`${ver.banner} 已啟動`);
     console.log(`  版本: ${ver.labelFull || ver.label}`);
     console.log(`  建置: ${ver.build} · 原始檔 ${ver.sourceFiles || 0} 個`);
+    console.log(`  時間: ${tz.nowStamp()}（台灣時間）`);
+    // 主機時區不是 UTC+8 時大聲提醒：資料庫寫入的時間會錯，且只能在啟動前修正
+    tz.warnIfHostTzMismatch();
     console.log(`預設管理員: admin / admin123（若為首次啟動）`);
     try {
       deployLog.recordOnStartup();

@@ -1,3 +1,4 @@
+const tz = require('./tz');
 /**
  * 簽核流程模組（流程步驟 + 申請表單欄位 + PDF 排版 + 最終核准通知）
  * 匯出／匯入一體；不包含系統設定、Email 帳密、使用者帳號本體、歷史單據。
@@ -300,7 +301,7 @@ function buildExportModule({
       applicants: notify.applicants || [],
       label: notify.label,
     },
-    exportedAt: exportedAt || new Date().toISOString(),
+    exportedAt: exportedAt || tz.nowIso(),
   };
 }
 

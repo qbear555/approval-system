@@ -4,6 +4,7 @@
  * 不含：系統設定、Email、使用者、歷史單據
  * 用法：node server/export-workflows.js [輸出目錄]
  */
+const tz = require('./tz');
 const db = require('./db');
 const fs = require('fs');
 const path = require('path');
@@ -97,7 +98,7 @@ const pack = {
   format: 'approval-system-workflows',
   version: 2,
   module: 'workflow+form+pdfLayout+finalNotify',
-  exportedAt: new Date().toISOString(),
+  exportedAt: tz.nowIso(),
   systemUrl: 'http://127.0.0.1:8080/',
   count: workflows.length,
   workflows: [],

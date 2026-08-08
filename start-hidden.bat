@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+set "TZ=Asia/Taipei"
 if not exist "data" mkdir "data"
 
 set "NODE=C:\Program Files\nodejs\node.exe"

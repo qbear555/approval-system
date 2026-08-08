@@ -1160,6 +1160,21 @@ async function navigate(page, params = {}, navOpts = {}) {
   refreshBadge();
 }
 
+/**
+ * 台灣時間的 YYYY-MM-DD。
+ * 檔名原本用 new Date().toISOString()，那是 UTC，
+ * 台灣時間早上 8 點前下載會標成前一天的日期。
+ */
+function twToday(d) {
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(d instanceof Date ? d : new Date());
+  const o = {};
+  for (const x of p) if (x.type !== 'literal') o[x.type] = x.value;
+  return o.year + '-' + o.month + '-' + o.day;
+}
+
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -5944,7 +5959,7 @@ async function renderWorkflows(body) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `全部簽核流程_可匯入_${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `全部簽核流程_可匯入_${twToday()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast('已匯出流程模組（表單＋步驟＋PDF 排版；不含系統設定）', 'success');
@@ -7667,7 +7682,7 @@ async function downloadUsersExcel(ids, { resetPasswords = false } = {}) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `成員名單_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.download = `成員名單_${twToday()}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -11383,9 +11398,7 @@ async function renderSystemSettings(body) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `簽核系統_${history === '1' ? '完整含歷史' : '設定'}包_${new Date()
-        .toISOString()
-        .slice(0, 10)}.json`;
+      a.download = `簽核系統_${history === '1' ? '完整含歷史' : '設定'}包_${twToday()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast('設定完整包已下載', 'success');

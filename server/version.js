@@ -4,6 +4,7 @@
  * - 自動建置戳：掃描 server/、public/ 等原始檔的內容指紋
  *   任一檔案修改後重啟服務，版本字串會自動變更
  */
+const tz = require('./tz');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -128,7 +129,7 @@ function buildFileSnapshots(files) {
     hash: digest,
     short,
     stamp,
-    builtAt: d.toISOString(),
+    builtAt: tz.nowIso(d),
     fileCount: Object.keys(map).length,
   };
 }

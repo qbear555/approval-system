@@ -3,6 +3,7 @@
  * 設定檔：data/mail-config.json
  * 若 SMTP 未就緒但 enabled=true，信件會寫入 data/mail-outbox 供檢查
  */
+const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 const nodemailer = require('nodemailer');
@@ -198,13 +199,13 @@ function fromAddress(cfg) {
 
 function writeOutbox({ to, subject, text, html, meta }) {
   ensureDirs();
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const stamp = tz.fileStamp();
   const file = path.join(OUTBOX_DIR, `${stamp}.json`);
   fs.writeFileSync(
     file,
     JSON.stringify(
       {
-        at: new Date().toISOString(),
+        at: tz.nowIso(),
         to,
         subject,
         text,

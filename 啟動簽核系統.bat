@@ -2,6 +2,7 @@
 chcp 65001 >nul
 title 線上簽核系統 - 請勿關閉此視窗
 cd /d "%~dp0"
+set "TZ=Asia/Taipei"
 
 set "NODE=C:\Program Files\nodejs\node.exe"
 if not exist "%NODE%" set "NODE=node"

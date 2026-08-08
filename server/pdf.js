@@ -1,3 +1,4 @@
+const tz = require('./tz');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
@@ -5119,7 +5120,7 @@ function writeApprovalPdf(request, destStream) {
     function endPdfWithApprovedStamp(doc, request, useFont) {
       if (request.watermarkText || request.requester_name) {
         try {
-          const text = String(request.watermarkText || `檢視/列印防偽：${request.requester_name || '系統同仁'} · ${new Date().toISOString().replace('T', ' ').slice(0, 16)}`).trim();
+          const text = String(request.watermarkText || `檢視/列印防偽：${request.requester_name || '系統同仁'} · ${tz.nowMinute()}`).trim();
           const range = doc.bufferedPageRange();
           for (let i = range.start; i < range.start + range.count; i++) {
             doc.switchToPage(i);

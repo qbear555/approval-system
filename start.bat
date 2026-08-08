@@ -2,6 +2,7 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 set "PORT=3847"
+set "TZ=Asia/Taipei"
 set "NODE=C:\Program Files\nodejs\node.exe"
 if not exist "%NODE%" set "NODE=node"
 echo ========================================

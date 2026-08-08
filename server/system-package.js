@@ -3,6 +3,7 @@
  * 包含：部門、成員（含密碼雜湊與權限）、簽核流程、Email 設定
  * 可選：歷史申請單、簽核歷程、附件實體檔
  */
+const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
@@ -232,7 +233,7 @@ function buildPackage({ includeHistory = false, includeMailSecrets = true } = {}
   return {
     format: FORMAT,
     version: VERSION,
-    exportedAt: new Date().toISOString(),
+    exportedAt: tz.nowIso(),
     includeHistory: Boolean(includeHistory),
     includeMailSecrets: Boolean(includeMailSecrets && mailConfig && mailConfig.pass),
     summary: {

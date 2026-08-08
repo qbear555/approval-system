@@ -32,6 +32,7 @@ ENV NODE_ENV=production \
     PORT=3847 \
     HTTPS_PORT=3848 \
     HTTPS_ENABLED=1 \
+    TZ=Asia/Taipei \
     JWT_SECRET=please-change-this-on-nas
 
 USER node

@@ -4,6 +4,7 @@
  * - 若有變更：寫入 data/deploy-history.json，並附加 data/修改紀錄-自動.md
  * - 若 docs/ 可寫：同步 docs/修改紀錄-自動.md，並在 docs/修改紀錄.md 頂部更新「最近自動部署」摘要
  */
+const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 const appVersion = require('./version');
@@ -38,7 +39,7 @@ function writeJson(file, obj) {
 }
 
 function localNowIso() {
-  return new Date().toISOString();
+  return tz.nowIso();
 }
 
 function formatLocal(dt = new Date()) {

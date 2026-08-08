@@ -2,6 +2,7 @@
  * 系統設定（公司名稱、Logo、PDF 數位簽章憑證、備份加密）
  * 儲存於 data/system-settings.json；Logo 於 data/branding/；憑證於 data/certs/
  */
+const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 
@@ -134,7 +135,7 @@ function normalizeAnnounceIso(v) {
   if (v == null || String(v).trim() === '') return null;
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return tz.nowIso(d);
 }
 
 function saveRaw(settings) {
@@ -168,7 +169,7 @@ function saveRaw(settings) {
     announcementStartAt: normalizeAnnounceIso(cur.announcementStartAt),
     announcementEndAt: normalizeAnnounceIso(cur.announcementEndAt),
     announcementUpdatedAt: cur.announcementUpdatedAt || null,
-    updatedAt: new Date().toISOString(),
+    updatedAt: tz.nowIso(),
   };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(payload, null, 2), 'utf8');
   return payload;
@@ -253,7 +254,7 @@ function updateAnnouncement(patch = {}) {
   if (start && end && start.getTime() > end.getTime()) {
     throw new Error('公布開始時間不可晚於結束時間');
   }
-  cur.announcementUpdatedAt = new Date().toISOString();
+  cur.announcementUpdatedAt = tz.nowIso();
   saveRaw(cur);
   return getAnnouncementPublic();
 }
@@ -338,7 +339,7 @@ function saveAnnouncementFile(file) {
   }
   cur.announcementFile = stored;
   cur.announcementOriginalName = displayName;
-  cur.announcementUpdatedAt = new Date().toISOString();
+  cur.announcementUpdatedAt = tz.nowIso();
   saveRaw(cur);
   return getAnnouncementPublic();
 }
@@ -355,7 +356,7 @@ function clearAnnouncementFile() {
   }
   cur.announcementFile = null;
   cur.announcementOriginalName = null;
-  cur.announcementUpdatedAt = new Date().toISOString();
+  cur.announcementUpdatedAt = tz.nowIso();
   saveRaw(cur);
   return getAnnouncementPublic();
 }
@@ -758,8 +759,8 @@ function createSelfSignedPdfSignCert(body = {}) {
       organization,
       country,
       validYears,
-      notBefore: cert.validity.notBefore.toISOString(),
-      notAfter: cert.validity.notAfter.toISOString(),
+      notBefore: tz.nowIso(cert.validity.notBefore),
+      notAfter: tz.nowIso(cert.validity.notAfter),
       fileName: name,
       selfSigned: true,
     },

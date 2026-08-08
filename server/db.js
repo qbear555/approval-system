@@ -1,3 +1,7 @@
+// 必須在建立連線前載入：資料表的時間欄位都用 datetime('now','localtime')，
+// 那取的是行程時區。tz 會把 TZ 固定為 Asia/Taipei，維護腳本直接 require
+// 本檔（未經 index.js）時也才會寫入台灣時間。
+require('./tz');
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
