@@ -24,7 +24,11 @@ $NodeZipName = "node-$NodeVersion-win-x64.zip"
 $NodeUrl = "https://nodejs.org/dist/$NodeVersion/$NodeZipName"
 $CacheDir = Join-Path $Root '.cache'
 $NodeZipPath = Join-Path $CacheDir $NodeZipName
-$Port = 8080
+# 便攜版對外使用的埠（寫進 README 與說明文件）
+$Port = 3847
+# 啟動驗證專用的暫時埠。刻意與 $Port 分開：驗證流程會清掉佔用該埠的
+# node 行程，若沿用 3847，建置時會把正在跑的開發伺服器一起砍掉。
+$VerifyPort = 34700
 
 Write-Host '========================================' -ForegroundColor Cyan
 Write-Host '  Build Approval System Installer' -ForegroundColor Cyan
@@ -159,14 +163,14 @@ Write-Host '[5/6] Verify boot...' -ForegroundColor Yellow
 # 舊寫法對任何佔用者無條件 Stop-Process -Force，若使用者剛好有別的程式
 # 在這個埠上（開發伺服器、其他服務），會被建置腳本直接強制砍掉。
 # 改為只清理 node，其他程式一律中止建置並要求使用者自行處理。
-foreach ($c in @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+foreach ($c in @(Get-NetTCPConnection -LocalPort $VerifyPort -State Listen -ErrorAction SilentlyContinue)) {
   $owner = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
   if (-not $owner) { continue }
   if ($owner.ProcessName -eq 'node') {
     Write-Host ("  清除殘留的 node 行程 PID {0}" -f $owner.Id) -ForegroundColor DarkGray
     Stop-Process -Id $owner.Id -Force -ErrorAction SilentlyContinue
   } else {
-    throw ("連接埠 $Port 被 {0}（PID {1}）占用，不是建置殘留的 node 行程。" -f $owner.ProcessName, $owner.Id) +
+    throw ("驗證用連接埠 $VerifyPort 被 {0}（PID {1}）占用，不是建置殘留的 node 行程。" -f $owner.ProcessName, $owner.Id) +
           "建置已中止，未動到該程式。請自行關閉後重試，或加 -SkipBootCheck 略過啟動驗證。"
   }
 }
@@ -178,7 +182,7 @@ $psi.Arguments = 'start-server.js'
 $psi.WorkingDirectory = $appDir
 $psi.UseShellExecute = $false
 $psi.CreateNoWindow = $true
-$psi.EnvironmentVariables['PORT'] = "$Port"
+$psi.EnvironmentVariables['PORT'] = "$VerifyPort"
 $proc = [System.Diagnostics.Process]::Start($psi)
 try {
   # 輪詢至多 30 秒，而非固定睡 3 秒後單次請求。
@@ -193,7 +197,7 @@ try {
       break
     }
     try {
-      $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 5
+      $r = Invoke-WebRequest -Uri "http://127.0.0.1:$VerifyPort/" -UseBasicParsing -TimeoutSec 5
       if ($r.StatusCode -eq 200) { $ok = $true; break }
       $lastErr = "HTTP $($r.StatusCode)"
     } catch {
@@ -219,7 +223,7 @@ try {
     $proc.Kill()
     $proc.WaitForExit(3000) | Out-Null
   }
-  Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+  Get-NetTCPConnection -LocalPort $VerifyPort -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 }
 } # end if (-not $SkipBootCheck)
@@ -322,7 +326,7 @@ $readmeLines = @(
   '  2. Double-click Install-ApprovalSystem.bat',
   '',
   '[After install]',
-  '  URL:      http://127.0.0.1:8080/',
+  '  URL:      http://127.0.0.1:3847/',
   '  Admin:    admin',
   '  Password: admin123',
   '  Folder:   %LOCALAPPDATA%\ApprovalSystem',
@@ -334,8 +338,8 @@ $readmeLines = @(
   '',
   '[LAN / Server]',
   '  1. Install and start on server',
-  '  2. Open firewall TCP 8080',
-  '  3. Clients open: http://SERVER-IP:8080/',
+  '  2. Open firewall TCP 3847',
+  '  3. Clients open: http://SERVER-IP:3847/',
   '',
   '[Uninstall]',
   '  Start Menu -> Approval System -> Uninstall',

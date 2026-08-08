@@ -45,6 +45,7 @@
 
 1. **直接在 NAS 正式站修改**（`192.168.99.220`）  
    - 正式站：https://192.168.99.220:3848  
+   - 外部網域：https://catshome.tw:3848  
    - 一律 `NAS_SKIP_DB=1`，**不覆寫**正式 `data/`、mail、LINE 密鑰  
 2. **NAS 確認 OK 後**，同步程式碼到本機：  
    ```bash
@@ -91,8 +92,11 @@
 4. **NAS 部署**：更新程式時預設 `NAS_SKIP_DB=1`，保留正式資料與備份。
 5. **HTTPS**：
    - NAS / Ubuntu Docker：HTTP `3847` + HTTPS `3848`
-   - Windows 便攜版：HTTP `8080` + HTTPS `8443`（若有憑證）
-6. 同步後建議寫一筆 `D:\一鍵安裝包\同步紀錄-YYYY-MM-DD.txt`。
+   - Windows 便攜版／本機：HTTP `3847`（2026-08 起由 8080 改為 3847，與 NAS 一致）
+6. **時區**：一律 `Asia/Taipei`。`TZ` 必須在**行程啟動前**設定才對 SQLite 生效
+   （`datetime('now','localtime')` 於啟動時綁定時區，程式內改 `process.env.TZ` 無效）。
+   Docker 由 `docker-compose.yml` / `Dockerfile` 設定；Windows 由各啟動 `.bat` 設定。
+7. 同步後建議寫一筆 `D:\一鍵安裝包\同步紀錄-YYYY-MM-DD.txt`。
 
 ### 一鍵安裝包不含 Email 設定（必守）
 

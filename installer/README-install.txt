@@ -13,7 +13,7 @@
    Or extract zip and run install.bat
 
 Install folder: %LOCALAPPDATA%\ApprovalSystem
-URL after install: http://127.0.0.1:8080/
+URL after install: http://127.0.0.1:3847/
 Admin: admin / admin123
 
 ========================================
@@ -29,8 +29,8 @@ Option 3: Open %LOCALAPPDATA%\ApprovalSystem
           - start-hidden.bat      (background only, no browser)
 
 Check if running:
-  Open http://127.0.0.1:8080/
-  Or run: netstat -ano | findstr :8080
+  Open http://127.0.0.1:3847/
+  Or run: netstat -ano | findstr :3847
   (LISTENING means server is ON)
 
 ========================================
@@ -43,8 +43,8 @@ Option 2: Run stop.bat in %LOCALAPPDATA%\ApprovalSystem
 Option 3: If started with start.bat, press Ctrl+C or close the black window
 
 Check if stopped:
-  http://127.0.0.1:8080/ cannot connect
-  Or: netstat -ano | findstr :8080 shows nothing listening
+  http://127.0.0.1:3847/ cannot connect
+  Or: netstat -ano | findstr :3847 shows nothing listening
 
 [Daily tips]
 - Need to use the system: start the server first
@@ -58,8 +58,8 @@ Check if stopped:
 
 [LAN]
 1. Install + START on the server PC
-2. Allow firewall TCP 8080
-3. Clients open: http://SERVER-IP:8080/
+2. Allow firewall TCP 3847
+3. Clients open: http://SERVER-IP:3847/
 
 [Uninstall]
 Start Menu -> 線上簽核系統 -> 解除安裝

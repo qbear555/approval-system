@@ -3,7 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 set "APP_DIR=%~dp0app"
 set "NODE_DIR=%~dp0runtime\node"
-set "PORT=8080"
+set "PORT=3847"
 set "TZ=Asia/Taipei"
 if not exist "%APP_DIR%\data" mkdir "%APP_DIR%\data"
 if not exist "%APP_DIR%\data\uploads" mkdir "%APP_DIR%\data\uploads"

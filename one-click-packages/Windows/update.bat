@@ -64,12 +64,12 @@ if exist "runtime\node\npm.cmd" (
 echo [3/3] 啟動服務...
 start "" "%~dp0start.bat"
 timeout /t 3 /nobreak >nul
-start http://127.0.0.1:8080
+start http://127.0.0.1:3847
 
 echo.
 echo ========================================
 echo  更新完成
-echo  HTTP : http://127.0.0.1:8080
+echo  HTTP : http://127.0.0.1:3847
 echo  HTTPS: https://127.0.0.1:8443 （若有憑證）
 echo  data\ 與 Email 已保留
 echo ========================================

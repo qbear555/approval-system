@@ -6,7 +6,7 @@ cd /d "%~dp0"
 set "APP_DIR=%~dp0app"
 set "NODE_DIR=%~dp0runtime\node"
 set "DATA_DIR=%APP_DIR%\data"
-set "PORT=8080"
+set "PORT=3847"
 set "TZ=Asia/Taipei"
 
 if not exist "%APP_DIR%\server\index.js" (
