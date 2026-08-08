@@ -299,35 +299,85 @@ function openFlowEditor(workflow, onSave) {
     return typeof stepAssignLabel === 'function' ? stepAssignLabel(n) : '';
   }
 
+  function nodeWidth(n) {
+    if (n.type === 'approval') return FE_NODE_W;
+    if (n.type === 'join') return 120;
+    return 110;
+  }
+
   function centerOf(n) {
-    const w = n.type === 'approval' ? FE_NODE_W : 115;
+    const w = nodeWidth(n);
     return { x: (n.ui && n.ui.x ? n.ui.x : 0) + w / 2, y: (n.ui && n.ui.y ? n.ui.y : 0) + FE_NODE_H / 2 };
+  }
+
+  /**
+   * 從節點中心朝目標方向，取節點外框上的交點。
+   * 線條若直接畫到節點中心，箭頭會被節點方塊蓋住而看不見方向，
+   * 所以兩端都要收到外框上；終點再往回退一點留給箭頭本身。
+   */
+  function borderPoint(node, towardX, towardY, pullBack) {
+    const w = nodeWidth(node) / 2;
+    const h = FE_NODE_H / 2;
+    const c = centerOf(node);
+    const dx = towardX - c.x;
+    const dy = towardY - c.y;
+    if (!dx && !dy) return c;
+    // 射線與矩形邊界的交點：取水平／垂直方向較先碰到的那個
+    const scale = Math.min(
+      dx ? w / Math.abs(dx) : Infinity,
+      dy ? h / Math.abs(dy) : Infinity
+    );
+    const len = Math.sqrt(dx * dx + dy * dy) * scale;
+    const back = pullBack ? Math.max(0, (len - pullBack) / len) : 1;
+    return { x: c.x + dx * scale * back, y: c.y + dy * scale * back };
   }
 
   function renderEdges() {
     let html =
       '<defs>' +
+      // 三種顏色各一個 marker：SVG marker 無法繼承線條顏色，
+      // 少了選取色的 marker，選中的線會變藍但箭頭仍是灰的
       '<marker id="fe-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>' +
       '<marker id="fe-arrow-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>' +
+      '<marker id="fe-arrow-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker>' +
       '</defs>';
     g.edges.forEach((e, i) => {
       const a = nodeById(e.from);
       const b = nodeById(e.to);
       if (!a || !b) return;
-      const p1 = centerOf(a);
-      const p2 = centerOf(b);
+      const ca = centerOf(a);
+      const cb = centerOf(b);
+      // 兩端收到節點外框；終點多退 4px，箭頭尖端才不會壓在方塊邊上
+      const p1 = borderPoint(a, cb.x, cb.y, 0);
+      const p2 = borderPoint(b, ca.x, ca.y, 4);
       const dx = Math.max(40, Math.abs(p2.x - p1.x) * 0.45);
       const d = 'M ' + p1.x + ' ' + p1.y + ' C ' + (p1.x + dx) + ' ' + p1.y + ', ' + (p2.x - dx) + ' ' + p2.y + ', ' + p2.x + ' ' + p2.y;
       const isSel = selected && selected.kind === 'edge' && selected.index === i;
-      const color = e.condition ? '#d97706' : '#94a3b8';
-      html += '<path d="' + d + '" fill="none" stroke="' + (isSel ? '#2563eb' : color) + '" stroke-width="' + (isSel ? 3 : 2) + '" ' +
+      const color = isSel ? '#2563eb' : e.condition ? '#d97706' : '#94a3b8';
+      const marker = isSel ? 'fe-arrow-s' : e.condition ? 'fe-arrow-c' : 'fe-arrow';
+      html += '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="' + (isSel ? 3 : 2) + '" ' +
         (e.condition ? 'stroke-dasharray="6 4" ' : '') +
-        'marker-end="url(#' + (e.condition ? 'fe-arrow-c' : 'fe-arrow') + ')" data-edge="' + i + '"></path>';
+        'marker-end="url(#' + marker + ')" data-edge="' + i + '"></path>';
+
+      // 線段中央再放一個方向指標：長線條或彎折時，只靠終點箭頭不容易一眼看出流向
+      const c1 = { x: p1.x + dx, y: p1.y };
+      const c2 = { x: p2.x - dx, y: p2.y };
+      const mid = {
+        x: (p1.x + 3 * c1.x + 3 * c2.x + p2.x) / 8,
+        y: (p1.y + 3 * c1.y + 3 * c2.y + p2.y) / 8,
+      };
+      // 三次貝茲在 t=0.5 的切線方向
+      const tan = {
+        x: 0.75 * (c1.x - p1.x) + 1.5 * (c2.x - c1.x) + 0.75 * (p2.x - c2.x),
+        y: 0.75 * (c1.y - p1.y) + 1.5 * (c2.y - c1.y) + 0.75 * (p2.y - c2.y),
+      };
+      const ang = (Math.atan2(tan.y, tan.x) * 180) / Math.PI;
+      html += '<path d="M -5 -4.5 L 5 0 L -5 4.5 Z" fill="' + color + '" style="pointer-events:none" ' +
+        'transform="translate(' + mid.x.toFixed(1) + ',' + mid.y.toFixed(1) + ') rotate(' + ang.toFixed(1) + ')"></path>';
+
       if (e.condition) {
-        const mx = (p1.x + p2.x) / 2;
-        const my = (p1.y + p2.y) / 2 - 8;
         const t = e.condition.fieldId + ' ' + flowOpSymbol(e.condition.operator) + ' ' + e.condition.value;
-        html += '<text x="' + mx + '" y="' + my + '" text-anchor="middle" font-size="11" fill="#92400e" style="pointer-events:none">' + esc(t) + '</text>';
+        html += '<text x="' + mid.x.toFixed(1) + '" y="' + (mid.y - 12).toFixed(1) + '" text-anchor="middle" font-size="11" fill="#92400e" style="pointer-events:none">' + esc(t) + '</text>';
       }
     });
     svg.innerHTML = html;
