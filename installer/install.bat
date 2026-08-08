@@ -11,6 +11,7 @@ echo.
 set "SRC=%~dp0"
 set "DEST=%LOCALAPPDATA%\ApprovalSystem"
 set "PORT=8080"
+set "TZ=Asia/Taipei"
 
 echo 安裝位置: %DEST%
 echo 服務埠號: %PORT%

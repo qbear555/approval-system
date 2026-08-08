@@ -7,6 +7,7 @@ set "APP_DIR=%~dp0app"
 set "NODE_DIR=%~dp0runtime\node"
 set "DATA_DIR=%APP_DIR%\data"
 set "PORT=8080"
+set "TZ=Asia/Taipei"
 
 if not exist "%APP_DIR%\server\index.js" (
   echo [錯誤] 找不到應用程式檔案，請先執行 install.bat。
