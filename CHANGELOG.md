@@ -2,6 +2,12 @@
 
 ## [1.1.0] — 2026-08-13
 
+### 架構
+
+- 後端路由抽出 `server/routes/bind-routes.js`（`index.js` 改為啟動、中介層與共用函式）。
+- 前端管理頁抽出 `public/js/pages-admin.js`（成員／部門／帳號／系統設定）。
+- 移除未掛載、易改錯檔的 `src/` 影子專案。
+
 ### P2 安全／權限
 
 - **預設密碼**：全新庫不再使用 `admin123`；初始密碼寫入 `data/.admin-bootstrap.txt`。啟動 log 不再印出密碼。仍使用 `admin123`／`pass1234` 的帳號登入後必須先改密。
