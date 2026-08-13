@@ -103,11 +103,24 @@ app.use((req, res, next) => {
       `connect-src 'self'${extra}`,
       `frame-src 'self' blob:${extra}`,
       `child-src 'self' blob:${extra}`,
-      "object-src 'none'",
+      `worker-src 'self' blob:${extra}`,
+      // Chrome 內建 PDF 檢視器用 object／embed；'none' 會顯示「此內容已被封鎖」
+      `object-src 'self' blob:${extra}`,
       "base-uri 'self'",
       "form-action 'self'",
     ].join('; ')
   );
+  // PDF／ZIP 本身若帶 CSP，Chrome 開啟檔案時也會封鎖內建檢視器
+  const origSetHeader = res.setHeader.bind(res);
+  res.setHeader = function setHeaderPatched(name, value) {
+    if (
+      String(name).toLowerCase() === 'content-type' &&
+      /application\/(pdf|zip)\b/i.test(String(value || ''))
+    ) {
+      res.removeHeader('Content-Security-Policy');
+    }
+    return origSetHeader(name, value);
+  };
   next();
 });
 // OnlyOffice 靜態資源同源代理（須在 static 之前，避免 HTTPS 混合內容）

@@ -147,6 +147,7 @@ child.stderr.on('data', (d) => process.stderr.write(d));
     const csp = String(home.headers['content-security-policy'] || '');
     if (!csp.includes("default-src 'self'")) throw new Error('缺少 CSP');
     if (!/frame-src[^;]*blob:/.test(csp)) throw new Error('CSP frame-src 未放行 blob（PDF 預覽會被擋）');
+    if (!/object-src[^;]*blob:/.test(csp)) throw new Error('CSP object-src 未放行 blob（Chrome PDF 檢視器會被擋）');
     if (String(home.headers['x-content-type-options'] || '') !== 'nosniff') {
       throw new Error('缺少 X-Content-Type-Options: nosniff');
     }
