@@ -2,7 +2,7 @@
 
 適合約 30 人規模的內部線上簽核工具，支援：
 
-- 使用者註冊 / 登入
+- 登入（由管理員建立帳號，**不開放自行註冊**）
 - 自訂簽核流程（多步驟、指定簽核人、任一/全員核准）
 - **流程綁定自訂表單**（文字、多行、數字、日期、下拉、核取方塊；可設必填）
 - **流程模組匯出／匯入**：表單 + 步驟 + PDF 排版 + 最終核准系統內通知（見 [docs/流程模組-最終核准通知.md](docs/流程模組-最終核准通知.md)）
@@ -18,7 +18,7 @@
 - Node.js 22+（使用內建 `node:sqlite`，無需編譯原生模組）
 - Express + JWT 認證
 - SQLite 資料庫（`data/approval.db`）
-- PDFKit（產生 PDF，自動使用 Windows 中文字型）
+- PDFKit（產生 PDF；優先 `fonts/Deng.ttf`，略過 SimSun-ExtB）
 
 ## 快速開始（開發）
 
@@ -138,12 +138,12 @@ npm.cmd start
 approval-system/
 ├── server/
 │   ├── index.js      # API 與靜態檔服務
-│   ├── db.js         # SQLite schema
-│   ├── auth.js       # 密碼 / JWT
-│   ├── pdf.js        # PDF 產生
-│   └── seed.js       # 手動初始化管理員
+│   ├── pdf.js        # PDF 編排入口
+│   ├── pdf/          # 字型／表單／簽核意見
+│   └── routes/       # 依領域拆開的 API
 ├── public/           # 前端 UI
-├── data/             # 資料庫（自動產生）
+├── fonts/            # Deng.ttf 等中文字型（部署必帶）
+├── data/             # 資料庫／備份／附件（自動產生；部署不覆蓋）
 ├── package.json
 └── README.md
 ```
@@ -152,5 +152,5 @@ approval-system/
 
 - 資料庫為本機 SQLite，請定期備份 `data/approval.db`
 - 使用者上限約 50 人（管理員建立時檢查），設計目標約 30 人
-- 若 PDF 中文顯示異常，請確認系統有安裝「微軟正黑體 / 微軟雅黑」等字型
+- 若 PDF 中文顯示異常，請確認專案有 `fonts/Deng.ttf`（Docker 映像會一併複製）；勿使用 `simsunb.ttf`（擴展 B，常用中文會空白）
 - 正式環境建議自行設定夠長的 `JWT_SECRET`；未設定時請確認 `data/.jwt-secret` 已產生且不要提交到 git

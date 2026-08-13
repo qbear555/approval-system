@@ -2,6 +2,14 @@
 
 ## [1.1.0] — 2026-08-13
 
+### PDF／文件
+
+- PDF 中文字型：拆檔後改回專案根 `fonts/Deng.ttf`；略過 `simsunb.ttf`（SimSun-ExtB，常用中文會空白）。
+- `writeApprovalPdf` 等目標串流 `finish`，避免檔案寫到一半就 0 byte。
+- 信用額度 PDF 抬頭不再重複「申請日期」。
+- 文件對齊：本機／NAS 埠 **3847／3848**、全新庫帳號 **Admin**、LINE 綁定用真實帳號、Webhook 用 `https://catshome.tw:3848/line/webhook`。
+- 一鍵更新／compose 再確認：`NAS_SKIP_DB=1`、volume `./data:/app/data`，更新不覆寫正式庫與 `data/backups/`。
+
 ### 架構
 
 - 後端 helper 抽到 `server/runtime.js`，並再依領域拆 `runtime/devices.js`、`perms.js`、`flow.js`、`notify.js`。

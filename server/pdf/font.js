@@ -2,11 +2,22 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
+/** 專案根 fonts/（本檔在 server/pdf/，需上兩層） */
+function projectFontsDir() {
+  return path.join(__dirname, '..', '..', 'fonts');
+}
+
+/** SimSun-ExtB／擴展 B 幾乎沒有常用中文，選到會讓標籤空白 */
+function isRejectedCjkFont(nameOrPath) {
+  const lower = String(nameOrPath || '').toLowerCase();
+  return /simsunb|simsun-ext|ext-?b|extb/.test(lower);
+}
+
 function resolveChineseFont() {
   const winFonts = path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts');
-  const projectFonts = path.join(__dirname, '..', 'fonts');
+  const projectFonts = projectFontsDir();
 
-  // 預設：無襯線 TTF（等線／黑體）；避免標楷體與部分 CJK OTF（PDFKit 會亂碼）
+  // 預設：無襯線 TTF（等線／黑體）；避免標楷體、Ext-B 與部分 CJK OTF（PDFKit 會亂碼）
   const candidates = [
     path.join(projectFonts, 'Deng.ttf'), // 等線（推薦）
     path.join(projectFonts, 'simhei.ttf'),
@@ -18,7 +29,6 @@ function resolveChineseFont() {
     path.join(winFonts, 'msyh.ttf'),
     path.join(winFonts, 'msjh.ttf'),
     path.join(winFonts, 'simfang.ttf'),
-    path.join(winFonts, 'simsunb.ttf'),
     // 部分 Subset OTF 在 PDFKit 會亂碼，排在後面
     path.join(projectFonts, 'NotoSansTC-Regular.otf'),
     path.join(projectFonts, 'NotoSansCJKtc-Regular.otf'),
@@ -32,6 +42,7 @@ function resolveChineseFont() {
     if (!fs.existsSync(p)) continue;
     if (/\.ttc$/i.test(p)) continue;
     if (/-VF\.ttf$/i.test(p) || /Variable/i.test(p)) continue;
+    if (isRejectedCjkFont(p)) continue;
     return p;
   }
   return null;
@@ -69,10 +80,11 @@ function getChineseFontPath() {
     for (const name of files) {
       if (!/\.ttf$/i.test(name)) continue;
       if (/-VF/i.test(name)) continue;
+      if (isRejectedCjkFont(name)) continue;
       const lower = name.toLowerCase();
-      // 掃描 Windows 字型時優先無襯線；略過標楷／楷體檔名（仍可由 candidates 備援）
+      // 掃描 Windows 字型時優先無襯線；略過標楷／楷體與泛用 ming（避免 simsunb）
       if (
-        !/msyh|msjh|simhei|simfang|deng|noto|sourcehan|uming|wqy|firefly|ming|yuan|hei/.test(
+        !/msyh|msjh|simhei|simfang|deng|noto|sourcehan|uming|wqy|firefly|yuan|hei/.test(
           lower
         )
       ) {
@@ -107,5 +119,7 @@ module.exports = {
   canUseFont,
   getChineseFontPath,
   getCompanyNameForPdf,
+  isRejectedCjkFont,
+  projectFontsDir,
   COMPANY_NAME,
 };

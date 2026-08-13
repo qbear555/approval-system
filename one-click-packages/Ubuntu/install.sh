@@ -202,7 +202,7 @@ install_docker_mode() {
   echo "  停止:  $COMPOSE down"
   echo "  重啟:  $COMPOSE restart"
   echo "----------------------------------------"
-  echo "  預設管理員（全新庫）: admin / admin123"
+  echo "  預設管理員（全新庫）: Admin ；密碼見 data/.admin-bootstrap.txt"
   echo "  若已放入 data/approval.db，請用既有帳號登入。"
   echo "  請儘快修改密碼，並確認 .env 的 JWT_SECRET。"
   echo "----------------------------------------"
@@ -280,7 +280,7 @@ EOF
   echo "  停止:  systemctl stop approval-system"
   echo "  資料:  $SCRIPT_DIR/data/"
   echo "----------------------------------------"
-  echo "  預設管理員（全新庫）: admin / admin123"
+  echo "  預設管理員（全新庫）: Admin ；密碼見 data/.admin-bootstrap.txt"
   echo "----------------------------------------"
 
   if command -v ufw >/dev/null 2>&1; then

@@ -132,8 +132,17 @@ description: >
 ### 3.4 安全
 
 - 不在聊天或 Git 留下真實密碼；Email／LINE 密鑰僅執行期環境  
-- 預設弱密碼（舊的 `admin123`）登入後必須先改密；全新庫初始密碼在 `data/.admin-bootstrap.txt`  
+- 全新庫帳號 **`Admin`**；初始密碼只寫入 `data/.admin-bootstrap.txt`（不使用公開 `admin123`）  
+- 舊帳號若仍是 `admin123`／`pass1234`，登入後必須先改密  
 - 內網為主；外網需 HTTPS／VPN 再討論  
+
+### 3.6 LINE 綁定（成員端）
+
+- 對官方帳號傳 **`綁定 Admin`**（把 `Admin` 改成該成員真實帳號，例如 `A01`）  
+- 不要照抄「綁定 帳號」四字；佔位詞會被拒絕  
+- LINE Developers Webhook 必須是**公網 HTTPS**：`https://catshome.tw:3848/line/webhook`  
+  （簽核 `:3848` 轉送到 NAS `line-notify:3850`；區網 3850 給 LINE 雲端打不到）  
+- 解除：傳 `解除綁定`，或在簽核 LINE 設定頁按解除  
 
 ### 3.5 本機執行（常見缺檔）
 

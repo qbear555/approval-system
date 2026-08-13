@@ -18,8 +18,8 @@ echo   ★ 這個黑色視窗請一直開著（或改用桌面「背景啟動」
 echo   ★ 關掉就會「無法連線」
 echo.
 echo   網址：%URL%
-echo   帳號：admin
-echo   密碼：admin123
+echo   全新庫帳號：Admin
+echo   密碼見 data\.admin-bootstrap.txt
 echo  ========================================
 echo.
 

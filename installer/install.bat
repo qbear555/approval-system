@@ -103,8 +103,8 @@ echo   安裝完成！
 echo ========================================
 echo   安裝目錄: %DEST%
 echo   使用網址: http://127.0.0.1:%PORT%/
-echo   預設帳號: admin
-echo   預設密碼: admin123
+echo   全新庫帳號: Admin
+echo   密碼見 data\.admin-bootstrap.txt
 echo.
 echo   資料庫: %DEST%\app\data\approval.db
 echo   備份PDF: %DEST%\app\data\backups

@@ -39,6 +39,7 @@ services:
       - ONLYOFFICE_JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-1}
     volumes:
       # 持久化：資料庫、上傳附件、備份 PDF/ZIP、HTTPS 憑證
+      # 更新時 NAS_SKIP_DB=1，禁止用種子庫覆寫此掛載
       - ./data:/app/data
     networks:
       - approval-net

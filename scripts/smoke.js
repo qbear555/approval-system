@@ -169,6 +169,16 @@ child.stderr.on('data', (d) => process.stderr.write(d));
     });
     if (vn.status !== 0) throw new Error('verify-notify 失敗: ' + (vn.stderr || vn.stdout || '').slice(0, 300));
     if (!String(vn.stdout || '').includes('"mail"')) throw new Error('verify-notify 輸出異常');
+    const fontMod = require(path.join(ROOT, 'server/pdf/font'));
+    const fontPath = fontMod.getChineseFontPath();
+    if (!fontPath) throw new Error('找不到可用中文字型');
+    if (fontMod.isRejectedCjkFont(fontPath)) {
+      throw new Error('誤選 Ext-B 字型: ' + fontPath);
+    }
+    const deng = path.join(ROOT, 'fonts', 'Deng.ttf');
+    if (fs.existsSync(deng) && path.normalize(fontPath) !== path.normalize(deng)) {
+      throw new Error('應優先使用 fonts/Deng.ttf，實際: ' + fontPath);
+    }
     const pdf = require(path.join(ROOT, 'server/pdf'));
     if (typeof pdf.writeApprovalPdf !== 'function') throw new Error('pdf.writeApprovalPdf 缺失');
     const { PassThrough } = require('stream');

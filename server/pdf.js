@@ -45,7 +45,12 @@ function writeApprovalPdf(request, destStream) {
 
     destStream.on('error', reject);
     doc.on('error', reject);
-    doc.on('end', () => resolve());
+    const done = () => resolve();
+    if (typeof destStream.on === 'function') {
+      destStream.once('finish', done);
+    } else {
+      doc.once('end', done);
+    }
     doc.pipe(destStream);
 
     let fontReady = false;

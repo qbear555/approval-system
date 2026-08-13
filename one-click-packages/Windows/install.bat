@@ -40,16 +40,16 @@ if not exist "app\node_modules\@signpdf\signpdf" (
   echo       簽章套件已存在，略過。
 )
 
-echo [3/3] 正在啟動（埠 8080）...
+echo [3/3] 正在啟動（埠 3847）...
 start "" "%~dp0start.bat"
 timeout /t 3 >nul
-start http://127.0.0.1:8080
+start http://127.0.0.1:3847
 echo.
 echo ========================================
 echo  完成
-echo  網址：http://127.0.0.1:8080
-echo  帳號：admin
-echo  密碼：admin123  （請立刻修改）
+echo  網址：http://127.0.0.1:3847
+echo  全新庫帳號：Admin
+echo  密碼見 app\data\.admin-bootstrap.txt
 echo  說明：..\安裝說明.md
 echo ========================================
 pause

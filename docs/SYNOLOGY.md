@@ -79,9 +79,9 @@ docker compose logs -f
 
 **預設管理員（全新資料庫時）**
 
-- 帳號：`admin`
-- 密碼：見 `data/.admin-bootstrap.txt`（全新庫；登入後立刻改密）  
-請立刻修改。
+- 帳號：`Admin`（大小寫與正式庫一致）
+- 密碼：見 `data/.admin-bootstrap.txt`（全新庫；登入後立刻改密並刪檔）  
+請立刻修改。既有正式庫請用原本帳密，不要用公開預設 `admin123`。
 
 若已放入備份的 `approval.db`，請用原本的帳號密碼。
 
@@ -101,13 +101,14 @@ docker compose logs -f
 
 ### 2. 資料持久化
 
-`./data` 已掛載到容器 `/app/data`，包含：
+`./data` 已掛載到容器 `/app/data`（`docker-compose.yml` 的 `./data:/app/data`），包含：
 
 - `approval.db`（使用者、流程、簽核）
 - `uploads/`（附件）
-- `backups/`（備份 PDF）
+- `backups/`（產品「備份資料」產出的 PDF／ZIP）
+- `mail-config.json`、`certs/`、`.jwt-secret`、`.admin-bootstrap.txt`
 
-**請定期備份整個 `data` 資料夾。**
+**請定期備份整個 `data` 資料夾。** 一鍵更新必須 `NAS_SKIP_DB=1`，禁止用安裝包種子庫覆寫正式 `data/`。
 
 ### 3. 防火牆 / 埠號
 
@@ -130,18 +131,28 @@ docker compose logs -f
   - 目的地：`http://localhost:3847`
 - 或僅在 **VPN / 區網** 使用
 
+### 5. LINE Webhook（公網 HTTPS）
+
+LINE 雲端打不到區網 `192.168.99.220:3850`。正式 Webhook 請填：
+
+`https://catshome.tw:3848/line/webhook`
+
+（簽核容器會轉送到本機 `line-notify:3850`。）成員在官方帳號傳 **`綁定 Admin`**（把 `Admin` 改成真實帳號，例如 `A01`），不要照抄「綁定 帳號」。
+
 ---
 
 ## 六、更新系統
 
 1. 上傳新的 `server/`、`public/`、`package.json` 等（**不要覆蓋** `data/`）
-2. Container Manager → 專案 → **建置** → **重新啟動**  
+2. 開發機一鍵更新會設 `NAS_SKIP_DB=1`，只 `docker cp` 程式後重啟，**不** `compose up` 重建以免清掉掛載內容以外的容器內狀態
+3. Container Manager → 專案 → **建置** → **重新啟動**（僅在映像／依賴變更時）  
    或 SSH：
    ```bash
    cd /volume1/docker/approval-system
    docker compose build --no-cache
    docker compose up -d
    ```
+   重建後 volume `./data` 仍會保留；仍不要手動覆寫 `data/approval.db`。
 
 ---
 
@@ -151,7 +162,7 @@ docker compose logs -f
 |------|------|
 | 建置失敗、抓不到映像 | 檢查 NAS 能否上網；必要時設 Docker 代理 |
 | 頁面打不開 | 看容器是否 Running；埠 3847 是否衝突；防火牆 |
-| PDF 中文亂碼 | 映像已內建 Noto 繁中 OTF；請用本專案 Dockerfile 重建 |
+| PDF 中文亂碼或標籤空白 | 確認映像含 `fonts/Deng.ttf`；勿使用 `simsunb.ttf`（SimSun-ExtB） |
 | 資料不見 | 確認 volume `./data` 有掛載，且未刪除該資料夾 |
 | 權限錯誤 | `data` 資料夾權限允許 Docker 寫入；必要時對資料夾設 777 測試後再收斂權限 |
 

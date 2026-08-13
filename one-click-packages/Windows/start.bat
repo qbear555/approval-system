@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-set PORT=8080
+set PORT=3847
 set HTTPS_PORT=8443
-set HTTPS_ENABLED=1
+set HTTPS_ENABLED=0
 set NODE_ENV=production
 if not exist "app\data" mkdir "app\data"
 if not exist "app\data\uploads" mkdir "app\data\uploads"
@@ -22,9 +22,8 @@ if %ERRORLEVEL%==0 (
 
 echo.
 echo  線上簽核系統啟動中...
-echo  HTTP : http://127.0.0.1:8080
-echo  HTTPS: https://127.0.0.1:8443  (若已有憑證；自簽憑證瀏覽器會提示)
-echo  帳號 admin / 密碼 admin123
+echo  HTTP : http://127.0.0.1:3847
+echo  全新庫帳號 Admin，密碼見 app\data\.admin-bootstrap.txt
 echo.
 "%~dp0runtime\node\node.exe" "%~dp0app\start-server.js"
 pause

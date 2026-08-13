@@ -2921,7 +2921,7 @@ function drawCreditLimitForm(ctx, request) {
   // 1. 抬頭
   drawHeader(
     '信 用 額 度 申 請 表',
-    `申請日期：${applyDateText}　｜　組別：${groupName}`,
+    `${applyDateText}　｜　組別：${groupName}`,
     `單號 #${request.id}　·　${STATUS_LABEL[request.status] || request.status || ''}`
   );
 
