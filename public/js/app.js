@@ -281,6 +281,18 @@ async function api(path, options = {}) {
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const res = await fetch(API + path, { ...options, headers });
   const ct = res.headers.get('content-type') || '';
+  /** 取回檔案內容；returnMeta 時一併帶回檔名與 MIME */
+  const readBlob = async () => {
+    const blob = await res.blob();
+    if (!options.returnMeta) return blob;
+    return {
+      blob,
+      filename: parseContentDispositionFilename(
+        res.headers.get('Content-Disposition')
+      ),
+      contentType: ct,
+    };
+  };
   if (
     ct.includes('application/pdf') ||
     ct.includes('application/zip') ||
@@ -289,17 +301,7 @@ async function api(path, options = {}) {
     (options.expectBlob && res.ok)
   ) {
     if (!res.ok) throw new Error('檔案下載失敗');
-    const blob = await res.blob();
-    if (options.returnMeta) {
-      return {
-        blob,
-        filename: parseContentDispositionFilename(
-          res.headers.get('Content-Disposition')
-        ),
-        contentType: ct,
-      };
-    }
-    return blob;
+    return readBlob();
   }
   // 附件下載可能是各種 mime
   if (options.expectBlob) {
@@ -307,17 +309,7 @@ async function api(path, options = {}) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || '檔案下載失敗');
     }
-    const blob = await res.blob();
-    if (options.returnMeta) {
-      return {
-        blob,
-        filename: parseContentDispositionFilename(
-          res.headers.get('Content-Disposition')
-        ),
-        contentType: ct,
-      };
-    }
-    return blob;
+    return readBlob();
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -2539,17 +2531,19 @@ function flowGraphHtml(graph, opts = {}) {
     );
   });
 
-  const legend = opts.showLegend
-    ? `<div class="flow-legend">
+  return `<div class="flow-graph">${parts.join('')}</div>${flowLegendHtml(opts.showLegend)}`;
+}
+
+/** 流程圖圖例（狀態色塊說明） */
+function flowLegendHtml(show) {
+  if (!show) return '';
+  return `<div class="flow-legend">
         <span><i class="done"></i>已完成</span>
         <span><i class="current"></i>簽核中</span>
         <span><i class="todo"></i>未開始</span>
         <span><i class="skipped"></i>已略過</span>
         <span><i class="rejected"></i>駁回</span>
-      </div>`
-    : '';
-
-  return `<div class="flow-graph">${parts.join('')}</div>${legend}`;
+      </div>`;
 }
 
 function flowOpSymbol(op) {
@@ -2694,17 +2688,7 @@ function flowChartLinearHtml(steps, opts = {}) {
     </div>`
   );
 
-  const legend = opts.showLegend
-    ? `<div class="flow-legend">
-        <span><i class="done"></i>已完成</span>
-        <span><i class="current"></i>簽核中</span>
-        <span><i class="todo"></i>未開始</span>
-        <span><i class="skipped"></i>已略過</span>
-        <span><i class="rejected"></i>駁回</span>
-      </div>`
-    : '';
-
-  return `<div class="flow-chart">${parts.join('')}</div>${legend}`;
+  return `<div class="flow-chart">${parts.join('')}</div>${flowLegendHtml(opts.showLegend)}`;
 }
 
 /** 申請人同部門成員 + 其他人員（供部門主管自選） */
@@ -3841,8 +3825,8 @@ function formatFormValue(field, value, formData) {
   if (field?.type === 'user') {
     if (formData?.[`${field.id}__label`]) return formData[`${field.id}__label`];
     if (formData?.[`${field.id}__name`]) return formData[`${field.id}__name`];
-    const u = (state.users || []).find((x) => x.id === Number(value));
-    if (u) return u.department ? `${u.name}（${u.department}）` : u.name;
+    const label = userLabelById(value, '');
+    if (label) return label;
   }
   if (value == null || value === '') return '—';
   // 金額＋幣別（請購等）
@@ -3947,6 +3931,23 @@ function renderPlainValueHtml(val) {
   return escaped;
 }
 
+/** 依 id 取「姓名（部門）」顯示字串；查無此人回傳 fallback */
+function userLabelById(id, fallback) {
+  const u = (state.users || []).find((x) => x.id === Number(id));
+  if (!u) return fallback;
+  return u.department ? `${u.name}（${u.department}）` : u.name;
+}
+
+/** 「1,2,3」→「姓名（部門）、…」；沒有有效 id 時回傳空字串 */
+function userLabelsFromIds(val) {
+  return String(val)
+    .split(/[,，\s]+/)
+    .map(Number)
+    .filter((n) => n > 0)
+    .map((id) => userLabelById(id, `#${id}`))
+    .join('、');
+}
+
 function renderFormDataBlock(formFields, formData) {
   const fields = formFields || [];
   const data = formData || {};
@@ -3958,12 +3959,10 @@ function renderFormDataBlock(formFields, formData) {
       let label = '部門主管';
       let display = '略過';
       if (v && v !== 'skip' && Number(v)) {
-        const u = (state.users || []).find((x) => x.id === Number(v));
-        display = u
-          ? u.department
-            ? `${u.name}（${u.department}）`
-            : u.name
-          : data[`${k}__label`] || data[`${k}__name`] || `#${v}`;
+        display = userLabelById(
+          v,
+          data[`${k}__label`] || data[`${k}__name`] || `#${v}`
+        );
       }
       return `<dt>${esc(label)}</dt><dd>${esc(display)}</dd>`;
     })
@@ -3979,22 +3978,8 @@ function renderFormDataBlock(formFields, formData) {
       } else if (String(v) === 'all') {
         display = '全部';
       } else if (v) {
-        const ids = String(v)
-          .split(/[,，\s]+/)
-          .map(Number)
-          .filter((n) => n > 0);
-        if (ids.length) {
-          display = ids
-            .map((id) => {
-              const u = (state.users || []).find((x) => x.id === id);
-              return u
-                ? u.department
-                  ? `${u.name}（${u.department}）`
-                  : u.name
-                : `#${id}`;
-            })
-            .join('、');
-        }
+        const labels = userLabelsFromIds(v);
+        if (labels) display = labels;
       }
       return `<dt style="white-space:nowrap">副總經理簽核</dt><dd style="white-space:nowrap">${esc(display)}</dd>`;
     })
@@ -4008,22 +3993,8 @@ function renderFormDataBlock(formFields, formData) {
       if (data[`${k}__label`]) {
         display = data[`${k}__label`];
       } else if (v && v !== 'skip') {
-        const ids = String(v)
-          .split(/[,，\s]+/)
-          .map(Number)
-          .filter((n) => n > 0);
-        if (ids.length) {
-          display = ids
-            .map((id) => {
-              const u = (state.users || []).find((x) => x.id === id);
-              return u
-                ? u.department
-                  ? `${u.name}（${u.department}）`
-                  : u.name
-                : `#${id}`;
-            })
-            .join('、');
-        }
+        const labels = userLabelsFromIds(v);
+        if (labels) display = labels;
       }
       return `<dt>會簽人員</dt><dd>${esc(display)}</dd>`;
     })

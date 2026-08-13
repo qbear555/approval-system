@@ -38,7 +38,6 @@ const {
   deleteBackups,
   isZipBackup,
 } = require('./backup');
-const { hashPassword: hp } = require('./auth');
 const mail = require('./mail');
 const lineNotify = require('./line-notify');
 const { importPayload } = require('./import-workflows');
@@ -844,7 +843,7 @@ function requirePerm(permId) {
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(
       normalizeUsername('admin'),
-      hp('admin123'),
+      hashPassword('admin123'),
       '系統管理員',
       'admin@example.com',
       '管理部',
@@ -963,6 +962,19 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // ---------- helpers ----------
 const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'checkbox', 'user'];
 
+/** 申請單列表共用的 SELECT／JOIN（後面接 WHERE／ORDER BY） */
+const REQUEST_LIST_SELECT = `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
+              u.name AS requester_name
+       FROM approval_requests r
+       JOIN workflows w ON w.id = r.workflow_id
+       JOIN users u ON u.id = r.requester_id`;
+
+/** 信用額度單判定（流程名稱或主旨含「信用額度」） */
+const CREDIT_LIMIT_COND = `(IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')`;
+/** 信用額度單的兩段建檔確認步驟名稱 */
+const STEP_FINANCE_CONFIRM = '財務部額度建檔確認';
+const STEP_APPLICANT_ACK = '申請人建檔確認';
+
 /** 出勤可選時間範圍（請假起迄與前端一致） */
 const WORK_TIME_START_MIN = 9 * 60; // 09:00
 const WORK_TIME_END_MIN = 17 * 60 + 30; // 17:30
@@ -1057,6 +1069,29 @@ function parseCosignIds(val) {
     .filter((n) => n > 0 && Number.isFinite(n));
   return ids.length ? [...new Set(ids)] : null;
 }
+
+/**
+ * 解析使用者更新時的到職日：未帶欄位沿用原值、空值清除、格式錯誤回報
+ * @returns {{ ok: true, value: string|null } | { ok: false, error: string }}
+ */
+function resolveNextHireDate(hireDate, current) {
+  if (hireDate === undefined) return { ok: true, value: current || null };
+  if (hireDate === null || hireDate === '') return { ok: true, value: null };
+  const hd = labor.toDateOnly(hireDate);
+  if (!hd) return { ok: false, error: '到職日格式須為 YYYY-MM-DD' };
+  return { ok: true, value: hd };
+}
+
+/** 使用者 id 陣列 → 「姓名（部門）」顯示字串；查無此人顯示 #id */
+function formatUserLabels(ids) {
+  return ids
+    .map((uid) => {
+      const u = db.prepare(`SELECT name, department FROM users WHERE id = ?`).get(uid);
+      if (!u) return `#${uid}`;
+      return u.department ? `${u.name}（${u.department}）` : u.name;
+    })
+    .join('、');
+}
 /** 單位別名 → 實際部門名稱（人事由管理部代理） */
 const UNIT_ALIASES = {
   人事: '管理部',
@@ -1149,6 +1184,38 @@ const TW_LEAVE_TYPES = [
   '曠職',
   '其他',
 ];
+
+/** 假別下拉的後備選項（表單未自訂 options 時使用；不含「曠職」） */
+const LEAVE_TYPE_FALLBACK_OPTIONS = [
+  '特別休假（特休）',
+  '事假',
+  '普通傷病假（病假）',
+  '住院傷病假',
+  '公傷病假',
+  '婚假',
+  '喪假',
+  '產假',
+  '產檢假',
+  '安胎休養',
+  '陪產檢及陪產假',
+  '生理假',
+  '家庭照顧假',
+  '公假',
+  '補休',
+  '祭儀假',
+  '其他',
+];
+
+/** 由表單欄位取假別選項；表單沒定義就用後備清單 */
+function resolveLeaveTypeOptions(formFields) {
+  const lf = (formFields || []).find(
+    (f) => f.id === 'leave_type' || /假別/.test(String(f.label || ''))
+  );
+  if (Array.isArray(lf?.options) && lf.options.length) {
+    return lf.options.map((o) => String(o).trim()).filter(Boolean);
+  }
+  return [...LEAVE_TYPE_FALLBACK_OPTIONS];
+}
 
 function validateStepTemplate(step) {
   if (!step.name) return '步驟名稱不可空白';
@@ -1534,11 +1601,16 @@ function mergeCosignFormData(baseData, rawFormData, templateSteps) {
   return { data: merged };
 }
 
-/** 部門主管：同部門 active 使用者（含多部門隸屬），優先非 admin，再依 id */
-function getDeptHead(department) {
-  const dept = String(department || '').trim();
-  if (!dept) return null;
-  const users = db
+/**
+ * 部門 active 成員（含 user_departments 多部門隸屬）
+ * @param {string} dept 已正規化的部門名稱
+ * @param {boolean} adminLast true 時把 admin 排到最後（挑部門主管用）
+ */
+function queryDepartmentUsers(dept, adminLast = false) {
+  const order = adminLast
+    ? `CASE WHEN u.role = 'admin' THEN 1 ELSE 0 END, u.id ASC`
+    : `u.id ASC`;
+  return db
     .prepare(
       `SELECT DISTINCT u.id, u.name, u.department, u.role FROM users u
        WHERE u.active = 1 AND (
@@ -1548,10 +1620,16 @@ function getDeptHead(department) {
            WHERE ud.user_id = u.id AND ud.department = ?
          )
        )
-       ORDER BY CASE WHEN u.role = 'admin' THEN 1 ELSE 0 END, u.id ASC`
+       ORDER BY ${order}`
     )
     .all(dept, dept);
-  return users[0] || null;
+}
+
+/** 部門主管：同部門 active 使用者（含多部門隸屬），優先非 admin，再依 id */
+function getDeptHead(department) {
+  const dept = String(department || '').trim();
+  if (!dept) return null;
+  return queryDepartmentUsers(dept, true)[0] || null;
 }
 
 function resolveUnitName(name) {
@@ -1563,19 +1641,7 @@ function resolveUnitName(name) {
 function getUsersInDepartment(department) {
   const dept = resolveUnitName(department);
   if (!dept) return [];
-  return db
-    .prepare(
-      `SELECT DISTINCT u.id, u.name, u.department, u.role FROM users u
-       WHERE u.active = 1 AND (
-         u.department = ?
-         OR EXISTS (
-           SELECT 1 FROM user_departments ud
-           WHERE ud.user_id = u.id AND ud.department = ?
-         )
-       )
-       ORDER BY u.id ASC`
-    )
-    .all(dept, dept);
+  return queryDepartmentUsers(dept);
 }
 
 /**
@@ -1933,6 +1999,40 @@ function getPendingFinalNotifyRequests(userId) {
     .all(Number(userId));
 }
 
+/** 待財務部額度建檔確認的已核准信用額度單 */
+function getPendingFinanceConfirmRequests() {
+  return db
+    .prepare(
+      `${REQUEST_LIST_SELECT}
+       WHERE r.status = 'approved'
+         AND ${CREDIT_LIMIT_COND}
+         AND r.id NOT IN (
+           SELECT request_id FROM approval_actions WHERE step_name = ?
+         )
+       ORDER BY r.completed_at DESC, r.updated_at DESC`
+    )
+    .all(STEP_FINANCE_CONFIRM);
+}
+
+/** 財務已建檔、待申請人確認收到的信用額度單 */
+function getPendingApplicantAckRequests(userId) {
+  return db
+    .prepare(
+      `${REQUEST_LIST_SELECT}
+       WHERE r.status = 'approved'
+         AND r.requester_id = ?
+         AND ${CREDIT_LIMIT_COND}
+         AND r.id IN (
+           SELECT request_id FROM approval_actions WHERE step_name = ?
+         )
+         AND r.id NOT IN (
+           SELECT request_id FROM approval_actions WHERE step_name = ?
+         )
+       ORDER BY r.completed_at DESC, r.updated_at DESC`
+    )
+    .all(Number(userId), STEP_FINANCE_CONFIRM, STEP_APPLICANT_ACK);
+}
+
 function loadFinalNotifyReceiptsForRequest(requestId) {
   return db
     .prepare(
@@ -2241,17 +2341,9 @@ function getRequestDetail(id) {
         .filter((n) => n > 0);
     }
     if (!ids.length) continue;
-    const labels = [];
-    for (const uid of ids) {
-      const u = db.prepare(`SELECT name, department FROM users WHERE id = ?`).get(uid);
-      if (u) {
-        labels.push(u.department ? `${u.name}（${u.department}）` : u.name);
-      } else {
-        labels.push(`#${uid}`);
-      }
-    }
-    formDataDisplay[`${key}__name`] = labels.join('、');
-    formDataDisplay[`${key}__label`] = labels.join('、');
+    const labels = formatUserLabels(ids);
+    formDataDisplay[`${key}__name`] = labels;
+    formDataDisplay[`${key}__label`] = labels;
   }
   // 會簽人員 cosign_N（可多位：1,2,3）
   for (const key of Object.keys(form_data)) {
@@ -2261,17 +2353,9 @@ function getRequestDetail(id) {
       formDataDisplay[`${key}__label`] = '略過（無會簽）';
       continue;
     }
-    const labels = [];
-    for (const uid of ids) {
-      const u = db.prepare(`SELECT name, department FROM users WHERE id = ?`).get(uid);
-      if (u) {
-        labels.push(u.department ? `${u.name}（${u.department}）` : u.name);
-      } else {
-        labels.push(`#${uid}`);
-      }
-    }
-    formDataDisplay[`${key}__label`] = labels.join('、');
-    formDataDisplay[`${key}__name`] = labels.join('、');
+    const labels = formatUserLabels(ids);
+    formDataDisplay[`${key}__label`] = labels;
+    formDataDisplay[`${key}__name`] = labels;
   }
 
   let approver_data = {};
@@ -3712,16 +3796,9 @@ app.put('/api/users/:id', authMiddleware, (req, res) => {
     if (!canViewerSeeUser(req.user, user)) {
       return res.status(404).json({ error: '找不到使用者' });
     }
-    let nextHireDate = user.hire_date || null;
-    if (hire_date !== undefined) {
-      if (hire_date === null || hire_date === '') {
-        nextHireDate = null;
-      } else {
-        const hd = labor.toDateOnly(hire_date);
-        if (!hd) return res.status(400).json({ error: '到職日格式須為 YYYY-MM-DD' });
-        nextHireDate = hd;
-      }
-    }
+    const hireDateRes = resolveNextHireDate(hire_date, user.hire_date);
+    if (!hireDateRes.ok) return res.status(400).json({ error: hireDateRes.error });
+    const nextHireDate = hireDateRes.value;
     const leaveMerged = labor.mergeLeaveUsedFromRequest(
       { leave_used, leave_used_json, sl_used_days, sl_used_hours },
       user
@@ -3761,16 +3838,9 @@ app.put('/api/users/:id', authMiddleware, (req, res) => {
   if (department != null && department !== '' && !isValidDepartment(department)) {
     return res.status(400).json({ error: '請選擇有效的部門' });
   }
-  let nextHireDate = user.hire_date || null;
-  if (hire_date !== undefined) {
-    if (hire_date === null || hire_date === '') {
-      nextHireDate = null;
-    } else {
-      const hd = labor.toDateOnly(hire_date);
-      if (!hd) return res.status(400).json({ error: '到職日格式須為 YYYY-MM-DD' });
-      nextHireDate = hd;
-    }
-  }
+  const hireDateRes = resolveNextHireDate(hire_date, user.hire_date);
+  if (!hireDateRes.ok) return res.status(400).json({ error: hireDateRes.error });
+  const nextHireDate = hireDateRes.value;
   // 各有上限假別：手動可休＋手動已休（leave_entitled / leave_used）＋相容 sl_used_*
   const leaveMerged = labor.mergeLeaveUsedFromRequest(
     { leave_used, leave_used_json, sl_used_days, sl_used_hours },
@@ -4762,30 +4832,35 @@ app.get('/api/system/package/export', authMiddleware, builtinAdminOnly, (req, re
   }
 });
 
+/** 設定包上傳（multipart 檔案或 JSON body 皆可） */
+function uploadPackageMiddleware(req, res, next) {
+  uploadPackage.single('package')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || '上傳失敗' });
+    next();
+  });
+}
+
+/** 從上傳檔案／body 取出設定包 JSON；無法解析回傳 null */
+function readPackagePayload(req) {
+  if (req.file?.buffer) return JSON.parse(req.file.buffer.toString('utf8'));
+  if (req.body?.package) {
+    return typeof req.body.package === 'string'
+      ? JSON.parse(req.body.package)
+      : req.body.package;
+  }
+  if (req.body && req.body.format) return req.body;
+  return null;
+}
+
 /** 預覽設定包摘要（不上傳寫入） */
 app.post(
   '/api/system/package/preview',
   authMiddleware,
   builtinAdminOnly,
-  (req, res, next) => {
-    uploadPackage.single('package')(req, res, (err) => {
-      if (err) return res.status(400).json({ error: err.message || '上傳失敗' });
-      next();
-    });
-  },
+  uploadPackageMiddleware,
   (req, res) => {
     try {
-      let data = null;
-      if (req.file?.buffer) {
-        data = JSON.parse(req.file.buffer.toString('utf8'));
-      } else if (req.body?.package) {
-        data =
-          typeof req.body.package === 'string'
-            ? JSON.parse(req.body.package)
-            : req.body.package;
-      } else if (req.body && req.body.format) {
-        data = req.body;
-      }
+      const data = readPackagePayload(req);
       if (!data || !systemPackage.isConfigPackage(data)) {
         return res.status(400).json({
           error: '不是有效的系統設定完整包（format 不符）',
@@ -4816,25 +4891,10 @@ app.post(
   '/api/system/package/import',
   authMiddleware,
   builtinAdminOnly,
-  (req, res, next) => {
-    uploadPackage.single('package')(req, res, (err) => {
-      if (err) return res.status(400).json({ error: err.message || '上傳失敗' });
-      next();
-    });
-  },
+  uploadPackageMiddleware,
   (req, res) => {
     try {
-      let data = null;
-      if (req.file?.buffer) {
-        data = JSON.parse(req.file.buffer.toString('utf8'));
-      } else if (req.body?.package) {
-        data =
-          typeof req.body.package === 'string'
-            ? JSON.parse(req.body.package)
-            : req.body.package;
-      } else if (req.body && req.body.format) {
-        data = req.body;
-      }
+      const data = readPackagePayload(req);
       if (!data || !systemPackage.isConfigPackage(data)) {
         return res.status(400).json({
           error: '不是有效的系統設定完整包。請使用「帳號設定 → 系統設定完整包」匯出的 JSON。',
@@ -5287,30 +5347,12 @@ app.get('/api/requests', authMiddleware, (req, res) => {
       .all(uid);
   } else if (filter === 'pending_finance_confirm') {
     // 待財務部授信額度建檔確認（總經理已核准，財務部尚未點確認）
-    rows = db
-      .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
-         WHERE r.status = 'approved'
-           AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-           AND r.id NOT IN (
-             SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
-           )
-         ORDER BY r.completed_at DESC, r.updated_at DESC`
-      )
-      .all();
+    rows = getPendingFinanceConfirmRequests();
   } else if (filter === 'pending_me') {
     // 待我簽核（使用送出時步驟快照，勿用流程模板）
     const allPending = db
       .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
+        `${REQUEST_LIST_SELECT}
          WHERE r.status = 'pending'
          ORDER BY r.updated_at DESC`
       )
@@ -5335,21 +5377,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
 
     // 財務部：併入待建檔確認的已核准信用額度單
     if (isFinanceUser(req.user)) {
-      const finReqs = db
-        .prepare(
-          `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                  u.name AS requester_name
-           FROM approval_requests r
-           JOIN workflows w ON w.id = r.workflow_id
-           JOIN users u ON u.id = r.requester_id
-           WHERE r.status = 'approved'
-             AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-             AND r.id NOT IN (
-               SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
-             )
-           ORDER BY r.completed_at DESC, r.updated_at DESC`
-        )
-        .all();
+      const finReqs = getPendingFinanceConfirmRequests();
       const existingIds = new Set(rows.map((x) => x.id));
       for (const fr of finReqs) {
         if (!existingIds.has(fr.id)) rows.push(fr);
@@ -5357,25 +5385,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
     }
 
     // 申請人待確認財務建檔
-    const ackReqs = db
-      .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
-         WHERE r.status = 'approved'
-           AND r.requester_id = ?
-           AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-           AND r.id IN (
-             SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
-           )
-           AND r.id NOT IN (
-             SELECT request_id FROM approval_actions WHERE step_name = '申請人建檔確認'
-           )
-         ORDER BY r.completed_at DESC, r.updated_at DESC`
-      )
-      .all(uid);
+    const ackReqs = getPendingApplicantAckRequests(uid);
     const existingIdsAck = new Set(rows.map((x) => x.id));
     for (const ar of ackReqs) {
       if (!existingIdsAck.has(ar.id)) rows.push(ar);
@@ -5409,11 +5419,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
     // 已結案：預設僅本人相關；records_all／leave_delete（請假）／管理員可擴大範圍
     const allDone = db
       .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
+        `${REQUEST_LIST_SELECT}
          WHERE r.status IN ('approved', 'rejected', 'cancelled')
          ORDER BY r.completed_at DESC, r.updated_at DESC
          LIMIT 800`
@@ -5433,11 +5439,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
     // related / all：預設僅本人相關；records_all／leave_delete（請假）／管理員可擴大範圍
     const candidates = db
       .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
+        `${REQUEST_LIST_SELECT}
          ORDER BY r.updated_at DESC
          LIMIT 800`
       )
@@ -5631,33 +5633,7 @@ app.get('/api/requests/:id', authMiddleware, (req, res) => {
 
   /** 申請表單全部假別選項（人事核定下拉用） */
   function getLeaveTypeOptionsFromDetail(d) {
-    const fields = d.formFields || [];
-    const lf = fields.find(
-      (f) => f.id === 'leave_type' || /假別/.test(String(f.label || ''))
-    );
-    if (Array.isArray(lf?.options) && lf.options.length) {
-      return lf.options.map((o) => String(o).trim()).filter(Boolean);
-    }
-    // 後備完整清單
-    return [
-      '特別休假（特休）',
-      '事假',
-      '普通傷病假（病假）',
-      '住院傷病假',
-      '公傷病假',
-      '婚假',
-      '喪假',
-      '產假',
-      '產檢假',
-      '安胎休養',
-      '陪產檢及陪產假',
-      '生理假',
-      '家庭照顧假',
-      '公假',
-      '補休',
-      '祭儀假',
-      '其他',
-    ];
+    return resolveLeaveTypeOptions(d.formFields);
   }
 
   /** 依人事核定假別計算剩餘日／小時建議值（僅特休自動帶入數字；其他假別留白） */
@@ -6495,34 +6471,7 @@ app.post(
       ).trim();
 
       // 假別選項：與詳情頁一致，帶入申請表單全部假別
-      const leaveFieldOpts = (() => {
-        const ff = detail.formFields || [];
-        const lf = ff.find(
-          (f) => f.id === 'leave_type' || /假別/.test(String(f.label || ''))
-        );
-        if (Array.isArray(lf?.options) && lf.options.length) {
-          return lf.options.map((o) => String(o).trim()).filter(Boolean);
-        }
-        return [
-          '特別休假（特休）',
-          '事假',
-          '普通傷病假（病假）',
-          '住院傷病假',
-          '公傷病假',
-          '婚假',
-          '喪假',
-          '產假',
-          '產檢假',
-          '安胎休養',
-          '陪產檢及陪產假',
-          '生理假',
-          '家庭照顧假',
-          '公假',
-          '補休',
-          '祭儀假',
-          '其他',
-        ];
-      })();
+      const leaveFieldOpts = resolveLeaveTypeOptions(detail.formFields);
 
       // 特休不以小時計算：略過剩餘特休小時欄
       fields = fields
@@ -7233,9 +7182,9 @@ app.post('/api/requests/:id/finance-confirm', authMiddleware, (req, res) => {
 
     const existing = db
       .prepare(
-        `SELECT id FROM approval_actions WHERE request_id = ? AND step_name = '財務部額度建檔確認'`
+        `SELECT id FROM approval_actions WHERE request_id = ? AND step_name = ?`
       )
-      .get(id);
+      .get(id, STEP_FINANCE_CONFIRM);
     if (existing) {
       return res.status(400).json({ error: '財務部已完成額度建檔確認，請勿重複送出' });
     }
@@ -7268,9 +7217,10 @@ app.post('/api/requests/:id/finance-confirm', authMiddleware, (req, res) => {
 
     db.prepare(
       `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
-       VALUES (?, 4, '財務部額度建檔確認', ?, 'comment', ?, ?)`
+       VALUES (?, 4, ?, ?, 'comment', ?, ?)`
     ).run(
       id,
+      STEP_FINANCE_CONFIRM,
       req.user.id,
       note ? `已完成核准額度建檔登記：${note}` : '已完成核准額度建檔登記',
       JSON.stringify({
@@ -7304,7 +7254,7 @@ app.post('/api/requests/:id/finance-confirm', authMiddleware, (req, res) => {
           to: reqEmail,
           toName: requester?.name || updated.requester_name,
           request: updated,
-          deptName: '財務部額度建檔確認',
+          deptName: STEP_FINANCE_CONFIRM,
           actorName: req.user.name,
         })
       );
@@ -7338,25 +7288,25 @@ app.post('/api/requests/:id/applicant-ack', authMiddleware, (req, res) => {
     }
     const finDone = db
       .prepare(
-        `SELECT id FROM approval_actions WHERE request_id = ? AND step_name = '財務部額度建檔確認'`
+        `SELECT id FROM approval_actions WHERE request_id = ? AND step_name = ?`
       )
-      .get(id);
+      .get(id, STEP_FINANCE_CONFIRM);
     if (!finDone) {
       return res.status(400).json({ error: '財務部尚未完成建檔確認' });
     }
     const existing = db
       .prepare(
-        `SELECT id FROM approval_actions WHERE request_id = ? AND step_name = '申請人建檔確認'`
+        `SELECT id FROM approval_actions WHERE request_id = ? AND step_name = ?`
       )
-      .get(id);
+      .get(id, STEP_APPLICANT_ACK);
     if (existing) {
       return res.status(400).json({ error: '已點選過確認，請勿重複送出' });
     }
 
     db.prepare(
       `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
-       VALUES (?, 5, '申請人建檔確認', ?, 'comment', '申請人已確認財務部授信額度建檔完成', '{}')`
-    ).run(id, req.user.id);
+       VALUES (?, 5, ?, ?, 'comment', '申請人已確認財務部授信額度建檔完成', '{}')`
+    ).run(id, STEP_APPLICANT_ACK, req.user.id);
 
     const updated = getRequestDetail(id);
     res.json({
@@ -7611,6 +7561,42 @@ app.post('/api/backups/bulk-delete', authMiddleware, adminOnly, (req, res) => {
 });
 
 /**
+ * 稽核日誌查詢條件 → WHERE 子句與參數（查詢與匯出共用）
+ * @param {{ q?: string, category?: string, user_id?: string|number, dateFrom?: string, dateTo?: string }} query
+ */
+function buildAuditLogFilter(query = {}) {
+  const { q, category, user_id, dateFrom, dateTo } = query || {};
+  const where = [];
+  const params = [];
+
+  if (q && String(q).trim()) {
+    const kw = `%${String(q).trim()}%`;
+    where.push(
+      `(user_name LIKE ? OR user_username LIKE ? OR description LIKE ? OR ip_address LIKE ? OR action_type LIKE ?)`
+    );
+    params.push(kw, kw, kw, kw, kw);
+  }
+  if (category && String(category).trim()) {
+    where.push(`category = ?`);
+    params.push(String(category).trim());
+  }
+  if (user_id) {
+    where.push(`user_id = ?`);
+    params.push(Number(user_id));
+  }
+  if (dateFrom && String(dateFrom).trim()) {
+    where.push(`created_at >= ?`);
+    params.push(`${String(dateFrom).trim()} 00:00:00`);
+  }
+  if (dateTo && String(dateTo).trim()) {
+    where.push(`created_at <= ?`);
+    params.push(`${String(dateTo).trim()} 23:59:59`);
+  }
+
+  return { whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+}
+
+/**
  * 取得系統進階稽核日誌 (P3-1)
  * GET /api/system/audit-logs
  * Query: { q, category, user_id, dateFrom, dateTo, page, limit }
@@ -7620,37 +7606,12 @@ app.get('/api/system/audit-logs', authMiddleware, (req, res) => {
     return res.status(403).json({ error: '需要系統稽核日誌權限' });
   }
 
-  const { q, category, user_id, dateFrom, dateTo, page = 1, limit = 50 } = req.query || {};
+  const { page = 1, limit = 50 } = req.query || {};
   const p = Math.max(1, Number(page) || 1);
   const l = Math.min(200, Math.max(10, Number(limit) || 50));
   const offset = (p - 1) * l;
 
-  const whereClause = [];
-  const params = [];
-
-  if (q && String(q).trim()) {
-    const kw = `%${String(q).trim()}%`;
-    whereClause.push(`(user_name LIKE ? OR user_username LIKE ? OR description LIKE ? OR ip_address LIKE ? OR action_type LIKE ?)`);
-    params.push(kw, kw, kw, kw, kw);
-  }
-  if (category && String(category).trim()) {
-    whereClause.push(`category = ?`);
-    params.push(String(category).trim());
-  }
-  if (user_id) {
-    whereClause.push(`user_id = ?`);
-    params.push(Number(user_id));
-  }
-  if (dateFrom && String(dateFrom).trim()) {
-    whereClause.push(`created_at >= ?`);
-    params.push(`${String(dateFrom).trim()} 00:00:00`);
-  }
-  if (dateTo && String(dateTo).trim()) {
-    whereClause.push(`created_at <= ?`);
-    params.push(`${String(dateTo).trim()} 23:59:59`);
-  }
-
-  const whereSql = whereClause.length ? `WHERE ${whereClause.join(' AND ')}` : '';
+  const { whereSql, params } = buildAuditLogFilter(req.query);
 
   const totalCount = db.prepare(`SELECT COUNT(*) AS c FROM system_audit_logs ${whereSql}`).get(...params)?.c || 0;
   const logs = db.prepare(`SELECT * FROM system_audit_logs ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`)
@@ -7677,33 +7638,7 @@ app.get('/api/system/audit-logs/export', authMiddleware, (req, res) => {
     return res.status(403).json({ error: '需要系統稽核日誌權限' });
   }
 
-  const { q, category, user_id, dateFrom, dateTo } = req.query || {};
-  const whereClause = [];
-  const params = [];
-
-  if (q && String(q).trim()) {
-    const kw = `%${String(q).trim()}%`;
-    whereClause.push(`(user_name LIKE ? OR user_username LIKE ? OR description LIKE ? OR ip_address LIKE ? OR action_type LIKE ?)`);
-    params.push(kw, kw, kw, kw, kw);
-  }
-  if (category && String(category).trim()) {
-    whereClause.push(`category = ?`);
-    params.push(String(category).trim());
-  }
-  if (user_id) {
-    whereClause.push(`user_id = ?`);
-    params.push(Number(user_id));
-  }
-  if (dateFrom && String(dateFrom).trim()) {
-    whereClause.push(`created_at >= ?`);
-    params.push(`${String(dateFrom).trim()} 00:00:00`);
-  }
-  if (dateTo && String(dateTo).trim()) {
-    whereClause.push(`created_at <= ?`);
-    params.push(`${String(dateTo).trim()} 23:59:59`);
-  }
-
-  const whereSql = whereClause.length ? `WHERE ${whereClause.join(' AND ')}` : '';
+  const { whereSql, params } = buildAuditLogFilter(req.query);
   const logs = db.prepare(`SELECT * FROM system_audit_logs ${whereSql} ORDER BY id DESC LIMIT 5000`).all(...params);
 
   // UTF-8 BOM CSV output for Excel compatibility
@@ -7873,12 +7808,12 @@ app.get('/api/stats', authMiddleware, (req, res) => {
           `SELECT COUNT(*) AS c FROM approval_requests r
            JOIN workflows w ON w.id = r.workflow_id
            WHERE r.status = 'approved'
-             AND (w.name LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
+             AND ${CREDIT_LIMIT_COND}
              AND r.id NOT IN (
-               SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
+               SELECT request_id FROM approval_actions WHERE step_name = ?
              )`
         )
-        .get().c
+        .get(STEP_FINANCE_CONFIRM).c
     : 0;
   const pendingApplicantAck = db
     .prepare(
@@ -7886,15 +7821,15 @@ app.get('/api/stats', authMiddleware, (req, res) => {
        JOIN workflows w ON w.id = r.workflow_id
        WHERE r.status = 'approved'
          AND r.requester_id = ?
-         AND (w.name LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
+         AND ${CREDIT_LIMIT_COND}
          AND r.id IN (
-           SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
+           SELECT request_id FROM approval_actions WHERE step_name = ?
          )
          AND r.id NOT IN (
-           SELECT request_id FROM approval_actions WHERE step_name = '申請人建檔確認'
+           SELECT request_id FROM approval_actions WHERE step_name = ?
          )`
     )
-    .get(uid).c;
+    .get(uid, STEP_FINANCE_CONFIRM, STEP_APPLICANT_ACK).c;
 
   const pendingFinalNotify = getPendingFinalNotifyCount(uid);
 

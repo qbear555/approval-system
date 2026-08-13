@@ -964,20 +964,11 @@ function createSimpleTableKit(ctx, theme = {}) {
             .lineWidth(0.35)
             .stroke();
         }
-        if (j === 2 && a.signature_image && typeof a.signature_image === 'string' && a.signature_image.startsWith('data:image/')) {
-          try {
-            const base64Data = a.signature_image.replace(/^data:image\/\w+;base64,/, '');
-            const imgBuf = Buffer.from(base64Data, 'base64');
-            doc.image(imgBuf, x + 2, y + 2, { fit: [widths[j] - 4, maxH - 4], align: 'center', valig: 'center' });
-          } catch {
-            textAt(cells[j], x + 4, y + 5, widths[j] - 8, { size: 9.5, color: C.ink });
-          }
-        } else {
-          textAt(cells[j], x + 4, y + 5, widths[j] - 8, {
-            size: 9.5,
-            color: C.ink,
-          });
-        }
+        const drawCellText = () =>
+          textAt(cells[j], x + 4, y + 5, widths[j] - 8, { size: 9.5, color: C.ink });
+        const cellBox = { x, y, w: widths[j], h: maxH };
+        if (j === 2) drawSignatureCell(doc, a.signature_image, cellBox, drawCellText);
+        else drawCellText();
         x += widths[j];
       }
       y += maxH;
@@ -1767,6 +1758,27 @@ function pickFormValue(formData, formFields, ids, labelRe) {
  * v2 圖模型的系統動作（匯合、路徑判定）不屬於任何編號關卡，
  * step_order 為 NULL，直接內插會在 PDF 上印出「null · 匯合」。
  */
+/**
+ * 簽核表格的「簽名」欄：有 base64 簽名圖就畫圖，
+ * 沒有圖或圖片無法解碼則改印文字（drawText）。
+ */
+function drawSignatureCell(doc, dataUrl, { x, y, w, h }, drawText) {
+  if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+    try {
+      const imgBuf = Buffer.from(dataUrl.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+      doc.image(imgBuf, x + 2, y + 2, {
+        fit: [w - 4, h - 4],
+        align: 'center',
+        valig: 'center',
+      });
+      return;
+    } catch {
+      /* 圖片無法解碼 → 退回文字 */
+    }
+  }
+  drawText();
+}
+
 function formatStepCell(a) {
   const name = a.step_name ? String(a.step_name) : '';
   if (a.step_order == null || a.step_order === '') return name || '—';
@@ -2600,20 +2612,11 @@ function drawLeaveForm(ctx, request) {
             .lineWidth(0.35)
             .stroke();
         }
-        if (j === 2 && a.signature_image && typeof a.signature_image === 'string' && a.signature_image.startsWith('data:image/')) {
-          try {
-            const base64Data = a.signature_image.replace(/^data:image\/\w+;base64,/, '');
-            const imgBuf = Buffer.from(base64Data, 'base64');
-            doc.image(imgBuf, x + 2, y + 2, { fit: [widths[j] - 4, maxH - 4], align: 'center', valig: 'center' });
-          } catch {
-            textAt(cells[j], x + 4, y + 5, widths[j] - 8, { size: 9.5, color: C.ink });
-          }
-        } else {
-          textAt(cells[j], x + 4, y + 5, widths[j] - 8, {
-            size: 9.5,
-            color: C.ink,
-          });
-        }
+        const drawCellText = () =>
+          textAt(cells[j], x + 4, y + 5, widths[j] - 8, { size: 9.5, color: C.ink });
+        const cellBox = { x, y, w: widths[j], h: maxH };
+        if (j === 2) drawSignatureCell(doc, a.signature_image, cellBox, drawCellText);
+        else drawCellText();
         x += widths[j];
       }
       y += maxH;
