@@ -1,8 +1,87 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'approval-system-secret-change-in-production-2026';
 const JWT_EXPIRES = '7d';
+const MIN_SECRET_LEN = 24;
+const SECRET_FILE = path.join(__dirname, '..', 'data', '.jwt-secret');
+
+/** 公開倉庫／安裝包曾出現的預設值，一律視為弱密鑰 */
+const WEAK_SECRETS = new Set([
+  '',
+  'change-me-to-a-long-random-secret',
+  'please-change-this-on-nas',
+  'approval-system-secret-change-in-production-2026',
+  'please-change-me-in-dotenv-file',
+  'onlyoffice-dev-secret-change-me',
+  '請改成很長的隨機英數字串',
+  '請改成很長的隨機字串',
+  '請改成隨機長字串',
+  '請換成夠長的隨機字串',
+]);
+
+function isWeakSecret(value) {
+  const v = String(value || '').trim();
+  if (v.length < MIN_SECRET_LEN) return true;
+  if (WEAK_SECRETS.has(v)) return true;
+  if (/please-change|change-me|change.in.production|請改成|請換成/i.test(v)) return true;
+  return false;
+}
+
+function readPersistedSecret() {
+  try {
+    if (!fs.existsSync(SECRET_FILE)) return '';
+    return String(fs.readFileSync(SECRET_FILE, 'utf8') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function persistSecret(secret) {
+  const dir = path.dirname(SECRET_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(SECRET_FILE, secret, { encoding: 'utf8', mode: 0o600 });
+}
+
+function generateSecret() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function resolveJwtSecret() {
+  const envSecret = String(process.env.JWT_SECRET || '').trim();
+  if (envSecret && !isWeakSecret(envSecret)) {
+    return { secret: envSecret, source: 'env' };
+  }
+
+  const fileSecret = readPersistedSecret();
+  if (fileSecret && !isWeakSecret(fileSecret)) {
+    if (envSecret) {
+      console.warn(
+        '[auth] JWT_SECRET 環境變數為公開預設值或過短，已改用 data/.jwt-secret'
+      );
+    }
+    return { secret: fileSecret, source: 'file' };
+  }
+
+  const next = generateSecret();
+  try {
+    persistSecret(next);
+  } catch (e) {
+    console.error('[auth] 無法寫入 data/.jwt-secret：', e.message);
+    console.error('[auth] 請設定夠長的 JWT_SECRET 環境變數後重啟');
+    process.exit(1);
+  }
+  console.warn(
+    '[auth] 已產生新的 JWT 密鑰並寫入 data/.jwt-secret（既有登入需重新登入）'
+  );
+  return { secret: next, source: 'generated' };
+}
+
+const resolved = resolveJwtSecret();
+const JWT_SECRET = resolved.secret;
+const JWT_SECRET_SOURCE = resolved.source;
 
 /**
  * 帳號顯示／儲存規範：去除首尾空白，英文第一個字母大寫。
@@ -88,4 +167,7 @@ module.exports = {
   adminOnly,
   builtinAdminOnly,
   JWT_SECRET,
+  JWT_SECRET_SOURCE,
+  isWeakSecret,
+  MIN_SECRET_LEN,
 };

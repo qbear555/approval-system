@@ -23,8 +23,8 @@ services:
       - HTTPS_PORT=3848
       - HTTPS_ENABLED=1
       - NODE_ENV=production
-      # 正式環境請改成夠長的隨機字串
-      - JWT_SECRET=${JWT_SECRET:-change-me-to-a-long-random-secret}
+      # 未設定或為公開預設值時，程式會在 data/.jwt-secret 自動產生並沿用
+      - JWT_SECRET=${JWT_SECRET:-}
       - TZ=${TZ:-Asia/Taipei}
       # 自簽憑證 CN / SAN（可依 NAS IP／網域調整）
       - SSL_CN=${SSL_CN:-192.168.99.220}
@@ -34,7 +34,7 @@ services:
       - ONLYOFFICE_DOCS_URL=${ONLYOFFICE_DOCS_URL:-http://127.0.0.1:8088}
       - ONLYOFFICE_INTERNAL_URL=${ONLYOFFICE_INTERNAL_URL:-http://onlyoffice}
       - ONLYOFFICE_APP_URL=${ONLYOFFICE_APP_URL:-http://approval-system:3847}
-      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-${JWT_SECRET:-change-me-to-a-long-random-secret}}
+      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-}
       - ONLYOFFICE_JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-1}
     volumes:
       # 持久化：資料庫、上傳附件、備份 PDF/ZIP、HTTPS 憑證
@@ -66,7 +66,7 @@ services:
       - "8088:80"
     environment:
       - JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-true}
-      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-${JWT_SECRET:-change-me-to-a-long-random-secret}}
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-}
       - JWT_HEADER=Authorization
       - JWT_IN_BODY=true
       - ALLOW_PRIVATE_IP_ADDRESS=true

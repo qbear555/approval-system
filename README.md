@@ -109,7 +109,7 @@ npm.cmd run build:installer
 
 ## 使用流程建議
 
-1. 各成員自行**註冊**帳號（或由管理員先建好）
+1. 由管理員在 **成員名單** 建立帳號（不開放自行註冊）
 2. 管理員或任何使用者到 **簽核流程** 建立模板（例如：請假、請購）
 3. 在流程中設定步驟順序與簽核人
 4. 到 **新增申請** 選擇流程、填寫主旨與內容後送出
@@ -121,13 +121,14 @@ npm.cmd run build:installer
 | 變數 | 說明 | 預設 |
 |------|------|------|
 | `PORT` | 服務埠號 | `3847` |
-| `JWT_SECRET` | JWT 簽章密鑰 | 內建字串（正式環境請改掉） |
+| `JWT_SECRET` | JWT 簽章密鑰 | 未設或為弱預設時自動寫入 `data/.jwt-secret` |
 
 PowerShell 範例：
 
 ```powershell
 $env:PORT=4000
-$env:JWT_SECRET="請換成夠長的隨機字串"
+# 選用；未設定時會寫入 data/.jwt-secret 並沿用
+$env:JWT_SECRET = -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
 npm.cmd start
 ```
 
@@ -150,6 +151,6 @@ approval-system/
 ## 注意事項
 
 - 資料庫為本機 SQLite，請定期備份 `data/approval.db`
-- 使用者上限約 50 人（註冊時檢查），設計目標約 30 人
+- 使用者上限約 50 人（管理員建立時檢查），設計目標約 30 人
 - 若 PDF 中文顯示異常，請確認系統有安裝「微軟正黑體 / 微軟雅黑」等字型
-- 正式對外開放時，請設定 HTTPS、更改 `JWT_SECRET`，並評估反向代理（如 Nginx / IIS）
+- 正式環境建議自行設定夠長的 `JWT_SECRET`；未設定時請確認 `data/.jwt-secret` 已產生且不要提交到 git

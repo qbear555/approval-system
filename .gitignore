@@ -28,6 +28,7 @@ Thumbs.db
 .claude/settings.local.json
 
 # Runtime secrets / local data (never commit)
+data/.jwt-secret
 data/system-settings.json
 data/announcements/
 data/branding/

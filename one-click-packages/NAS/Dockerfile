@@ -31,8 +31,7 @@ RUN mkdir -p /app/data/uploads /app/data/backups /app/data/mail-outbox /app/data
 ENV NODE_ENV=production \
     PORT=3847 \
     HTTPS_PORT=3848 \
-    HTTPS_ENABLED=1 \
-    JWT_SECRET=please-change-this-on-nas
+    HTTPS_ENABLED=1
 
 USER node
 EXPOSE 3847 3848

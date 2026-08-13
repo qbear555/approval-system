@@ -53,10 +53,9 @@ function getConfig() {
       process.env.PUBLIC_APP_URL ||
       `http://127.0.0.1:${process.env.PORT || 3847}`
   ).replace(/\/$/, '');
-  const jwtSecret =
-    process.env.ONLYOFFICE_JWT_SECRET ||
-    process.env.JWT_SECRET ||
-    'onlyoffice-dev-secret-change-me';
+  const { JWT_SECRET, isWeakSecret } = require('./auth');
+  const ooEnv = String(process.env.ONLYOFFICE_JWT_SECRET || '').trim();
+  const jwtSecret = ooEnv && !isWeakSecret(ooEnv) ? ooEnv : JWT_SECRET;
   const jwtEnabled = envBool('ONLYOFFICE_JWT_ENABLED', true);
   return {
     enabled,

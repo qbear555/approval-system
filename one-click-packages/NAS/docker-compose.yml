@@ -17,8 +17,8 @@ services:
       - HTTPS_PORT=3848
       - HTTPS_ENABLED=1
       - NODE_ENV=production
-      # 正式環境請改成夠長的隨機字串
-      - JWT_SECRET=change-me-to-a-long-random-secret
+      # 未設定或為公開預設值時，程式會在 data/.jwt-secret 自動產生並沿用
+      - JWT_SECRET=${JWT_SECRET:-}
       # 自簽憑證 CN / SAN（可依 NAS IP 調整）
       - SSL_CN=192.168.99.220
       - SSL_SAN=DNS:localhost,DNS:approval-system,IP:127.0.0.1,IP:192.168.99.220

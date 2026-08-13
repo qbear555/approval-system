@@ -14,7 +14,7 @@ services:
     environment:
       - PORT=3847
       - NODE_ENV=production
-      - JWT_SECRET=${JWT_SECRET:-please-change-me-in-dotenv-file}
+      - JWT_SECRET=${JWT_SECRET:-}
       - TZ=${TZ:-Asia/Taipei}
     volumes:
       - ./data:/app/data

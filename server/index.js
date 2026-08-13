@@ -16,7 +16,9 @@ const {
   authMiddleware,
   adminOnly,
   builtinAdminOnly,
+  JWT_SECRET_SOURCE,
 } = require('./auth');
+const loginRateLimit = require('./login-rate-limit');
 const {
   generateApprovalPdf,
   writeApprovalPdf,
@@ -2927,64 +2929,14 @@ app.delete('/api/departments/:id', authMiddleware, adminOnly, (req, res) => {
 });
 
 // ---------- Auth ----------
+/** 不開放自行註冊；帳號僅能由管理員在「成員名單」建立 */
 app.post('/api/auth/register', (req, res) => {
-  const { username, password, name, email, department } = req.body || {};
-  if (!username || !password || !name) {
-    return res.status(400).json({ error: '帳號、密碼、姓名為必填' });
-  }
-  if (String(username).length < 3) {
-    return res.status(400).json({ error: '帳號至少 3 個字元' });
-  }
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: '密碼至少 6 字元' });
-  }
-  const deptName = department ? String(department).trim() : '';
-  if (deptName && !isValidDepartment(deptName)) {
-    return res.status(400).json({ error: '請選擇有效的部門' });
-  }
-
-  const total = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-  if (total >= 50) {
-    return res.status(400).json({ error: '使用者數量已達上限（50）' });
-  }
-  const uname = normalizeUsername(username);
-  if (uname.length < 3) {
-    return res.status(400).json({ error: '帳號至少 3 個字元' });
-  }
-  // 帳號不區分大小寫：Admin 與 admin 視為同一帳號；儲存時首字母大寫
-  if (findUserByUsername(uname, { activeOnly: false })) {
-    return res.status(400).json({ error: '此帳號已被使用' });
-  }
-
-  try {
-    const info = db
-      .prepare(
-        `INSERT INTO users (username, password_hash, name, email, department, role)
-         VALUES (?, ?, ?, ?, ?, 'user')`
-      )
-      .run(
-        uname,
-        hashPassword(password),
-        String(name).trim(),
-        email ? String(email).trim() : null,
-        deptName
-      );
-    const user = db
-      .prepare(
-        `SELECT id, username, name, email, department, role, active, created_at, permissions_json
-         FROM users WHERE id = ?`
-      )
-      .get(info.lastInsertRowid);
-    const safe = publicUser(user);
-    const token = signToken(safe);
-    res.json({ token, user: safe, permissionDefs: PERMISSION_DEFS });
-  } catch (e) {
-    if (String(e.message).includes('UNIQUE')) {
-      return res.status(400).json({ error: '此帳號已被使用' });
-    }
-    console.error(e);
-    res.status(500).json({ error: '註冊失敗' });
-  }
+  logAudit(req, {
+    action_type: 'register_blocked',
+    category: 'auth',
+    description: '拒絕公開自行註冊',
+  });
+  return res.status(403).json({ error: '不開放自行註冊，請洽系統管理員建立帳號' });
 });
 
 /** 依帳號查詢（不區分大小寫；優先精確相符） */
@@ -3012,11 +2964,35 @@ app.post('/api/auth/login', (req, res) => {
   const uStr = String(username).trim();
   const pStr = String(password);
   const pTrim = pStr.trim();
+  const ip = getClientIp(req);
+  const limited = loginRateLimit.checkLogin(ip, uStr);
+  if (limited.blocked) {
+    const msg = loginRateLimit.lockMessage(limited.remainingSec);
+    res.setHeader('Retry-After', String(limited.remainingSec || 60));
+    logAudit(req, {
+      action_type: 'login_rate_limited',
+      category: 'auth',
+      description: `登入次數過多已鎖定（帳號：${uStr}）`,
+    });
+    return res.status(429).json({ error: msg });
+  }
   const user = findUserByUsername(uStr, { activeOnly: true });
   if (!user || (!verifyPassword(pStr, user.password_hash) && !verifyPassword(pTrim, user.password_hash))) {
+    const after = loginRateLimit.recordFail(ip, uStr);
     logAudit(req, { action_type: 'login_fail', category: 'auth', description: `登入失敗（帳號：${uStr}）` });
+    if (after.blocked) {
+      const msg = loginRateLimit.lockMessage(after.remainingSec);
+      res.setHeader('Retry-After', String(after.remainingSec || 60));
+      logAudit(req, {
+        action_type: 'login_rate_limited',
+        category: 'auth',
+        description: `登入失敗達上限已鎖定（帳號：${uStr}）`,
+      });
+      return res.status(429).json({ error: msg });
+    }
     return res.status(401).json({ error: '帳號或密碼錯誤' });
   }
+  loginRateLimit.recordSuccess(ip, uStr);
   const safe = publicUser(user);
   logAudit(req, { action_type: 'login', category: 'auth', description: `使用者 ${safe.name} (${safe.username}) 登入成功` });
   res.json({ token: signToken(safe), user: safe, permissionDefs: PERMISSION_DEFS });
@@ -7933,6 +7909,7 @@ listenDual(server, PORT, '線上簽核系統 HTTP', [
     console.log(`${ver.banner} 已啟動`);
     console.log(`  版本: ${ver.labelFull || ver.label}`);
     console.log(`  建置: ${ver.build} · 原始檔 ${ver.sourceFiles || 0} 個`);
+    console.log(`  JWT: ${JWT_SECRET_SOURCE === 'env' ? '環境變數' : JWT_SECRET_SOURCE === 'file' ? 'data/.jwt-secret' : '本次新產生'}`);
     console.log(`  時間: ${tz.nowStamp()}（台灣時間）`);
     // 主機時區不是 UTC+8 時大聲提醒：資料庫寫入的時間會錯，且只能在啟動前修正
     tz.warnIfHostTzMismatch();
