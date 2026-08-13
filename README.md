@@ -34,7 +34,7 @@
 ## 本機開發
 
 ```powershell
-cd C:\Users\TsuMing\Documents\approval-system
+cd C:\Users\UserName\Documents\approval-system
 npm.cmd install
 npm.cmd start
 ```
@@ -49,7 +49,7 @@ npm.cmd start
 |------|------|
 | Synology NAS | [docs/SYNOLOGY.md](docs/SYNOLOGY.md)，Docker HTTP 3847／HTTPS 3848 |
 | Ubuntu | [docs/UBUNTU.md](docs/UBUNTU.md) |
-| Windows 一鍵包 | `D:\一鍵安裝包\Windows` |
+| Windows 一鍵包
 | 更新 | [docs/一鍵更新說明.md](docs/一鍵更新說明.md)；開發機 `一鍵更新.bat` |
 
 Let's Encrypt 憑證同步見 [docs/HTTPS憑證-自動續期.md](docs/HTTPS憑證-自動續期.md)。
