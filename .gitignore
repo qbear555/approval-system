@@ -33,6 +33,10 @@ scratch/
 deploy/*.tar.gz
 deploy/*.zip
 deploy/approval_system.tar.gz
+deploy/Dockerfile
+deploy/docker-compose.yml
+deploy/backup_cron.sh
+deploy/deploy_to_nas.ps1
 
 # Runtime secrets / local data (never commit)
 data/.jwt-secret

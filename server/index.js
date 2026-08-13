@@ -183,6 +183,10 @@ require('./routes/departments')(routeCtx);
 require('./routes/system')(routeCtx);
 require('./routes/workflows')(routeCtx);
 require('./routes/requests')(routeCtx);
+require('./routes/attachments')(routeCtx);
+require('./routes/actions')(routeCtx);
+require('./routes/backups')(routeCtx);
+require('./routes/audit')(routeCtx);
 
 // SPA fallback
 app.get('*', (req, res) => {
