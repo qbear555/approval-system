@@ -53,7 +53,7 @@ description: >
   最終核定通過 → **系統內通知**選定對象（表 `final_notify_receipts`），對方須點 **「確認收到通知」**（非 Email）  
   總覽／待簽核／badge 會顯示待確認筆數；信用額度建檔確認仍為獨立流程
 - **不含**：系統設定、Email 帳密、使用者本體、歷史單據
-- **PDF**：`server/pdf.js` 優先讀 `pdfLayout`
+- **PDF**：`server/pdf.js` 入口；實作在 `server/pdf/`（write／filename／stamp／forms/*），優先讀 `pdfLayout`
 - **UI**：編輯流程可選 PDF 排版；可開關「最終核准完成通知」並勾選人員
 
 ### 2.2 通知（最高優先）
