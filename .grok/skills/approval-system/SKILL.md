@@ -1,7 +1,7 @@
 ---
 name: approval-system
 description: >
-  企業線上簽核系統（CatsHome／ARGO）的功能規範、優先順序與實作約定。
+  企業線上簽核系統的功能規範、優先順序與實作約定。
   用於開發、修改、部署、通知（Email／LINE／桌面彈窗）、流程、權限、報表、備份、一鍵安裝包。
   Triggers: 簽核、approval、待簽核、流程、請假、報支、LINE 通知、MailPlus、NAS 簽核、
   一鍵安裝包、備份、backup、desktop notification、彈窗、/approval-system。

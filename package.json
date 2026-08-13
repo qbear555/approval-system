@@ -1,7 +1,7 @@
 {
   "name": "approval-system",
   "version": "1.1.0",
-  "description": "CatsHome／ARGO 企業線上簽核：內網、自訂流程、PDF、Email／LINE／桌面通知",
+  "description": "企業線上簽核：內網、自訂流程、PDF、Email／LINE／桌面通知。本機 http://127.0.0.1:3847",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

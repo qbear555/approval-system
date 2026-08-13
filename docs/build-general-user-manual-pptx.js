@@ -10,7 +10,7 @@ const out =
 
 const pres = new pptxgen();
 pres.layout = 'LAYOUT_WIDE';
-pres.author = 'CatsHome';
+pres.author = '線上簽核系統';
 pres.title = '線上簽核系統 — 操作手冊';
 pres.subject = '登入、申請、簽核、PDF、通知';
 
@@ -41,7 +41,7 @@ function header(s, title) {
 }
 
 function footer(s, n, total) {
-  s.addText(`CatsHome 線上簽核  ·  ${n} / ${total}`, {
+  s.addText(`線上簽核系統  ·  ${n} / ${total}`, {
     x: 0.5, y: 7.15, w: 12.3, h: 0.22,
     fontFace: FONT, fontSize: 11, color: C.muted, margin: 0,
   });
@@ -67,7 +67,7 @@ const TOTAL = 12;
     x: 0.7, y: 4.0, w: 12, h: 0.4,
     fontFace: FONT, fontSize: 16, color: 'CBD5E1', margin: 0,
   });
-  s.addText('正式站  https://192.168.99.220:3848   或   https://catshome.tw:3848', {
+  s.addText('本機  http://127.0.0.1:3847', {
     x: 0.7, y: 5.9, w: 12, h: 0.35,
     fontFace: FONT, fontSize: 14, color: '94A3B8', margin: 0,
   });
@@ -83,9 +83,9 @@ const TOTAL = 12;
       { text: '項目', options: { fill: { color: C.navy }, color: C.white, bold: true } },
       { text: '說明', options: { fill: { color: C.navy }, color: C.white, bold: true } },
     ],
-    ['區網 HTTPS', 'https://192.168.99.220:3848'],
-    ['網域 HTTPS', 'https://catshome.tw:3848'],
-    ['本機開發', 'http://127.0.0.1:3847'],
+    ['本機（首頁）', 'http://127.0.0.1:3847'],
+    ['區網 HTTP', 'http://伺服器IP:3847'],
+    ['區網 HTTPS', 'https://伺服器IP:3848'],
     ['帳號', 'Admin（管理員建立其他人帳號，不能自行註冊）'],
     ['密碼', '全新庫看 data/.admin-bootstrap.txt，登入後立刻改'],
   ];
