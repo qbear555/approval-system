@@ -43,6 +43,9 @@ const required = [
   'server/routes/requests.js',
   'server/routes/attachments.js',
   'server/routes/actions.js',
+  'server/routes/actions-extra.js',
+  'server/routes/actions-ack.js',
+  'server/routes/pdf-download.js',
   'server/routes/backups.js',
   'server/routes/audit.js',
   'server/routes/request-helpers.js',
@@ -52,7 +55,9 @@ const required = [
   'public/js/pages-settings.js',
   'public/js/pages-line.js',
   'public/js/pages-system.js',
-  'public/js/pages-request-form.js',
+  'public/js/pages-request-fields.js',
+  'public/js/pages-request-table.js',
+  'public/js/pages-request-view.js',
   'public/js/pages-request-list.js',
   'public/js/pages-request-new.js',
   'public/js/pages-request-detail.js',
@@ -63,6 +68,9 @@ if (fs.existsSync(path.join(ROOT, 'public/js/pages-admin.js'))) {
 }
 if (fs.existsSync(path.join(ROOT, 'public/js/pages-requests.js'))) {
   throw new Error('pages-requests.js 應已拆走');
+}
+if (fs.existsSync(path.join(ROOT, 'public/js/pages-request-form.js'))) {
+  throw new Error('pages-request-form.js 應已拆走');
 }
 
 const runtime = require(path.join(ROOT, 'server/runtime'));
@@ -110,7 +118,9 @@ child.stderr.on('data', (d) => process.stderr.write(d));
       'pages-line.js',
       'pages-system.js',
       'pages-dashboard.js',
-      'pages-request-form.js',
+      'pages-request-fields.js',
+      'pages-request-table.js',
+      'pages-request-view.js',
       'pages-request-list.js',
       'pages-request-new.js',
       'pages-request-detail.js',
@@ -147,6 +157,18 @@ child.stderr.on('data', (d) => process.stderr.write(d));
     if (dept.status !== 401) throw new Error('departments should 401, got ' + dept.status);
     const me = await req('/api/auth/me');
     if (me.status !== 401) throw new Error('/api/auth/me should 401, got ' + me.status);
+    const hook = await req('/line/webhook');
+    if (hook.status !== 200 || !hook.raw.includes('approval-line-webhook-proxy')) {
+      throw new Error('/line/webhook 探活失敗 ' + hook.status);
+    }
+    const { spawnSync } = require('child_process');
+    const vn = spawnSync(process.execPath, [path.join(ROOT, 'scripts/verify-notify.js')], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    if (vn.status !== 0) throw new Error('verify-notify 失敗: ' + (vn.stderr || vn.stdout || '').slice(0, 300));
+    if (!String(vn.stdout || '').includes('"mail"')) throw new Error('verify-notify 輸出異常');
     console.log('煙霧測試通過');
   } catch (e) {
     console.error('失敗:', e.message);

@@ -12,6 +12,8 @@
 - 申請路由再拆 `attachments`／`actions`／`backups`／`audit`；設定頁再拆 LINE／系統設定。
 - 新增 `scripts/verify-notify.js`（可選 `--send` 只測 Admin 自己）。
 - 修復拆 runtime 後登入 500：`publicUser` 補回 `normalizeUsername`，代理簽核補回 `tz`。
+- 煙霧測試涵蓋 `/line/webhook`、`verify-notify` 狀態、`publicUser`。
+- 申請表單再拆 fields／table／view；簽核動作再拆 extra／ack／pdf-download。
 - 回應加上 CSP、`X-Content-Type-Options: nosniff`、`X-Frame-Options`、`Referrer-Policy`。
 - 通知：`getAppBaseUrl` 空值回退 3847；最終通知模組補上拆檔後缺的依賴；新待簽核在無其他 modal 時顯示中央彈窗。
 - 移除未掛載、易改錯檔的 `src/` 影子專案。

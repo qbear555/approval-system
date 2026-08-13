@@ -217,6 +217,9 @@ require('./routes/workflows')(routeCtx);
 require('./routes/requests')(routeCtx);
 require('./routes/attachments')(routeCtx);
 require('./routes/actions')(routeCtx);
+require('./routes/actions-extra')(routeCtx);
+require('./routes/actions-ack')(routeCtx);
+require('./routes/pdf-download')(routeCtx);
 require('./routes/backups')(routeCtx);
 require('./routes/audit')(routeCtx);
 
