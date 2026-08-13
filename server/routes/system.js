@@ -152,6 +152,29 @@ app.get('/api/line/bindings', authMiddleware, lineSettingsOnly, async (req, res)
   res.json(result);
 });
 
+app.delete('/api/line/bindings/me', authMiddleware, async (req, res) => {
+  const result = await lineNotify.unbindUsername(req.user.username);
+  if (!result.ok) return res.status(400).json({ error: result.error || '解除綁定失敗' });
+  logAudit(req, {
+    action_type: 'line_unbind',
+    category: 'system',
+    description: `自行解除 LINE 綁定（${req.user.username}）`,
+  });
+  res.json(result);
+});
+
+app.delete('/api/line/bindings/:username', authMiddleware, lineSettingsOnly, async (req, res) => {
+  const username = decodeURIComponent(String(req.params.username || '').trim());
+  const result = await lineNotify.unbindUsername(username);
+  if (!result.ok) return res.status(400).json({ error: result.error || '解除綁定失敗' });
+  logAudit(req, {
+    action_type: 'line_unbind',
+    category: 'system',
+    description: `解除 LINE 綁定（${username}）`,
+  });
+  res.json(result);
+});
+
 // ---------- Mail settings ----------
 app.get('/api/mail/config', authMiddleware, (req, res) => {
   // 所有登入者可見是否啟用；完整 SMTP 僅管理員

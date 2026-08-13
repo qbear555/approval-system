@@ -259,6 +259,27 @@ async function testPush({ username, lineUserId, text }) {
   });
 }
 
+async function unbindUsername(username) {
+  const cfg = loadConfig();
+  if (!cfg.serviceUrl || !cfg.apiKey) {
+    return { ok: false, error: '尚未設定 LINE 服務' };
+  }
+  const u = String(username || '').trim();
+  if (!u) return { ok: false, error: '請指定簽核帳號' };
+  try {
+    const res = await fetch(`${cfg.serviceUrl}/api/bind/${encodeURIComponent(u)}`, {
+      method: 'DELETE',
+      headers: { 'X-Api-Key': cfg.apiKey },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 404) return { ok: false, error: '此帳號尚未綁定 LINE' };
+    if (!res.ok) return { ok: false, error: data.error || `HTTP ${res.status}` };
+    return { ok: true, binding: data.binding || null };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 async function fetchBindings() {
   const cfg = loadConfig();
   if (!cfg.serviceUrl || !cfg.apiKey) {
@@ -302,5 +323,6 @@ module.exports = {
   notifyApproversLine,
   testPush,
   fetchBindings,
+  unbindUsername,
   healthCheck,
 };

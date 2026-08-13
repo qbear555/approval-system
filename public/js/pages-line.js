@@ -16,7 +16,7 @@ function lineSettingsFormHtml(cfg = {}, opts = {}) {
     <p class="muted" style="margin-top:0;line-height:1.55">
       透過獨立服務 <code>line-notify</code>（預設埠 3850）推播 Messaging API。
       Channel Token 只放在 LINE 專案 <code>.env</code>；此處只填<strong>服務網址</strong>與<strong>內部 API 金鑰</strong>。
-      成員需先對官方帳號傳送：<code>綁定 簽核帳號</code>。
+      成員需先對官方帳號傳送：<code>綁定 簽核帳號</code>；解除可傳 <code>解除綁定</code>，或在下方列表按「解除」。
     </p>
     <p style="margin:0 0 12px">
       狀態：
@@ -156,20 +156,38 @@ function bindLineSettingsForm(opts = {}) {
           return;
         }
         const rows = list
-          .slice(0, 30)
-          .map(
-            (b) =>
-              `<tr><td>${esc(b.username || '—')}</td><td style="font-family:monospace;font-size:0.8rem">${esc(
+          .slice(0, 50)
+          .map((b) => {
+            const uname = String(b.username || '');
+            return `<tr>
+              <td>${esc(uname || '—')}</td>
+              <td style="font-family:monospace;font-size:0.8rem">${esc(
                 String(b.lineUserId || b.userId || '').slice(0, 24)
-              )}</td></tr>`
-          )
+              )}</td>
+              <td><button type="button" class="btn ghost sm" data-line-unbind="${esc(uname)}">解除</button></td>
+            </tr>`;
+          })
           .join('');
         box.innerHTML = `
-          <strong>已綁定帳號（前 ${Math.min(list.length, 30)} 筆）</strong>
+          <strong>已綁定帳號（${list.length} 筆）</strong>
           <table class="data" style="margin-top:8px;font-size:0.85rem;width:100%">
-            <thead><tr><th>簽核帳號</th><th>LINE userId</th></tr></thead>
+            <thead><tr><th>簽核帳號</th><th>LINE userId</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
-          </table>`;
+          </table>
+          <p class="muted" style="margin:8px 0 0;font-size:0.82rem">成員也可在 LINE 傳「解除綁定」自行取消。</p>`;
+        box.querySelectorAll('[data-line-unbind]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const uname = btn.getAttribute('data-line-unbind') || '';
+            if (!uname || !confirm(`確定解除「${uname}」的 LINE 綁定？`)) return;
+            try {
+              await api(`/api/line/bindings/${encodeURIComponent(uname)}`, { method: 'DELETE' });
+              toast(`已解除 ${uname} 的 LINE 綁定`, 'success');
+              btn.closest('tr')?.remove();
+            } catch (err) {
+              toast(err.message || '解除失敗', 'error');
+            }
+          });
+        });
       })
       .catch(() => {
         box.innerHTML = '無法載入綁定列表（服務未就緒或 API 金鑰不符）';
