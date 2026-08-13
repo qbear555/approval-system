@@ -152,6 +152,9 @@ const routeCtx = {
   ...runtime,
 };
 require('./routes/auth')(routeCtx);
+require('./routes/users')(routeCtx);
+require('./routes/departments')(routeCtx);
+require('./routes/system')(routeCtx);
 require('./routes/workflows')(routeCtx);
 require('./routes/requests')(routeCtx);
 

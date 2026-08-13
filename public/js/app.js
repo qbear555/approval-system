@@ -2091,7 +2091,7 @@ function splitUsersForDeptHeadChooser() {
 }
 
 /** 渲染部門主管步驟：自選成員或略過 */
-// 供後載入的 pages-admin.js / flow-editor.js 使用
+// 供後載入的 pages-settings.js / flow-editor.js 使用
 window.state = state;
 window.$ = $;
 window.$$ = $$;
@@ -2271,4 +2271,4 @@ try {
 } catch (_) {
   /* ignore */
 }
-// boot() 改由 pages-admin.js 載入後呼叫，避免管理頁函式尚未定義
+// boot() 改由 pages-settings.js 載入後呼叫，避免管理頁函式尚未定義
