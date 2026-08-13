@@ -1,7 +1,7 @@
 /* 線上簽核系統 — 前端 */
 const API = '';
 const state = {
-  token: localStorage.getItem('approval_token') || '',
+  token: '',
   user: null,
   page: 'dashboard',
   users: [],
@@ -278,8 +278,7 @@ async function api(path, options = {}) {
     options.body = JSON.stringify(options.body);
   }
   // FormData 勿手動設 Content-Type，瀏覽器會帶 boundary
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const res = await fetch(API + path, { ...options, headers });
+  const res = await fetch(API + path, { ...options, headers, credentials: 'same-origin' });
   const ct = res.headers.get('content-type') || '';
   /** 取回檔案內容；returnMeta 時一併帶回檔名與 MIME */
   const readBlob = async () => {
@@ -313,7 +312,13 @@ async function api(path, options = {}) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && state.token && !path.includes('/auth/login')) {
+    if (
+      res.status === 401 &&
+      state.user &&
+      !path.includes('/auth/login') &&
+      !path.includes('/auth/logout') &&
+      !path.includes('/auth/me')
+    ) {
       logout(false);
     }
     throw new Error(data.error || `請求失敗 (${res.status})`);
@@ -322,14 +327,18 @@ async function api(path, options = {}) {
 }
 
 function setAuth(token, user) {
-  state.token = token;
+  state.token = user ? '1' : '';
   state.user = user;
-  if (token) localStorage.setItem('approval_token', token);
-  else localStorage.removeItem('approval_token');
+  try {
+    localStorage.removeItem('approval_token');
+  } catch {
+    /* ignore */
+  }
 }
 
 function logout(showMsg = true) {
   stopPendingWatcher();
+  fetch(API + '/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   setAuth('', null);
   updateAppWatermark();
   state.page = 'dashboard';
@@ -11452,7 +11461,7 @@ function bindAuthUI() {
         method: 'POST',
         body: { username: fd.get('username'), password: fd.get('password') },
       });
-      setAuth(data.token, data.user);
+      setAuth('1', data.user);
       // 登入手勢下請求桌面通知權限
       showMain({ requestPermission: true });
       toast(`歡迎，${data.user.name}`, 'success');
@@ -11504,17 +11513,18 @@ async function boot() {
   }
   // 登入頁只讀品牌（公司名／Logo／版本）；部門名單需登入後才載
   loadSystemSettings().catch(() => {});
-  if (state.token) loadDepartmentOptions();
-  if (!state.token) {
-    return;
+  try {
+    localStorage.removeItem('approval_token');
+  } catch {
+    /* ignore */
   }
   try {
     const { user } = await api('/api/auth/me');
     if (!user) throw new Error('no user');
-    state.user = user;
+    setAuth('1', user);
+    loadDepartmentOptions();
     showMain();
   } catch (e) {
-    console.warn('auto login failed', e);
     setAuth('', null);
     showAuth();
   }

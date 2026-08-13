@@ -122,9 +122,62 @@ function signToken(user) {
   );
 }
 
+const AUTH_COOKIE = 'approval_token';
+const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function parseCookies(req) {
+  const header = String(req?.headers?.cookie || '');
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (!k) continue;
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function readAuthToken(req) {
+  const header = req?.headers?.authorization || '';
+  if (header.startsWith('Bearer ')) {
+    const bearer = header.slice(7).trim();
+    if (bearer) return bearer;
+  }
+  return parseCookies(req)[AUTH_COOKIE] || '';
+}
+
+function authCookieOptions(req) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: COOKIE_MAX_AGE_MS,
+    secure: !!(req && req.secure),
+  };
+}
+
+function setAuthCookie(req, res, token) {
+  res.cookie(AUTH_COOKIE, token, authCookieOptions(req));
+}
+
+function clearAuthCookie(req, res) {
+  res.clearCookie(AUTH_COOKIE, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: !!(req && req.secure),
+  });
+}
+
 function authMiddleware(req, res, next) {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const token = readAuthToken(req);
   if (!token) {
     return res.status(401).json({ error: '請先登入' });
   }
@@ -164,6 +217,9 @@ module.exports = {
   verifyPassword,
   signToken,
   authMiddleware,
+  setAuthCookie,
+  clearAuthCookie,
+  AUTH_COOKIE,
   adminOnly,
   builtinAdminOnly,
   JWT_SECRET,

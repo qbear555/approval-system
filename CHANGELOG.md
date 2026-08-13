@@ -7,6 +7,10 @@
 - **公開 API**：部門、台灣日曆、系統版本、完整系統設定改需登入。登入頁改讀 `/api/system/branding`（僅公司名／Logo／版本）。
 - **探活**：新增 `/health`、`/api/health`（檢查 SQLite）；Docker healthcheck 不再打 `/api/departments`。
 - **設定包**：預設不含 SMTP 密碼；勾選匯出密碼須再確認（`confirmMailSecrets=1`）。
+- **CORS**：預設關閉（同源即可）；僅當設定 `CORS_ORIGIN` 才開放指定來源。
+- **來源 IP**：預設不採信 `X-Forwarded-For`；僅 `TRUST_PROXY=1` 時交給 Express。
+- **登入態**：JWT 改 HttpOnly Cookie（`approval_token`），前端不再寫入 localStorage。
+- **字型**：登入頁不再載入 Google Fonts，改用本機微軟正黑體／系統字型。
 
 ### P0 安全
 

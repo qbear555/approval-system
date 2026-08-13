@@ -14,6 +14,8 @@ const {
   verifyPassword,
   signToken,
   authMiddleware,
+  setAuthCookie,
+  clearAuthCookie,
   adminOnly,
   builtinAdminOnly,
   JWT_SECRET_SOURCE,
@@ -219,14 +221,13 @@ function canUserAttachOnStep(userId, detail) {
   return true;
 }
 
-/** 取得請求端 IP 位址 */
+/** 取得請求端 IP：未設 TRUST_PROXY 時不採信 X-Forwarded-For */
 function getClientIp(req) {
   if (!req) return '127.0.0.1';
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    return String(forwarded).split(',')[0].trim();
-  }
-  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
+  const raw = TRUST_PROXY
+    ? req.ip || req.socket?.remoteAddress
+    : req.socket?.remoteAddress || req.connection?.remoteAddress;
+  return String(raw || '127.0.0.1').replace(/^::ffff:/, '');
 }
 
 /** 寫入系統進階稽核日誌 (P3-1) */
@@ -939,11 +940,18 @@ function requirePerm(permId) {
 
 const app = express();
 const PORT = process.env.PORT || 3847;
+const TRUST_PROXY = /^(1|true|yes)$/i.test(String(process.env.TRUST_PROXY || ''));
+const CORS_ORIGINS = String(process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
-// 反向代理／HTTPS 時正確辨識 req.protocol（OnlyOffice 同源腳本用）
-app.set('trust proxy', 1);
+// 直連 3847/3848 時勿信任 X-Forwarded-*（否則稽核 IP 可被偽造）
+if (TRUST_PROXY) app.set('trust proxy', 1);
 
-app.use(cors());
+if (CORS_ORIGINS.length) {
+  app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
+}
 // OnlyOffice 靜態資源同源代理（須在 static 之前，避免 HTTPS 混合內容）
 app.use(onlyoffice.createDocsProxy());
 app.use(express.json({ limit: '2mb' }));
@@ -3002,8 +3010,15 @@ app.post('/api/auth/login', (req, res) => {
   }
   loginRateLimit.recordSuccess(ip, uStr);
   const safe = publicUser(user);
+  const token = signToken(safe);
+  setAuthCookie(req, res, token);
   logAudit(req, { action_type: 'login', category: 'auth', description: `使用者 ${safe.name} (${safe.username}) 登入成功` });
-  res.json({ token: signToken(safe), user: safe, permissionDefs: PERMISSION_DEFS });
+  res.json({ ok: true, user: safe, permissionDefs: PERMISSION_DEFS });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  clearAuthCookie(req, res);
+  res.json({ ok: true });
 });
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {

@@ -13,7 +13,7 @@
   --border: #e2e8f0;
   --radius: 12px;
   --shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
-  --font: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
