@@ -92,7 +92,7 @@ module.exports = function register(ctx) {
   } = ctx;
   const { isRequestRelatedToUser } = require('./request-helpers')(ctx);
 app.get('/api/requests', authMiddleware, (req, res) => {
-  const filter = req.query.filter || 'related'; // related | mine | pending_me | done | all
+  const filter = req.query.filter || 'related'; // related | mine | pending_me | done | all | deleted
   const uid = req.user.id;
   let rows;
 
@@ -179,6 +179,20 @@ app.get('/api/requests', authMiddleware, (req, res) => {
       needsFinalNotifyAck: true,
       final_notify_label: fr.final_notify_label,
     }));
+  } else if (filter === 'deleted') {
+    const canSeeDeleted =
+      req.user.role === 'admin' || canDeleteApprovalRecords(req.user);
+    if (!canSeeDeleted) {
+      return res.status(403).json({ error: '沒有查看已刪申請的權限' });
+    }
+    rows = db
+      .prepare(
+        `${REQUEST_LIST_SELECT}
+         WHERE IFNULL(r.deleted_at,'') <> ''
+         ORDER BY r.deleted_at DESC, r.updated_at DESC
+         LIMIT 800`
+      )
+      .all();
   } else if (filter === 'done') {
     // 已結案：預設僅本人相關；records_all／leave_delete（請假）／管理員可擴大範圍
     const allDone = db
@@ -309,7 +323,9 @@ app.get('/api/requests', authMiddleware, (req, res) => {
       ...rest,
       approver_signed: signed,
       is_leave: isLeave,
-      can_delete,
+      can_delete: can_delete && !rest.deleted_at,
+      can_restore: !!(rest.deleted_at && (isAdminUser || canDeleteRecords)),
+      deleted: !!rest.deleted_at,
     };
   });
   res.json({
@@ -327,7 +343,11 @@ app.get('/api/requests', authMiddleware, (req, res) => {
 });
 
 app.get('/api/requests/:id', authMiddleware, (req, res) => {
-  const detail = getRequestDetail(Number(req.params.id));
+  const canSeeDeleted =
+    req.user.role === 'admin' || canDeleteApprovalRecords(req.user);
+  const detail = getRequestDetail(Number(req.params.id), {
+    includeDeleted: canSeeDeleted,
+  });
   if (!detail) return res.status(404).json({ error: '找不到簽核單' });
   const isLeaveReq =
     isLeaveApprovalRequest(detail) ||
@@ -359,11 +379,13 @@ app.get('/api/requests/:id', authMiddleware, (req, res) => {
   // 刪除：系統管理員可刪任何狀態；請假＋leave_delete 可刪；其餘已簽署則不可
   // 具備「刪除簽核紀錄」：可刪他人／非鎖定單據；申請人可刪自己的未核准單
   const canDelete =
-    req.user.role === 'admin' ||
-    (isLeaveReq && canDeleteLeaveRequests(req.user)) ||
-    (!approverSigned &&
-      (canDeleteApprovalRecords(req.user) ||
-        (detail.requester_id === req.user.id && detail.status !== 'approved')));
+    !detail.deleted_at &&
+    (req.user.role === 'admin' ||
+      (isLeaveReq && canDeleteLeaveRequests(req.user)) ||
+      (!approverSigned &&
+        (canDeleteApprovalRecords(req.user) ||
+          (detail.requester_id === req.user.id && detail.status !== 'approved'))));
+  const canRestore = !!(detail.deleted_at && canSeeDeleted);
   // 會簽進度：目前步驟已簽 / 未簽人員
   let coApprovers = null;
   if (current && detail.status === 'pending') {
@@ -545,6 +567,7 @@ app.get('/api/requests/:id', authMiddleware, (req, res) => {
     isFinalStep,
     canCancel,
     canDelete,
+    canRestore,
     approverSigned,
     currentStep: currentStepOut,
     coApprovers,
@@ -1038,6 +1061,37 @@ app.delete('/api/requests/:id', authMiddleware, (req, res) => {
     return res.status(code).json({ error: result.error });
   }
   res.json({ ok: true, ...result });
+});
+
+app.post('/api/requests/:id/restore', authMiddleware, (req, res) => {
+  const canRestore =
+    req.user.role === 'admin' || canDeleteApprovalRecords(req.user);
+  if (!canRestore) {
+    return res.status(403).json({ error: '沒有還原已刪申請的權限' });
+  }
+  const id = Number(req.params.id);
+  const row = db
+    .prepare(
+      `SELECT r.id, r.title, r.deleted_at FROM approval_requests r WHERE r.id = ?`
+    )
+    .get(id);
+  if (!row) return res.status(404).json({ error: '找不到簽核單' });
+  if (!row.deleted_at) {
+    return res.status(400).json({ error: '此申請未被刪除' });
+  }
+  db.prepare(
+    `UPDATE approval_requests
+     SET deleted_at = NULL,
+         updated_at = datetime('now', 'localtime')
+     WHERE id = ?`
+  ).run(id);
+  logAudit(req, {
+    action_type: 'request_restore',
+    category: 'approval',
+    description: `還原已刪申請 #${id}「${row.title || ''}」`,
+    target_id: id,
+  });
+  res.json({ ok: true, id, title: row.title });
 });
 
 app.post('/api/requests/bulk-delete', authMiddleware, (req, res) => {

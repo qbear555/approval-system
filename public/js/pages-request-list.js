@@ -5,7 +5,10 @@
 async function renderRequestList(body, filter) {
   // 查詢列僅「簽核紀錄」等紀錄頁；待我簽核／我的申請不顯示、也不帶查詢參數
   const showSearch =
-    filter === 'related' || filter === 'all' || filter === 'done';
+    filter === 'related' ||
+    filter === 'all' ||
+    filter === 'done' ||
+    filter === 'deleted';
 
   // 查詢條件（僅紀錄頁、同 filter 間保留）
   const prev =
@@ -48,7 +51,10 @@ async function renderRequestList(body, filter) {
     (isAdmin() || canDeleteRecordsPerm() || canDeleteLeavePerm()) &&
     (filter === 'related' || filter === 'all' || filter === 'done' || filter === 'mine');
   const allowDelete =
-    filter === 'mine' || adminMode || canDeleteLeavePerm() || isAdmin();
+    filter !== 'deleted' &&
+    (filter === 'mine' || adminMode || canDeleteLeavePerm() || isAdmin());
+  const allowRestore =
+    filter === 'deleted' && (isAdmin() || canDeleteRecordsPerm());
   const anyDeletable =
     allowDelete &&
     requests.some((r) => canDeleteRequestRow(r, { adminMode }));
@@ -73,6 +79,12 @@ async function renderRequestList(body, filter) {
           !isAdmin() && canDeleteRecordsPerm()
             ? ' 具備「刪除簽核紀錄」者可刪除尚未有簽署人核准的單據。'
             : ''
+        }${
+          isAdmin() || canDeleteRecordsPerm()
+            ? filter === 'deleted'
+              ? ' 目前為<strong>已刪除單據</strong>；可還原回一般列表。'
+              : ' <a href="#records" data-go-deleted="1">查看已刪除單據</a>。'
+            : ''
         }</p>`
       : filter === 'mine'
         ? `<p class="muted" style="margin:0 0 12px">僅顯示您本人送出的申請。${
@@ -82,6 +94,8 @@ async function renderRequestList(body, filter) {
           }</p>`
         : filter === 'pending_me'
           ? `<p class="muted" style="margin:0 0 12px">僅顯示目前待您簽核的單據。</p>`
+          : filter === 'deleted'
+            ? `<p class="muted" style="margin:0 0 12px">已刪除單據（軟刪）。單據、附件與備份仍在；按「還原」會回到一般列表。<a href="#records" data-go-records="1">回簽核紀錄</a></p>`
           : '';
   const emptyByFilter = {
     pending_me: {
@@ -125,6 +139,15 @@ async function renderRequestList(body, filter) {
       actions: hasActiveQuery
         ? [{ label: '清除條件', id: 'btn-req-clear', outline: true }]
         : [{ label: '＋ 新增申請', go: 'new-request', primary: true }],
+    },
+    deleted: {
+      title: hasActiveQuery ? '沒有符合條件的已刪單據' : '沒有已刪除的申請',
+      desc: hasActiveQuery
+        ? '請調整查詢條件後再試。'
+        : '軟刪的單據會列在這裡，可還原回一般列表。附件與備份仍保留。',
+      actions: [
+        { label: '回簽核紀錄', go: 'records', outline: true },
+      ],
     },
     done: {
       title: hasActiveQuery ? '沒有符合條件的紀錄' : '尚無已完成紀錄',
@@ -270,6 +293,7 @@ async function renderRequestList(body, filter) {
       }
       ${requestTable(requests, {
         allowDelete,
+        allowRestore,
         adminMode,
         allowBatchSelect: filter === 'pending_me' && requests.length > 0,
         empty: emptyByFilter[filter] || {
@@ -348,6 +372,35 @@ async function renderRequestList(body, filter) {
       openBatchApprovalModal(selectedIds, 'reject', () => renderRequestList(body, 'pending_me'));
     });
   }
+
+  body.querySelector('[data-go-deleted]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    state.requestListQuery = { ...(state.requestListQuery || {}), _filter: 'deleted' };
+    renderRequestList(body, 'deleted');
+  });
+  body.querySelector('[data-go-records]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    state.requestListQuery = { ...(state.requestListQuery || {}), _filter: 'related' };
+    navigate('records');
+  });
+
+  body.querySelectorAll('[data-restore-req]').forEach((btn) => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const id = Number(btn.dataset.restoreReq);
+      const r = requests.find((x) => x.id === id);
+      if (!confirm(`確定還原申請 #${id}${r ? `「${r.title}」` : ''}？\n還原後會重新出現在一般列表。`)) {
+        return;
+      }
+      try {
+        await api(`/api/requests/${id}/restore`, { method: 'POST' });
+        toast('已還原申請', 'success');
+        renderRequestList(body, 'deleted');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  });
 
   if (!anyDeletable) return;
 
@@ -437,8 +490,8 @@ async function renderRequestList(body, filter) {
     if (
       !confirm(
         isAdmin()
-          ? `確定刪除選取的 ${okIds.length} 筆申請？\n將永久刪除單據、歷程、附件與相關備份，無法復原。\n（系統管理員可刪除任何狀態，含已核准／駁回／簽核中／已取消）`
-          : `確定刪除選取的 ${okIds.length} 筆申請？\n將永久刪除單據、歷程、附件與相關備份，無法復原。\n（一般單據：已簽署／已核准不可刪；請假單若具備「刪除請假申請」權限可刪）`
+          ? `確定刪除選取的 ${okIds.length} 筆申請？\n將從列表隱藏；單據、附件與備份仍保留，管理員可還原。`
+          : `確定刪除選取的 ${okIds.length} 筆申請？\n將從列表隱藏；單據、附件與備份仍保留供稽核。`
       )
     ) {
       return;

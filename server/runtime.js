@@ -346,7 +346,7 @@ const workflowModule = require('./workflow-module');
   }
 })();
 
-function getRequestDetail(id) {
+function getRequestDetail(id, opts = {}) {
   const row = db
     .prepare(
       `SELECT r.*, w.name AS workflow_name, w.steps_json, w.form_fields_json, w.pdf_layout_json,
@@ -360,7 +360,7 @@ function getRequestDetail(id) {
     )
     .get(id);
   if (!row) return null;
-  if (row.deleted_at) return null;
+  if (row.deleted_at && !opts.includeDeleted) return null;
 
   const actions = db
     .prepare(

@@ -1358,13 +1358,16 @@ function requestTable(requests, emptyOkOrOpts = false, opts = {}) {
   let emptyCfg = null;
   let allowDelete = false;
   let adminMode = false;
+  let allowRestore = false;
   if (emptyOkOrOpts && typeof emptyOkOrOpts === 'object' && !Array.isArray(emptyOkOrOpts)) {
     emptyCfg = emptyOkOrOpts.empty || null;
     allowDelete = !!emptyOkOrOpts.allowDelete;
     adminMode = !!emptyOkOrOpts.adminMode;
+    allowRestore = !!emptyOkOrOpts.allowRestore;
   } else {
     allowDelete = !!(opts && opts.allowDelete);
     adminMode = !!(opts && opts.adminMode);
+    allowRestore = !!(opts && opts.allowRestore);
     emptyCfg = (opts && opts.empty) || null;
     if (!emptyCfg && emptyOkOrOpts === true) {
       emptyCfg = {
@@ -1385,6 +1388,9 @@ function requestTable(requests, emptyOkOrOpts = false, opts = {}) {
   const anyDeletable =
     allowDelete &&
     requests.some((r) => canDeleteRequestRow(r, { adminMode }));
+  const anyRestorable =
+    allowRestore && requests.some((r) => r.deleted || r.deleted_at);
+  const showActions = anyDeletable || anyRestorable;
   const showCheckboxCol = anyDeletable || allowBatchSelect;
 
   return `
@@ -1399,13 +1405,18 @@ function requestTable(requests, emptyOkOrOpts = false, opts = {}) {
             <th style="width:100px;white-space:nowrap">申請人</th>
             <th style="width:90px;text-align:center;white-space:nowrap">狀態</th>
             <th style="width:145px;white-space:nowrap">更新時間</th>
-            ${anyDeletable ? '<th style="width:95px;text-align:center;white-space:nowrap">操作</th>' : ''}
+            ${showActions ? '<th style="width:95px;text-align:center;white-space:nowrap">操作</th>' : ''}
           </tr>
         </thead>
         <tbody>
           ${requests
             .map((r) => {
               const canDel = allowDelete && canDeleteRequestRow(r, { adminMode });
+              const canRestore = allowRestore && !!(r.deleted || r.deleted_at);
+              const deletedBadge =
+                r.deleted || r.deleted_at
+                  ? `<span class="tag draft" style="background:#fef2f2;color:#b91c1c;border-color:#fecaca;margin-right:6px">已刪除</span>`
+                  : '';
               const proxyBadge = r.is_delegated
                 ? `<span class="tag draft" style="background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;margin-right:6px">代理 ${esc(r.delegated_for_name || '')}</span>`
                 : '';
@@ -1425,16 +1436,18 @@ function requestTable(requests, emptyOkOrOpts = false, opts = {}) {
                   : ''
               }
               <td style="text-align:center;white-space:nowrap"><span class="req-id-badge">#${r.id}</span></td>
-              <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.title)}">${proxyBadge}<strong>${esc(r.title)}</strong></td>
+              <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.title)}">${deletedBadge}${proxyBadge}<strong>${esc(r.title)}</strong></td>
               <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.workflow_name)}">${esc(r.workflow_name)}</td>
               <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.requester_name)}">${esc(r.requester_name)}</td>
               <td style="text-align:center;white-space:nowrap">${statusTag(r.status)}</td>
               <td class="muted" style="white-space:nowrap">${esc(r.updated_at)}</td>
               ${
-                anyDeletable
+                showActions
                   ? `<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
                       ${
-                        canDel
+                        canRestore
+                          ? `<button type="button" class="btn sm outline" data-restore-req="${r.id}">還原</button>`
+                          : canDel
                           ? `<button type="button" class="btn sm danger" data-del-req="${r.id}">刪除</button>`
                           : r.approver_signed || r.can_delete === false
                             ? `<span class="muted" style="font-size:0.82rem" title="下一位簽署人已簽核">已簽核不可刪</span>`

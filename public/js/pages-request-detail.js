@@ -12,6 +12,7 @@ async function renderDetail(body, id) {
     isFinalStep,
     canCancel,
     canDelete,
+    canRestore,
     approverSigned,
     coApprovers,
     applicantLabor,
@@ -51,6 +52,11 @@ async function renderDetail(body, id) {
     );
   }
   // 伺服器判定：已有簽署人簽核則不可刪除
+  if (canRestore) {
+    actionsHtml.push(
+      `<button type="button" class="btn outline" id="btn-restore-request" title="還原此申請">還原申請</button>`
+    );
+  }
   if (canDelete) {
     actionsHtml.push(
       `<button type="button" class="btn danger" id="btn-del-request" title="刪除此申請">刪除申請</button>`
@@ -69,6 +75,15 @@ async function renderDetail(body, id) {
     userName,
     showLegend: true,
   });
+
+  const deletedBanner = request.deleted_at
+    ? `<div class="card" style="background:#fef2f2;border-color:#fecaca;margin-bottom:12px">
+          <strong style="color:#b91c1c">此申請已刪除</strong>
+          <div class="muted" style="margin-top:6px;font-size:0.9rem">
+            已從一般列表隱藏；單據、附件與備份仍保留。管理員可按上方「還原申請」。
+          </div>
+        </div>`
+    : '';
 
   const coApproverBanner =
     coApprovers &&
@@ -285,6 +300,7 @@ async function renderDetail(body, id) {
 
   body.innerHTML = `
     <div class="detail-main">
+      ${deletedBanner}
       ${coApproverBanner}
       ${finalNotifyBanner}
       ${financeConfirmBanner}
@@ -790,6 +806,23 @@ async function renderDetail(body, id) {
       }
     };
   }
+
+  $('#btn-restore-request')?.addEventListener('click', async () => {
+    if (
+      !confirm(
+        `確定還原申請 #${id}「${request.title}」？\n還原後會重新出現在一般列表。`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api(`/api/requests/${id}/restore`, { method: 'POST' });
+      toast('已還原申請', 'success');
+      navigate('records');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  });
 
   $('#btn-del-request')?.addEventListener('click', async () => {
     const isLeave =

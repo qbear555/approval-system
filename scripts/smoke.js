@@ -72,6 +72,12 @@ if (fs.existsSync(path.join(ROOT, 'public/js/pages-requests.js'))) {
 if (fs.existsSync(path.join(ROOT, 'public/js/pages-request-form.js'))) {
   throw new Error('pages-request-form.js 應已拆走');
 }
+{
+  const reqSrc = fs.readFileSync(path.join(ROOT, 'server/routes/requests.js'), 'utf8');
+  if (!reqSrc.includes('/api/requests/:id/restore')) {
+    throw new Error('缺少軟刪還原路由');
+  }
+}
 
 const runtime = require(path.join(ROOT, 'server/runtime'));
 for (const name of [

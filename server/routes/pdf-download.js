@@ -107,7 +107,11 @@ function safeZipEntryName(name, fallback = 'file') {
  * - 已核准且有附件、非 preview：ZIP（PDF＋附件）
  */
 app.get('/api/requests/:id/pdf', authMiddleware, async (req, res) => {
-  const detail = getRequestDetail(Number(req.params.id));
+  const canSeeDeleted =
+    req.user.role === 'admin' || canDeleteApprovalRecords(req.user);
+  const detail = getRequestDetail(Number(req.params.id), {
+    includeDeleted: canSeeDeleted,
+  });
   if (!detail) return res.status(404).json({ error: '找不到簽核單' });
 
   const seeAll =
