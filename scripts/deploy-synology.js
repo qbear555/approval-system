@@ -130,9 +130,6 @@ async function uploadDir(sftpClient, localDir, remoteDir) {
     const rp = remoteDir + '/' + ent.name;
     // skip tests / junk
     if (ent.name.startsWith('.')) continue;
-    if (/^test-|^create-users|^list-users|seed\.js$/.test(ent.name) && localDir.endsWith('server')) {
-      // still upload seed.js maybe useful - keep seed.js
-    }
     if (ent.isDirectory()) {
       if (ent.name === 'node_modules' || ent.name === 'data') continue;
       await uploadDir(sftpClient, lp, rp);

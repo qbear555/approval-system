@@ -58,21 +58,6 @@ if (Test-Path (Join-Path $Root 'start-server.js')) {
   Copy-Item -Force (Join-Path $Root 'start-server.js') (Join-Path $OutDir 'app\start-server.js')
 }
 
-# Remove dev/test scripts from package (keep mail.js, seed.js, pdf.js, backup.js, auth.js, db.js)
-$removeScripts = @(
-  'test-form.js', 'create-users.js', 'export-accounts.js', 'list-users-quick.js',
-  'set-gm.js', 'set-vgm.js', 'setup-approval-levels.js', 'test-wf-delete.js',
-  'update-leave-datetime.js', 'update-leave-tw.js', 'remove-agent-from-workflows.js',
-  'remove-dept-head-required.js'
-)
-foreach ($f in $removeScripts) {
-  $p = Join-Path $OutDir "app\server\$f"
-  if (Test-Path $p) { Remove-Item -Force $p }
-}
-# Remove accidental temp scripts
-Get-ChildItem (Join-Path $OutDir 'app\server') -Filter '_tmp*.js' -ErrorAction SilentlyContinue |
-  Remove-Item -Force -ErrorAction SilentlyContinue
-
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'app\data') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'app\data\uploads') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'app\data\backups') | Out-Null

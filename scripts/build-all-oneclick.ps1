@@ -91,7 +91,7 @@ Write-Host ("Seed: users={0} workflows={1} requests={2}" -f $manifest.counts.use
 # ---------- helpers: copy app common ----------
 function Copy-AppCore($destApp) {
   Ensure-Dir $destApp
-  robocopy (Join-Path $Root 'server') (Join-Path $destApp 'server') /E /XF test-*.js create-users.js list-users-quick.js _tmp*.js /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+  robocopy (Join-Path $Root 'server') (Join-Path $destApp 'server') /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
   robocopy (Join-Path $Root 'public') (Join-Path $destApp 'public') /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
   if (Test-Path (Join-Path $Root 'fonts')) {
     robocopy (Join-Path $Root 'fonts') (Join-Path $destApp 'fonts') /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
@@ -123,16 +123,6 @@ if (-not $SkipWindows) {
 
   Write-Host '  Copy app...'
   Copy-AppCore (Join-Path $OutDir 'app')
-  # strip helper scripts not needed at runtime
-  $removeScripts = @(
-    'export-accounts.js', 'set-gm.js', 'set-vgm.js', 'setup-approval-levels.js',
-    'test-wf-delete.js', 'update-leave-datetime.js', 'update-leave-tw.js',
-    'remove-agent-from-workflows.js', 'remove-dept-head-required.js'
-  )
-  foreach ($f in $removeScripts) {
-    $p = Join-Path $OutDir "app\server\$f"
-    if (Test-Path $p) { Remove-Item -Force $p }
-  }
 
   Write-Host '  Installer scripts...'
   $installerDir = Join-Path $Root 'installer'

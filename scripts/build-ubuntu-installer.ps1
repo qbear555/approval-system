@@ -36,7 +36,7 @@ Copy-Item -Force (Join-Path $Root '.dockerignore') $OutDir -ErrorAction Silently
 Copy-Item -Force (Join-Path $Root 'package.json') $OutDir
 Copy-Item -Force (Join-Path $Root 'package-lock.json') $OutDir
 Copy-Item -Force (Join-Path $Root 'README.md') $OutDir
-robocopy (Join-Path $Root 'server') (Join-Path $OutDir 'server') /E /XF test-*.js create-users.js list-users-quick.js /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+robocopy (Join-Path $Root 'server') (Join-Path $OutDir 'server') /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
 robocopy (Join-Path $Root 'public') (Join-Path $OutDir 'public') /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
 robocopy (Join-Path $Root 'docs') (Join-Path $OutDir 'docs') /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
 if (Test-Path (Join-Path $Root 'fonts')) {
