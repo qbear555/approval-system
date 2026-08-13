@@ -145,6 +145,7 @@ description: >
 - LINE Developers Webhook 必須是**公網 HTTPS**：`https://catshome.tw:3848/line/webhook`  
   （簽核 `:3848` 轉送到 NAS `line-notify:3850`；區網 3850 給 LINE 雲端打不到）  
 - 解除：傳 `解除綁定`，或在簽核 LINE 設定頁按解除  
+- **目前僅內建 Admin** 可設定與收 LINE 推播（`LINE_NOTIFY_BUILTIN_ADMIN_ONLY=true`）。開放全員時改 false  
 
 ### 3.5 本機執行（常見缺檔）
 

@@ -202,6 +202,9 @@ function publicUser(row, { withLabor = false } = {}) {
 
 function canConfigureLineSettings(user) {
   if (!user) return false;
+  if (lineNotify.LINE_NOTIFY_BUILTIN_ADMIN_ONLY) {
+    return isBuiltinAdminUsername(user.username);
+  }
   const access = lineNotify.loadConfig().configAccess || 'builtin_admin';
   if (access === 'builtin_admin') return isBuiltinAdminUsername(user.username);
   if (access === 'any_admin') return user.role === 'admin' || isBuiltinAdminUsername(user.username);

@@ -9,6 +9,17 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const CONFIG_PATH = path.join(DATA_DIR, 'line-config.json');
 
+/**
+ * LINE 通知僅內建 Admin 使用（設定頁＋推播對象）。
+ * 開發階段（2026-08）：其他人即使已綁定也不推播。
+ * 之後要開放全員：改成 false。
+ */
+const LINE_NOTIFY_BUILTIN_ADMIN_ONLY = true;
+
+function isLineNotifyAllowedUsername(username) {
+  return String(username || '').trim().toLowerCase() === 'admin';
+}
+
 /** configAccess: builtin_admin | any_admin | permission */
 const DEFAULTS = {
   enabled: false,
@@ -44,7 +55,7 @@ function loadConfig() {
       enabled: !!raw.enabled,
       serviceUrl: String(raw.serviceUrl || DEFAULTS.serviceUrl).replace(/\/$/, ''),
       apiKey: raw.apiKey != null ? String(raw.apiKey) : '',
-      configAccess: access,
+      configAccess: LINE_NOTIFY_BUILTIN_ADMIN_ONLY ? 'builtin_admin' : access,
       events,
       updatedAt: raw.updatedAt || null,
     };
@@ -72,7 +83,7 @@ function saveConfig(partial = {}) {
   if (!['builtin_admin', 'any_admin', 'permission'].includes(access)) {
     access = DEFAULTS.configAccess;
   }
-  next.configAccess = access;
+  next.configAccess = LINE_NOTIFY_BUILTIN_ADMIN_ONLY ? 'builtin_admin' : access;
   next.enabled = !!next.enabled;
   next.updatedAt = tz.nowIso();
   ensureDir();
@@ -85,7 +96,10 @@ function publicConfig(cfg = loadConfig()) {
     enabled: !!cfg.enabled,
     serviceUrl: cfg.serviceUrl || DEFAULTS.serviceUrl,
     hasApiKey: Boolean(cfg.apiKey),
-    configAccess: cfg.configAccess || DEFAULTS.configAccess,
+    configAccess: LINE_NOTIFY_BUILTIN_ADMIN_ONLY
+      ? 'builtin_admin'
+      : cfg.configAccess || DEFAULTS.configAccess,
+    adminOnly: LINE_NOTIFY_BUILTIN_ADMIN_ONLY,
     events: { ...DEFAULTS.events, ...(cfg.events || {}) },
     ready: isReady(cfg),
     updatedAt: cfg.updatedAt || null,
@@ -119,6 +133,17 @@ async function push(opts = {}) {
   const cfg = loadConfig();
   if (!isReady(cfg)) {
     return { ok: false, skipped: true, error: 'LINE 通知未啟用或設定不完整' };
+  }
+  if (
+    LINE_NOTIFY_BUILTIN_ADMIN_ONLY &&
+    opts.username &&
+    !isLineNotifyAllowedUsername(opts.username)
+  ) {
+    return {
+      ok: false,
+      skipped: true,
+      error: 'LINE 通知目前僅內建 Admin 使用',
+    };
   }
   const url = `${cfg.serviceUrl}/api/push`;
   const body = {};
@@ -311,6 +336,8 @@ async function healthCheck() {
 
 module.exports = {
   DEFAULTS,
+  LINE_NOTIFY_BUILTIN_ADMIN_ONLY,
+  isLineNotifyAllowedUsername,
   loadConfig,
   saveConfig,
   publicConfig,

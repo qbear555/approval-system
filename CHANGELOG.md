@@ -22,6 +22,7 @@
 - 已核准 PDF 右上角「核准」章恢復（先前被 `pdf.js` 內同名函式蓋掉）。
 - CSP：`frame-src`／`object-src` 放行 `blob:`；PDF／ZIP 回應不帶 CSP，避免 Chrome 在 `https://catshome.tw:3848` 顯示「此內容已被封鎖」。
 - 電腦綁定開發階段停用（`DEVICE_BIND_FEATURE_ENABLED=false`）；不檢查、不寫入新裝置，設定頁有註記。
+- LINE 通知僅內建 Admin 可設定與收推播（`LINE_NOTIFY_BUILTIN_ADMIN_ONLY=true`）。
 
 - 後端 helper 抽到 `server/runtime.js`，並再依領域拆 `runtime/devices.js`、`perms.js`、`flow.js`、`notify.js`。
 - 後端路由拆成 `auth`／`users`／`departments`／`system`／`workflows`／`requests`，並改為明確解構 `ctx`（不再使用 `with`）。

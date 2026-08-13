@@ -139,6 +139,7 @@ async function renderSystemSettings(body) {
     lineCfg = { ...lineCfg, ...lc };
     state.lineCanConfigure = !!lc.canConfigure;
     state.lineConfigAccess = lc.configAccess || state.lineConfigAccess;
+    state.lineAdminOnly = !!lc.adminOnly;
     state.lineReady = !!lc.ready;
     state.lineEnabled = !!lc.enabled;
   } catch {

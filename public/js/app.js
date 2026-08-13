@@ -684,6 +684,9 @@ function hasPerm(permId) {
  * - 否則依 state.lineConfigAccess 粗判（builtin_admin / any_admin / permission）
  */
 function canConfigureLine() {
+  if (state.lineAdminOnly) {
+    return isBuiltinAdmin() && state.lineCanConfigure !== false;
+  }
   if (state.lineCanConfigure === true) return true;
   if (state.lineCanConfigure === false) return false;
   const access = state.lineConfigAccess || 'builtin_admin';
@@ -698,6 +701,7 @@ async function refreshLineAccess() {
   try {
     const cfg = await api('/api/line/config');
     state.lineConfigAccess = cfg.configAccess || 'builtin_admin';
+    state.lineAdminOnly = !!cfg.adminOnly || state.lineConfigAccess === 'builtin_admin';
     state.lineCanConfigure = !!cfg.canConfigure;
     state.lineReady = !!cfg.ready;
     state.lineEnabled = !!cfg.enabled;

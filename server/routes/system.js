@@ -123,6 +123,13 @@ app.post('/api/line/test', authMiddleware, lineSettingsOnly, async (req, res) =>
   if (!username && !lineUserId) {
     return res.status(400).json({ error: '請指定簽核帳號或 LINE userId' });
   }
+  if (
+    lineNotify.LINE_NOTIFY_BUILTIN_ADMIN_ONLY &&
+    username &&
+    !lineNotify.isLineNotifyAllowedUsername(username)
+  ) {
+    return res.status(400).json({ error: 'LINE 通知目前僅內建 Admin 可測試／收推播' });
+  }
   if (!lineNotify.isReady()) {
     return res.status(400).json({
       error: '請先啟用 LINE 通知並填寫服務網址與 API 金鑰後儲存',
