@@ -4842,7 +4842,11 @@ function uploadPackageMiddleware(req, res, next) {
 
 /** 從上傳檔案／body 取出設定包 JSON；無法解析回傳 null */
 function readPackagePayload(req) {
-  if (req.file?.buffer) return JSON.parse(req.file.buffer.toString('utf8'));
+  // 以記事本另存的 JSON 可能含 BOM，需先去除才能 parse
+  if (req.file?.buffer) {
+    const text = req.file.buffer.toString('utf8').replace(/^\uFEFF/, '');
+    return JSON.parse(text);
+  }
   if (req.body?.package) {
     return typeof req.body.package === 'string'
       ? JSON.parse(req.body.package)
