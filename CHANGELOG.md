@@ -20,6 +20,7 @@
 - `pdf.js` 改成入口：編排在 `pdf/write.js`、檔名在 `pdf/filename.js`、印章／浮水印在 `pdf/stamp.js`。
 - 各表單版面拆到 `pdf/forms/`（請假、請購、報支、出差、報修、加班、簽呈、信用額度、標準表）。
 - 已核准 PDF 右上角「核准」章恢復（先前被 `pdf.js` 內同名函式蓋掉）。
+- CSP `frame-src` 放行 `blob:`，詳情頁 PDF iframe 預覽不再被瀏覽器封鎖。
 
 - 後端 helper 抽到 `server/runtime.js`，並再依領域拆 `runtime/devices.js`、`perms.js`、`flow.js`、`notify.js`。
 - 後端路由拆成 `auth`／`users`／`departments`／`system`／`workflows`／`requests`，並改為明確解構 `ctx`（不再使用 `with`）。
