@@ -136,6 +136,7 @@ description: >
 - 全新庫帳號 **`Admin`**；初始密碼只寫入 `data/.admin-bootstrap.txt`（不使用公開 `admin123`）  
 - 舊帳號若仍是 `admin123`／`pass1234`，登入後必須先改密  
 - 內網為主；外網需 HTTPS／VPN 再討論  
+- **電腦綁定**：開發階段停用（`DEVICE_BIND_FEATURE_ENABLED=false`，`server/system-settings.js`）。上線改 true 即可恢復  
 
 ### 3.6 LINE 綁定（成員端）
 

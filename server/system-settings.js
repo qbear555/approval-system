@@ -14,6 +14,13 @@ const SETTINGS_PATH = path.join(DATA_DIR, 'system-settings.json');
 const DEFAULT_LOGO_URL = '/img/argo-logo.png';
 const DEFAULT_COMPANY_NAME = '線上簽核系統';
 
+/**
+ * 電腦綁定功能總開關。
+ * 開發階段（2026-08）先停用：不檢查、不新增綁定；系統設定勾選也無效。
+ * 上線要恢復：改成 true，既有 system-settings.json 的勾選會立刻生效。
+ */
+const DEVICE_BIND_FEATURE_ENABLED = false;
+
 const DEFAULTS = {
   companyName: DEFAULT_COMPANY_NAME,
   logoFile: null, // 相對 branding/ 檔名；null＝預設 argo-logo
@@ -479,10 +486,13 @@ function getAdminSettings() {
 
 function getAccessControl(raw) {
   const s = raw || loadRaw();
+  const configured = s.deviceBindEnabled !== false;
   return {
     intranetOnly: s.intranetOnly !== false,
     loginCidrs: s.loginCidrs || DEFAULTS.loginCidrs,
-    deviceBindEnabled: s.deviceBindEnabled !== false,
+    deviceBindFeatureEnabled: DEVICE_BIND_FEATURE_ENABLED,
+    deviceBindPaused: !DEVICE_BIND_FEATURE_ENABLED,
+    deviceBindEnabled: DEVICE_BIND_FEATURE_ENABLED && configured,
     deviceBindMax: Math.min(10, Math.max(1, Number(s.deviceBindMax) || 3)),
   };
 }
@@ -549,10 +559,10 @@ function updateSettings(patch = {}) {
   if (patch.loginCidrs !== undefined) {
     cur.loginCidrs = String(patch.loginCidrs || '').trim().slice(0, 500) || DEFAULTS.loginCidrs;
   }
-  if (patch.deviceBindEnabled !== undefined) {
+  if (DEVICE_BIND_FEATURE_ENABLED && patch.deviceBindEnabled !== undefined) {
     cur.deviceBindEnabled = !!patch.deviceBindEnabled;
   }
-  if (patch.deviceBindMax !== undefined) {
+  if (DEVICE_BIND_FEATURE_ENABLED && patch.deviceBindMax !== undefined) {
     cur.deviceBindMax = Math.min(10, Math.max(1, Number(patch.deviceBindMax) || 3));
   }
   return saveRaw(cur);
@@ -930,6 +940,7 @@ module.exports = {
   getBackupEncryptConfig,
   getBackupDir,
   getAccessControl,
+  DEVICE_BIND_FEATURE_ENABLED,
   DEFAULT_LOGO_URL,
   DEFAULT_COMPANY_NAME,
   BRAND_DIR,

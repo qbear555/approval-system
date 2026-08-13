@@ -28,6 +28,7 @@ function setDeviceCookie(req, res, token) {
 
 function bindOrCheckDevice(req, res, user) {
   const cfg = systemSettings.getAccessControl();
+  // 開發階段停用：DEVICE_BIND_FEATURE_ENABLED=false（見 system-settings.js）
   if (!cfg.deviceBindEnabled) return { ok: true };
   const cookies = parseCookies(req);
   let token = String(cookies[DEVICE_COOKIE] || '').trim();

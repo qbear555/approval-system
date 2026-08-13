@@ -287,6 +287,14 @@ async function renderSystemSettings(body) {
       <p class="muted" style="margin-top:0;line-height:1.55">
         限制只能從公司網段登入；並把帳號綁在常用電腦。本機 <code>127.0.0.1</code> 永遠允許，以免管理端鎖死。
       </p>
+      ${
+        accessCfgAdmin.deviceBindPaused
+          ? `<p class="muted" style="margin:0 0 12px;padding:8px 10px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;color:#9a3412">
+              <strong>電腦綁定：開發階段已停用</strong>（程式註記 <code>DEVICE_BIND_FEATURE_ENABLED=false</code>）。
+              登入不檢查、不新增綁定。上線時改回 true 即可恢復。
+            </p>`
+          : ''
+      }
       <form id="access-form" class="form-grid">
         <div class="field check-row-box" style="grid-column:1/-1">
           <label class="check-row">
@@ -300,13 +308,13 @@ async function renderSystemSettings(body) {
         </div>
         <div class="field check-row-box">
           <label class="check-row">
-            <input type="checkbox" name="deviceBindEnabled" ${accessCfgAdmin.deviceBindEnabled !== false ? 'checked' : ''} />
-            <span><strong>綁定登入電腦</strong></span>
+            <input type="checkbox" name="deviceBindEnabled" ${accessCfgAdmin.deviceBindEnabled ? 'checked' : ''} ${accessCfgAdmin.deviceBindPaused ? 'disabled' : ''} />
+            <span><strong>綁定登入電腦</strong>${accessCfgAdmin.deviceBindPaused ? '（開發中停用）' : ''}</span>
           </label>
         </div>
         <div class="field">
           <label>每帳號最多幾台</label>
-          <input name="deviceBindMax" type="number" min="1" max="10" value="${esc(String(accessCfgAdmin.deviceBindMax || 3))}" />
+          <input name="deviceBindMax" type="number" min="1" max="10" value="${esc(String(accessCfgAdmin.deviceBindMax || 3))}" ${accessCfgAdmin.deviceBindPaused ? 'disabled' : ''} />
         </div>
         <div class="form-actions" style="grid-column:1/-1">
           <button type="submit" class="btn primary">儲存存取限制</button>
@@ -740,8 +748,12 @@ async function renderSystemSettings(body) {
         body: {
           intranetOnly: fd.get('intranetOnly') === 'on',
           loginCidrs: fd.get('loginCidrs'),
-          deviceBindEnabled: fd.get('deviceBindEnabled') === 'on',
-          deviceBindMax: Number(fd.get('deviceBindMax') || 3),
+          ...(accessCfgAdmin.deviceBindPaused
+            ? {}
+            : {
+                deviceBindEnabled: fd.get('deviceBindEnabled') === 'on',
+                deviceBindMax: Number(fd.get('deviceBindMax') || 3),
+              }),
         },
       });
       toast('存取限制已儲存', 'success');

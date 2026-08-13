@@ -21,6 +21,7 @@
 - 各表單版面拆到 `pdf/forms/`（請假、請購、報支、出差、報修、加班、簽呈、信用額度、標準表）。
 - 已核准 PDF 右上角「核准」章恢復（先前被 `pdf.js` 內同名函式蓋掉）。
 - CSP：`frame-src`／`object-src` 放行 `blob:`；PDF／ZIP 回應不帶 CSP，避免 Chrome 在 `https://catshome.tw:3848` 顯示「此內容已被封鎖」。
+- 電腦綁定開發階段停用（`DEVICE_BIND_FEATURE_ENABLED=false`）；不檢查、不寫入新裝置，設定頁有註記。
 
 - 後端 helper 抽到 `server/runtime.js`，並再依領域拆 `runtime/devices.js`、`perms.js`、`flow.js`、`notify.js`。
 - 後端路由拆成 `auth`／`users`／`departments`／`system`／`workflows`／`requests`，並改為明確解構 `ctx`（不再使用 `with`）。
@@ -44,7 +45,7 @@
 - **預設密碼**：全新庫不再使用 `admin123`；初始密碼寫入 `data/.admin-bootstrap.txt`。啟動 log 不再印出密碼。仍使用 `admin123`／`pass1234` 的帳號登入後必須先改密。
 - **財務身分**：只認 `finance_confirm` 權限，不再寫死部門或姓名。啟動時會為舊的財務部／既有人員補上該權限。
 - **單據刪除**：改軟刪（`deleted_at`）。列表不再顯示；附件、備份、簽核歷程與稽核保留。已核准仍不可由申請人刪除。
-- **內網／電腦綁定**：預設僅允許 `192.168.99.0/24`（外加本機與 Docker 網段）。每帳號預設最多綁 3 台電腦，可在系統設定調整；帳號設定可自行解除。
+- **內網／電腦綁定**：預設僅允許 `192.168.99.0/24`（外加本機與 Docker 網段）。每帳號預設最多綁 3 台電腦，可在系統設定調整；帳號設定可自行解除。**2026-08 開發階段已停用電腦綁定**（見 `DEVICE_BIND_FEATURE_ENABLED`）。
 
 ### P1 安全
 
