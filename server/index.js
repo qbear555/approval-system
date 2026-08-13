@@ -111,6 +111,38 @@ app.use((req, res, next) => {
 });
 // OnlyOffice 靜態資源同源代理（須在 static 之前，避免 HTTPS 混合內容）
 app.use(onlyoffice.createDocsProxy());
+
+/** LINE Webhook 轉送（不走 /api，避免內網限制；須保留 raw body 驗簽） */
+app.get('/line/webhook', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'approval-line-webhook-proxy',
+    hint: 'LINE Developers 的 Webhook URL 請填：https://你的公網主機:3848/line/webhook',
+  });
+});
+app.post('/line/webhook', express.raw({ type: '*/*', limit: '2mb' }), async (req, res) => {
+  try {
+    const cfg = lineNotify.loadConfig();
+    const base = String(cfg.serviceUrl || 'http://127.0.0.1:3850').replace(/\/$/, '');
+    const headers = { ...req.headers };
+    delete headers.host;
+    delete headers['content-length'];
+    const r = await fetch(`${base}/webhook`, {
+      method: 'POST',
+      headers,
+      body: req.body,
+    });
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.status(r.status);
+    const ct = r.headers.get('content-type');
+    if (ct) res.setHeader('Content-Type', ct);
+    res.send(buf);
+  } catch (e) {
+    console.error('[line-webhook-proxy]', e.message);
+    res.status(502).json({ error: '無法轉送 LINE Webhook' });
+  }
+});
+
 app.use(express.json({ limit: '2mb' }));
 
 /** 探活（無需登入；勿改打業務 API） */

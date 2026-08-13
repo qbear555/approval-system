@@ -16,7 +16,9 @@ function lineSettingsFormHtml(cfg = {}, opts = {}) {
     <p class="muted" style="margin-top:0;line-height:1.55">
       透過獨立服務 <code>line-notify</code>（預設埠 3850）推播 Messaging API。
       Channel Token 只放在 LINE 專案 <code>.env</code>；此處只填<strong>服務網址</strong>與<strong>內部 API 金鑰</strong>。
-      成員需先對官方帳號傳送：<code>綁定 簽核帳號</code>；解除可傳 <code>解除綁定</code>，或在下方列表按「解除」。
+      成員請對官方帳號傳送 <code>綁定 Admin</code>（把 Admin 改成真實帳號，例如 A01）。不要只傳範例「綁定 帳號」。
+      LINE Developers 的 Webhook 必須是<strong>公網 HTTPS</strong>，例如 <code>https://catshome.tw:3848/line/webhook</code>。
+      解除可傳 <code>解除綁定</code>，或在下方列表按「解除」。
     </p>
     <p style="margin:0 0 12px">
       狀態：
