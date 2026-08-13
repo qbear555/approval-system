@@ -745,4 +745,35 @@ app.post(
     }
   }
 );
+
+  /** 通知通道狀態（不含密鑰；管理員） */
+  app.get('/api/system/notify-status', authMiddleware, adminOnly, (req, res) => {
+    const mailPub = mail.publicConfig();
+    const linePub = lineNotify.publicConfig();
+    const { getAppBaseUrl } = require('../runtime');
+    res.json({
+      ok: true,
+      baseUrl: getAppBaseUrl(),
+      mail: {
+        enabled: mailPub.enabled,
+        ready: mailPub.ready,
+        host: mailPub.host || '',
+        from: mailPub.from || '',
+        baseUrl: mailPub.baseUrl || '',
+        hasPass: mailPub.hasPass,
+      },
+      line: {
+        enabled: linePub.enabled,
+        ready: linePub.ready,
+        serviceUrl: linePub.serviceUrl || '',
+        hasApiKey: linePub.hasApiKey,
+        events: linePub.events,
+      },
+      desktop: {
+        poll: true,
+        modal: true,
+        notification: true,
+      },
+    });
+  });
 };

@@ -26,6 +26,13 @@ scripts/_tmp*
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+.claude/
+
+# 本機拆檔／部署暫存（不進 git）
+scratch/
+deploy/*.tar.gz
+deploy/*.zip
+deploy/approval_system.tar.gz
 
 # Runtime secrets / local data (never commit)
 data/.jwt-secret

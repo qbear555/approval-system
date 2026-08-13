@@ -7,7 +7,10 @@
 - 後端 helper 抽到 `server/runtime.js`，並再依領域拆 `runtime/devices.js`、`perms.js`、`flow.js`、`notify.js`。
 - 後端路由拆成 `auth`／`users`／`departments`／`system`／`workflows`／`requests`，並改為明確解構 `ctx`（不再使用 `with`）。
 - 前端再拆 `pages-dashboard.js`、`pages-requests.js`、`pages-workflows.js`、`pages-backups.js`、`pages-users.js`、`pages-audit.js`、`pages-departments.js`、`pages-settings.js`。
-- 倉庫內可重複跑 `node scripts/smoke.js`（health、branding、登入頁腳本、401）。
+- 倉庫內可重複跑 `node scripts/smoke.js`（health、branding、登入頁腳本、401、CSP）。
+- 申請頁再拆 `pages-request-list.js`／`form.js`／`new.js`／`detail.js`。
+- 回應加上 CSP、`X-Content-Type-Options: nosniff`、`X-Frame-Options`、`Referrer-Policy`。
+- 通知：`getAppBaseUrl` 空值回退 3847；最終通知模組補上拆檔後缺的依賴；新待簽核在無其他 modal 時顯示中央彈窗。
 - 移除未掛載、易改錯檔的 `src/` 影子專案。
 - 登入頁／側欄顯示環境徽章（NAS／本機）與版本。
 - 文件、種子產生器與安裝說明對齊：本機埠 **3847**；全新庫密碼見 `data/.admin-bootstrap.txt`（不再寫入 `admin123`／`pass1234`）。

@@ -1025,12 +1025,23 @@ async function refreshBadge(opts = {}) {
         }
       } else if (count > lastPendingMe) {
         const added = count - lastPendingMe;
-        showDesktopNotification(
-          '線上簽核系統 · 新待簽核',
-          `新增 ${added} 件待簽核，目前共 ${count} 件`,
-          () => navigate('inbox')
-        );
-        toast(`新增 ${added} 件待簽核文件`, 'info');
+        const msg = `新增 ${added} 件待簽核，目前共 ${count} 件`;
+        showDesktopNotification('線上簽核系統 · 新待簽核', msg, () => navigate('inbox'));
+        toast(msg, 'info');
+        if (!isModalOpen()) {
+          openModal(`
+            <h3 style="margin-top:0">📬 新待簽核</h3>
+            <p>${esc(msg)}。請回公司後儘速處理。</p>
+            <div class="form-actions">
+              <button type="button" class="btn primary" id="btn-goto-inbox">前往待簽核</button>
+              <button type="button" class="btn outline" data-close-modal>稍後</button>
+            </div>
+          `);
+          $('#btn-goto-inbox')?.addEventListener('click', () => {
+            closeModal();
+            navigate('inbox');
+          });
+        }
       }
       lastPendingMe = count;
     } else if (lastPendingMe !== null) {
@@ -1045,6 +1056,11 @@ async function refreshBadge(opts = {}) {
 function statusTag(status) {
   const s = STATUS[status] || { label: status, cls: '' };
   return `<span class="tag ${s.cls}">${s.label}</span>`;
+}
+
+function isModalOpen() {
+  const modal = $('#modal');
+  return !!(modal && !modal.classList.contains('hidden') && ($('#modal-panel')?.innerHTML || '').trim());
 }
 
 function openModal(html) {

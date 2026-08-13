@@ -83,6 +83,32 @@ if (TRUST_PROXY) app.set('trust proxy', 1);
 if (CORS_ORIGINS.length) {
   app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
 }
+
+/** 安全標頭（內網也套用；OnlyOffice 啟用時放行文件伺服器） */
+const OO_DOCS_URL = String(process.env.ONLYOFFICE_DOCS_URL || '').replace(/\/$/, '');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  const extra = OO_DOCS_URL ? ` ${OO_DOCS_URL}` : '';
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      `script-src 'self' 'unsafe-inline'${extra}`,
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      `connect-src 'self'${extra}`,
+      `frame-src 'self'${extra}`,
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; ')
+  );
+  next();
+});
 // OnlyOffice 靜態資源同源代理（須在 static 之前，避免 HTTPS 混合內容）
 app.use(onlyoffice.createDocsProxy());
 app.use(express.json({ limit: '2mb' }));

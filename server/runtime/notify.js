@@ -5,12 +5,19 @@ const db = require('../db');
 const mail = require('../mail');
 const lineNotify = require('../line-notify');
 const systemSettings = require('../system-settings');
+const workflowModule = require('../workflow-module');
 const { logAudit } = require('./devices');
 function findStepByOrder(...a) {
   return require('./flow').findStepByOrder(...a);
 }
 function getPendingApproverIds(...a) {
   return require('./flow').getPendingApproverIds(...a);
+}
+function resolveUserIdList(...a) {
+  return require('./flow').resolveUserIdList(...a);
+}
+function flowConst(name) {
+  return require('./flow')[name];
 }
 
 function handleP2ApprovedSideEffects(detail, req = null) {
@@ -198,12 +205,15 @@ function fireAndForgetLine(label, promise) {
 function getAppBaseUrl() {
   try {
     const cfg = mail.loadConfig();
-    return String(cfg.baseUrl || '')
+    const fromMail = String(cfg.baseUrl || '')
       .trim()
       .replace(/\/$/, '');
+    if (fromMail) return fromMail;
   } catch {
-    return '';
+    /* fall through */
   }
+  const port = process.env.PORT || 3847;
+  return `http://127.0.0.1:${port}`;
 }
 
 
@@ -401,7 +411,7 @@ function getPendingFinalNotifyRequests(userId) {
        JOIN workflows w ON w.id = r.workflow_id
        JOIN users u ON u.id = r.requester_id
        WHERE fn.user_id = ? AND fn.acked_at IS NULL
-         AND ${REQUEST_NOT_DELETED}
+         AND ${flowConst('REQUEST_NOT_DELETED')}
        ORDER BY fn.created_at DESC`
     )
     .all(Number(userId));
@@ -412,16 +422,16 @@ function getPendingFinalNotifyRequests(userId) {
 function getPendingFinanceConfirmRequests() {
   return db
     .prepare(
-      `${REQUEST_LIST_SELECT}
+      `${flowConst('REQUEST_LIST_SELECT')}
        WHERE r.status = 'approved'
-         AND ${REQUEST_NOT_DELETED}
-         AND ${CREDIT_LIMIT_COND}
+         AND ${flowConst('REQUEST_NOT_DELETED')}
+         AND ${flowConst('CREDIT_LIMIT_COND')}
          AND r.id NOT IN (
            SELECT request_id FROM approval_actions WHERE step_name = ?
          )
        ORDER BY r.completed_at DESC, r.updated_at DESC`
     )
-    .all(STEP_FINANCE_CONFIRM);
+    .all(flowConst('STEP_FINANCE_CONFIRM'));
 }
 
 /** 財務已建檔、待申請人確認收到的信用額度單 */
@@ -429,11 +439,11 @@ function getPendingFinanceConfirmRequests() {
 function getPendingApplicantAckRequests(userId) {
   return db
     .prepare(
-      `${REQUEST_LIST_SELECT}
+      `${flowConst('REQUEST_LIST_SELECT')}
        WHERE r.status = 'approved'
-         AND ${REQUEST_NOT_DELETED}
+         AND ${flowConst('REQUEST_NOT_DELETED')}
          AND r.requester_id = ?
-         AND ${CREDIT_LIMIT_COND}
+         AND ${flowConst('CREDIT_LIMIT_COND')}
          AND r.id IN (
            SELECT request_id FROM approval_actions WHERE step_name = ?
          )
@@ -442,7 +452,7 @@ function getPendingApplicantAckRequests(userId) {
          )
        ORDER BY r.completed_at DESC, r.updated_at DESC`
     )
-    .all(Number(userId), STEP_FINANCE_CONFIRM, STEP_APPLICANT_ACK);
+    .all(Number(userId), flowConst('STEP_FINANCE_CONFIRM'), flowConst('STEP_APPLICANT_ACK'));
 }
 
 

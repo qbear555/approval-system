@@ -34,7 +34,7 @@ function loadConfig() {
   ensureDir();
   try {
     if (!fs.existsSync(CONFIG_PATH)) return { ...DEFAULTS, events: { ...DEFAULTS.events } };
-    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
     const events = { ...DEFAULTS.events, ...(raw.events || {}) };
     let access = String(raw.configAccess || DEFAULTS.configAccess);
     if (!['builtin_admin', 'any_admin', 'permission'].includes(access)) {

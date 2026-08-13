@@ -41,7 +41,7 @@ function loadConfig() {
   ensureDirs();
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
       return { ...defaultConfig(), ...raw };
     }
   } catch (e) {

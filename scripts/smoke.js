@@ -16,7 +16,9 @@ function req(p) {
       .get({ hostname: '127.0.0.1', port: PORT, path: p, timeout: 8000 }, (res) => {
         let raw = '';
         res.on('data', (c) => (raw += c));
-        res.on('end', () => resolve({ status: res.statusCode, raw }));
+        res.on('end', () =>
+          resolve({ status: res.statusCode, raw, headers: res.headers })
+        );
       })
       .on('error', reject);
   });
@@ -43,10 +45,17 @@ const required = [
   'public/js/pages-audit.js',
   'public/js/pages-departments.js',
   'public/js/pages-settings.js',
+  'public/js/pages-request-form.js',
+  'public/js/pages-request-list.js',
+  'public/js/pages-request-new.js',
+  'public/js/pages-request-detail.js',
 ];
 for (const rel of required) mustExist(rel);
 if (fs.existsSync(path.join(ROOT, 'public/js/pages-admin.js'))) {
   throw new Error('pages-admin.js 應已拆走');
+}
+if (fs.existsSync(path.join(ROOT, 'public/js/pages-requests.js'))) {
+  throw new Error('pages-requests.js 應已拆走');
 }
 
 const runtime = require(path.join(ROOT, 'server/runtime'));
@@ -92,13 +101,27 @@ child.stderr.on('data', (d) => process.stderr.write(d));
       'pages-departments.js',
       'pages-settings.js',
       'pages-dashboard.js',
-      'pages-requests.js',
+      'pages-request-form.js',
+      'pages-request-list.js',
+      'pages-request-new.js',
+      'pages-request-detail.js',
       'pages-workflows.js',
       'pages-backups.js',
     ]) {
       if (!home.raw.includes(name)) throw new Error('index.html 未載入 ' + name);
     }
     if (home.raw.includes('pages-admin.js')) throw new Error('index.html 仍載入 pages-admin.js');
+    if (home.raw.includes('pages-requests.js')) throw new Error('index.html 仍載入 pages-requests.js');
+    const csp = String(home.headers['content-security-policy'] || '');
+    if (!csp.includes("default-src 'self'")) throw new Error('缺少 CSP');
+    if (String(home.headers['x-content-type-options'] || '') !== 'nosniff') {
+      throw new Error('缺少 X-Content-Type-Options: nosniff');
+    }
+    const notifySt = await req('/api/system/notify-status');
+    if (notifySt.status !== 401) throw new Error('notify-status should 401, got ' + notifySt.status);
+    const base = runtime.getAppBaseUrl();
+    if (!/^https?:\/\//.test(String(base || ''))) throw new Error('getAppBaseUrl 無效: ' + base);
+    runtime.resolveFinalNotifyJson({ enabled: false });
     const brand = await req('/api/system/branding');
     if (brand.status !== 200) throw new Error('branding ' + brand.status);
     const dept = await req('/api/departments');
