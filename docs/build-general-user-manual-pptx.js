@@ -526,7 +526,7 @@ function bulletList(slide, items, x, y, w, h, size = 13) {
   const urls = [
     ['正式站 HTTPS', 'https://192.168.99.220:3848/', '建議'],
     ['正式站 HTTP', 'http://192.168.99.220:3847/', '備援'],
-    ['本機測試', 'http://127.0.0.1:8080/', '開發／本機'],
+    ['本機測試', 'http://127.0.0.1:3847/', '開發／本機'],
   ];
   urls.forEach((u, i) => {
     const x = 0.85 + i * 2.9;
@@ -1792,7 +1792,7 @@ WORKFLOWS.forEach((wf, wi) => {
     [
       { text: '線上簽核系統 — 一般使用者完整操作手冊', options: { breakLine: true } },
       { text: '正式站 https://192.168.99.220:3848', options: { breakLine: true } },
-      { text: '本機 http://127.0.0.1:8080', options: { breakLine: true } },
+      { text: '本機 http://127.0.0.1:3847', options: { breakLine: true } },
       { text: '', options: { breakLine: true } },
       { text: '功能與介面以系統實際版本為準；流程關卡可由管理員調整。', options: { breakLine: true } },
       { text: `本手冊共 ${slideCount + 1} 頁（含本頁）`, options: {} },

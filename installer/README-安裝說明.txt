@@ -25,8 +25,8 @@
 【安裝後】
   使用網址： http://127.0.0.1:3847/
   或：       http://localhost:3847/
-  預設管理員帳號： admin
-  預設管理員密碼： admin123
+  預設管理員帳號： Admin
+  全新庫密碼：見 data/.admin-bootstrap.txt
   ※ 請登入後立刻修改密碼，並至「帳號設定」填寫 Email
 
   本安裝包已含：

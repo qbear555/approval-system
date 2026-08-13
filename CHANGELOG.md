@@ -4,11 +4,12 @@
 
 ### 架構
 
+- 後端 helper 抽到 `server/runtime.js`；`index.js` 只負責啟動、中介層與把 `routeCtx` 交給路由。
 - 後端路由拆成 `server/routes/auth.js`、`workflows.js`、`requests.js`，並改為明確解構 `ctx`（不再使用 `with`）。
-- 前端再拆 `pages-requests.js`、`pages-workflows.js`；管理頁仍在 `pages-admin.js`。
+- 前端再拆 `pages-dashboard.js`、`pages-requests.js`、`pages-workflows.js`、`pages-backups.js`、`pages-admin.js`。
 - 移除未掛載、易改錯檔的 `src/` 影子專案。
 - 登入頁／側欄顯示環境徽章（NAS／本機）與版本。
-- 文件與 Skill 對齊：本機埠 **3847**；全新庫密碼見 `data/.admin-bootstrap.txt`。
+- 文件、種子產生器與安裝說明對齊：本機埠 **3847**；全新庫密碼見 `data/.admin-bootstrap.txt`（不再寫入 `admin123`／`pass1234`）。
 
 ### P2 安全／權限
 
@@ -41,7 +42,7 @@
 ### 一鍵更新程式
 
 - 根目錄 **`一鍵更新.bat`**／`scripts/one-click-update.js`
-- 可選：部署 NAS、同步 `D:\一鍵安裝包`、啟動本機 8080
+- 可選：部署 NAS、同步 `D:\一鍵安裝包`、啟動本機 3847
 - 說明：`docs/一鍵更新-2026-08-01-本次功能.md`
 - 捷徑：`一鍵更新-部署NAS.bat`、`一鍵更新-同步一鍵包.bat`
 

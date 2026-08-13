@@ -356,7 +356,7 @@ async function deployNas() {
   return true;
 }
 
-function stopLocal8080() {
+function stopLocalServer() {
   try {
     execFileSync(
       'powershell',
@@ -376,7 +376,7 @@ function stopLocal8080() {
 
 function startLocal() {
   log('啟動本機 Server（3847）…');
-  stopLocal8080();
+  stopLocalServer();
   const node =
     process.env.NODE ||
     (fs.existsSync('C:\\Program Files\\nodejs\\node.exe')

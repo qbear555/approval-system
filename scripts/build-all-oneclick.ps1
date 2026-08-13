@@ -186,8 +186,8 @@ if (-not $SkipWindows) {
 1. 解壓或開啟本資料夾
 2. 雙擊 install.bat（或「一鍵安裝.bat」）
 3. 安裝完成後會自動啟動
-4. 瀏覽器開啟：http://127.0.0.1:8080/
-5. 管理員：admin / admin123
+4. 瀏覽器開啟：http://127.0.0.1:3847/
+5. 管理員：Admin（密碼見 data/.admin-bootstrap.txt）
 
 【完整說明】
 請閱讀外層「安裝說明.md」
@@ -383,8 +383,8 @@ $usersList
 > 完整清單見同目錄 **成員帳號清單.csv** 與 **SEED-MANIFEST.json**
 
 ### 預設登入
-- **管理員**：``admin`` / ``admin123``（首次請立即修改密碼）
-- **其他帳號**：多數為 ``pass1234``（若曾在系統中改過密碼，以實際為準）
+- **管理員**：帳號 ``Admin``，密碼見 ``data/.admin-bootstrap.txt``（請立刻改密）
+- **其他帳號**：由管理員建立或匯入；未填密碼時為隨機密碼
 "@
 
 # --- Windows guide ---
@@ -393,7 +393,7 @@ $winMd = @"
 
 **建置時間：** $Stamp  
 **適用：** Windows 10 / 11 / Windows Server 2016 以上（x64）  
-**預設埠：** ``8080``  
+**預設埠：** ``3847``  
 **無需預先安裝 Node.js**
 
 ---
@@ -430,9 +430,9 @@ $commonData
 3. 等待解壓與複製完成
 4. 瀏覽器自動或手動開啟：
 
-   **http://127.0.0.1:8080/**
+   **http://127.0.0.1:3847/**
 
-5. 使用 ``admin`` / ``admin123`` 登入
+5. 使用 ``Admin`` 登入（密碼見 ``data/.admin-bootstrap.txt``）
 
 ### 方式 B：使用已解壓資料夾
 
@@ -444,7 +444,7 @@ $commonData
 
 1. 開啟 ``ApprovalSystem-Portable``
 2. 雙擊 ``start.bat``
-3. 開啟 http://127.0.0.1:8080/
+3. 開啟 http://127.0.0.1:3847/
 
 ---
 
@@ -465,8 +465,8 @@ $commonData
 ## 4. 區網給其他電腦使用
 
 1. 在伺服器電腦完成安裝並啟動
-2. Windows 防火牆允許 **TCP 8080** 輸入
-3. 其他電腦瀏覽器開啟：``http://伺服器IP:8080/``
+2. Windows 防火牆允許 **TCP 3847** 輸入
+3. 其他電腦瀏覽器開啟：``http://伺服器IP:3847/``
 
 ---
 
@@ -494,7 +494,7 @@ $commonData
 ## 7. 常見問題
 
 **Q：打不開網頁？**  
-A：確認 ``start.bat`` 已執行；埠 8080 未被占用；瀏覽器用 ``127.0.0.1`` 而非錯誤 IP。
+A：確認 ``start.bat`` 已執行；埠 3847 未被占用；瀏覽器用 ``127.0.0.1`` 而非錯誤 IP。
 
 **Q：中文 PDF 亂碼？**  
 A：本包裝有 ``fonts/kaiu.ttf``；若仍異常請確認該字型檔存在於 ``app\fonts``。
@@ -510,8 +510,8 @@ Write-Utf8NoBom (Join-Path (Join-Path $OutRoot 'Windows') '00-請先讀我.txt')
 線上簽核系統 — Windows 安裝包
 ================================
 1. 雙擊 Install-ApprovalSystem.bat 或 一鍵安裝.bat
-2. 開啟 http://127.0.0.1:8080/
-3. 登入 admin / admin123
+2. 開啟 http://127.0.0.1:3847/
+3. 登入 Admin（密碼見 data/.admin-bootstrap.txt）
 4. 詳細步驟見 安裝說明.md
 建置：$Stamp
 "@
@@ -584,7 +584,7 @@ chmod +x install.sh uninstall.sh status.sh backup-data.sh
 
    **http://伺服器IP:3847/**
 
-5. 登入 ``admin`` / ``admin123``
+5. 登入 ``Admin``（密碼見 ``data/.admin-bootstrap.txt``）
 
 > 種子 ``data/`` 會一併安裝；若目標已有資料，腳本通常會保留既有 data（以 ``install.sh`` 實際行為為準）。
 
@@ -658,7 +658,7 @@ Write-Utf8NoBom (Join-Path (Join-Path $OutRoot 'Ubuntu') '00-請先讀我.txt') 
 2. cd ApprovalSystem-Ubuntu-Install
 3. chmod +x install.sh && ./install.sh
 4. 開啟 http://伺服器IP:3847/
-5. 登入 admin / admin123
+5. 登入 Admin（密碼見 data/.admin-bootstrap.txt）
 詳細：安裝說明.md
 建置：$Stamp
 "@
@@ -758,7 +758,7 @@ $commonData
 
 例如：``http://192.168.99.220:3847/``
 
-登入：``admin`` / ``admin123``
+登入：``Admin``（密碼見 ``data/.admin-bootstrap.txt``）
 
 ---
 
@@ -822,7 +822,7 @@ Write-Utf8NoBom (Join-Path (Join-Path $OutRoot 'NAS') '00-請先讀我.txt') @"
 2. 上傳全部內容到 /docker/approval-system/
 3. Container Manager → 專案 → 用 docker-compose 啟動
 4. 開啟 http://NAS_IP:3847/
-5. 登入 admin / admin123
+5. 登入 Admin（密碼見 data/.admin-bootstrap.txt）
 詳細：安裝說明.md
 建置：$Stamp
 "@
@@ -840,7 +840,7 @@ $index = @"
 存放位置：D:\一鍵安裝包\
 
 【目錄】
-  Windows\   → Windows 10/11 一鍵安裝（埠 8080）
+  Windows\   → Windows 10/11 一鍵安裝（埠 3847）
   Ubuntu\    → Ubuntu Docker／原生一鍵安裝（埠 3847）
   NAS\       → Synology Container Manager（埠 3847）
 
@@ -857,8 +857,8 @@ $index = @"
   申請單：$($manifest.counts.requests)
   部門：$($manifest.counts.departments)
 
-【預設帳號】
-  admin / admin123
+【全新庫登入】
+  帳號 Admin，密碼見 data/.admin-bootstrap.txt（請立刻改密）
 
 【建議】
   1. 依目標環境只拷貝對應子資料夾即可

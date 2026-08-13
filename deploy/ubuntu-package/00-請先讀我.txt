@@ -26,8 +26,8 @@
        http://伺服器IP:3847
 
   5. 登入（全新資料庫）：
-       帳號 admin
-       密碼 admin123
+       帳號 Admin
+       密碼見 data/.admin-bootstrap.txt
        ※ 請立刻修改密碼
 
 【已有舊資料要遷移】

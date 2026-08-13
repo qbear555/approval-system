@@ -28,7 +28,7 @@ function defaultConfig() {
     pass: '',
     from: '',
     fromName: '線上簽核系統',
-    baseUrl: 'http://127.0.0.1:8080',
+    baseUrl: 'http://127.0.0.1:3847',
   };
 }
 
@@ -90,7 +90,7 @@ function saveConfig(partial) {
   next.user = String(next.user || '').trim();
   next.from = String(next.from || '').trim();
   next.fromName = String(next.fromName || '線上簽核系統').trim();
-  next.baseUrl = String(next.baseUrl || 'http://127.0.0.1:8080').replace(/\/$/, '');
+  next.baseUrl = String(next.baseUrl || 'http://127.0.0.1:3847').replace(/\/$/, '');
   ensureDirs();
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
   return next;
@@ -109,7 +109,7 @@ function publicConfig(cfg = loadConfig()) {
     hasPass: Boolean(cfg.pass),
     from: cfg.from || '',
     fromName: cfg.fromName || '線上簽核系統',
-    baseUrl: cfg.baseUrl || 'http://127.0.0.1:8080',
+    baseUrl: cfg.baseUrl || 'http://127.0.0.1:3847',
     ready: isSmtpReady(cfg),
   };
 }
@@ -354,7 +354,7 @@ function statusLabel(status) {
 }
 
 function requestLink(cfg, requestId) {
-  const base = (cfg.baseUrl || 'http://127.0.0.1:8080').replace(/\/$/, '');
+  const base = (cfg.baseUrl || 'http://127.0.0.1:3847').replace(/\/$/, '');
   // 前端 showMain 會解析 #detail/{id}，登入後直達申請詳情（非整頁總覽）
   return `${base}/#detail/${Number(requestId) || 0}`;
 }

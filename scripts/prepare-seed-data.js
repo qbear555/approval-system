@@ -56,18 +56,25 @@ function copyDir(src, dest, { skipFiles = false } = {}) {
  * 指向不存在的人，功能不正確，個資也不該散佈。
  */
 function sanitizeForFreshInstall(dbPath) {
-  const { hashPassword } = require(path.join(Root, 'server', 'auth'));
+  const { hashPassword, generateBootstrapPassword } = require(path.join(Root, 'server', 'auth'));
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA foreign_keys = OFF');
 
-  // 1. 使用者：只留預設 admin
+  // 1. 使用者：只留內建 Admin，密碼寫入種子包 data/.admin-bootstrap.txt
   const before = db.prepare('SELECT COUNT(*) c FROM users').get().c;
   db.exec('DELETE FROM users');
   try { db.exec('DELETE FROM user_departments'); } catch { /* 表可能不存在 */ }
+  const bootPwd = generateBootstrapPassword();
   db.prepare(
     `INSERT INTO users (id, username, password_hash, name, email, department, role)
-     VALUES (1, 'admin', ?, '系統管理員', 'admin@example.com', '管理部', 'admin')`
-  ).run(hashPassword('admin123'));
+     VALUES (1, 'Admin', ?, '系統管理員', 'admin@example.com', '管理部', 'admin')`
+  ).run(hashPassword(bootPwd));
+  const bootFile = path.join(path.dirname(dbPath), '.admin-bootstrap.txt');
+  fs.writeFileSync(
+    bootFile,
+    ['username=Admin', `password=${bootPwd}`, '請登入後立刻修改密碼，並刪除此檔。', ''].join('\n'),
+    { encoding: 'utf8', mode: 0o600 }
+  );
   try {
     db.exec(`INSERT OR IGNORE INTO user_departments (user_id, department) VALUES (1, '管理部')`);
   } catch { /* ignore */ }
@@ -358,7 +365,10 @@ const csvLines = [
   '\uFEFFusername,name,department,role,email,default_password_hint',
 ];
 for (const u of userRows) {
-  const hint = u.username === 'admin' ? 'admin123' : 'pass1234（若曾改過密碼以實際為準）';
+  const hint =
+    /^admin$/i.test(u.username)
+      ? '見 data/.admin-bootstrap.txt（請立刻改密）'
+      : '由管理員建立或匯入；未填密碼時為隨機密碼';
   csvLines.push(
     [
       u.username,
@@ -400,9 +410,9 @@ const manifest = {
     hire_date: u.hire_date || null,
   })),
   loginHints: {
-    admin: 'admin / admin123',
-    others: '多數帳號預設密碼 pass1234（若曾修改以實際為準）',
-    windowsUrl: 'http://127.0.0.1:8080/',
+    admin: 'Admin／密碼見 data/.admin-bootstrap.txt（請立刻改密）',
+    others: '由管理員建立或匯入；未填密碼時為隨機密碼',
+    windowsUrl: 'http://127.0.0.1:3847/',
     dockerUrl: 'http://127.0.0.1:3847/',
   },
 };
@@ -443,10 +453,9 @@ ${wfNames.map((w, i) => `${i + 1}. ${w.name}`).join('\n')}
 ${deptRows.map((d) => `- ${d.name}`).join('\n')}
 
 【登入】
-  Windows 預設：http://127.0.0.1:8080/
-  Docker／NAS／Ubuntu 預設：http://主機IP:3847/
-  管理員：admin / admin123
-  其他成員：見「成員帳號清單.csv」（多為 pass1234）
+  Windows／Docker／NAS／Ubuntu 預設：http://127.0.0.1:3847/ 或 http://主機IP:3847/
+  管理員：Admin，密碼見 data/.admin-bootstrap.txt（請立刻改密）
+  其他成員：由管理員建立或匯入；見「成員帳號清單.csv」
 
 全新安裝時，安裝程式會自動帶入本種子資料庫。
 若目標已有資料庫，安裝會保留舊資料、不覆蓋。

@@ -56,15 +56,15 @@ ${usersList || '（無）'}
 > 完整清單見同目錄 **成員帳號清單.csv** 與 **SEED-MANIFEST.json**
 
 ### 預設登入
-- **管理員**：\`admin\` / \`admin123\`（首次請立即修改密碼）
-- **其他帳號**：多數為 \`pass1234\`（若曾在系統中改過密碼，以實際為準）
+- **管理員**：帳號 \`Admin\`，全新庫密碼見 \`data/.admin-bootstrap.txt\`（請立刻改密）
+- **其他帳號**：由管理員建立；匯入未填密碼時為隨機密碼
 `.trim();
 
 const winMd = `# 線上簽核系統 — Windows 一鍵安裝說明
 
 **建置時間：** ${stamp}  
 **適用：** Windows 10 / 11 / Windows Server 2016 以上（x64）  
-**預設埠：** \`8080\`  
+**預設埠：** \`3847\`  
 **無需預先安裝 Node.js**
 
 ---
@@ -99,8 +99,8 @@ ${commonData}
 1. 將整個 \`Windows\` 資料夾拷貝到目標電腦（例如桌面）
 2. 建議以系統管理員身分雙擊 **Install-ApprovalSystem.bat**
 3. 等待解壓與複製完成
-4. 瀏覽器開啟：**http://127.0.0.1:8080/**
-5. 使用 \`admin\` / \`admin123\` 登入
+4. 瀏覽器開啟：**http://127.0.0.1:3847/**
+5. 帳號 \`Admin\`，密碼見 \`data/.admin-bootstrap.txt\`（請立刻改密）
 
 ### 方式 B：使用已解壓資料夾
 
@@ -112,7 +112,7 @@ ${commonData}
 
 1. 開啟 \`ApprovalSystem-Portable\`
 2. 雙擊 **start.bat**
-3. 開啟 http://127.0.0.1:8080/
+3. 開啟 http://127.0.0.1:3847/
 
 ---
 
@@ -133,8 +133,8 @@ ${commonData}
 ## 4. 區網給其他電腦使用
 
 1. 在伺服器電腦完成安裝並啟動  
-2. Windows 防火牆允許 **TCP 8080**  
-3. 其他電腦開啟：\`http://伺服器IP:8080/\`
+2. Windows 防火牆允許 **TCP 3847**  
+3. 其他電腦開啟：\`http://伺服器IP:3847/\`
 
 ---
 
@@ -159,7 +159,7 @@ ${commonData}
 ## 7. 常見問題
 
 **Q：打不開網頁？**  
-A：確認已執行 start／install；埠 8080 未被占用。
+A：確認已執行 start／install；埠 3847 未被占用。
 
 **Q：中文 PDF 亂碼？**  
 A：確認 \`app\\fonts\\kaiu.ttf\` 存在。
@@ -232,7 +232,7 @@ chmod +x install.sh uninstall.sh status.sh backup-data.sh
 \`\`\`
 
 完成後開啟：**http://伺服器IP:3847/**  
-登入：\`admin\` / \`admin123\`
+登入：帳號 \`Admin\`，密碼見 \`data/.admin-bootstrap.txt\`（請立刻改密）
 
 ---
 
@@ -365,7 +365,7 @@ ${commonData}
 ### 步驟 3：開啟系統
 
 **http://NAS的IP:3847/**  
-登入：\`admin\` / \`admin123\`
+登入：帳號 \`Admin\`，密碼見 \`data/.admin-bootstrap.txt\`（請立刻改密）
 
 ---
 
@@ -415,7 +415,7 @@ const rootReadme = `線上簽核系統 — 一鍵安裝包總覽
 存放位置：D:\\一鍵安裝包\\
 
 【目錄】
-  Windows\\   → Windows 10/11 一鍵安裝（埠 8080）
+  Windows\\   → Windows 10/11 一鍵安裝（埠 3847）
   Ubuntu\\    → Ubuntu Docker／原生一鍵安裝（埠 3847）
   NAS\\       → Synology Container Manager（埠 3847）
   _共用種子資料\\ → 獨立種子備份（資料庫＋流程 JSON＋成員清單）
@@ -434,13 +434,13 @@ const rootReadme = `線上簽核系統 — 一鍵安裝包總覽
   部門：${c.departments}
   附件：${c.attachments}
 
-【預設帳號】
-  admin / admin123
+【全新庫登入】
+  帳號 Admin，密碼見 data/.admin-bootstrap.txt（請立刻改密）
 
 【建議】
   1. 依目標環境只拷貝對應子資料夾
   2. 安裝前閱讀該資料夾「安裝說明.md」
-  3. 上線後立即修改 admin 密碼並設定 Email
+  3. 上線後立即修改管理員密碼並設定 Email
 `;
 
 function write(p, content) {
@@ -458,8 +458,8 @@ write(
   `線上簽核系統 — Windows 安裝包
 ================================
 1. 雙擊 Install-ApprovalSystem.bat 或 一鍵安裝.bat
-2. 開啟 http://127.0.0.1:8080/
-3. 登入 admin / admin123
+2. 開啟 http://127.0.0.1:3847/
+3. 登入 Admin（密碼見 data/.admin-bootstrap.txt）
 4. 詳細步驟見 安裝說明.md
 建置：${stamp}
 `
@@ -474,7 +474,7 @@ write(
 2. cd ApprovalSystem-Ubuntu-Install
 3. chmod +x install.sh && ./install.sh
 4. 開啟 http://伺服器IP:3847/
-5. 登入 admin / admin123
+5. 登入 Admin（密碼見 data/.admin-bootstrap.txt）
 詳細：安裝說明.md
 建置：${stamp}
 `
@@ -489,7 +489,7 @@ write(
 2. 上傳全部內容到 /docker/approval-system/
 3. Container Manager → 專案 → 用 docker-compose 啟動
 4. 開啟 http://NAS_IP:3847/
-5. 登入 admin / admin123
+5. 登入 Admin（密碼見 data/.admin-bootstrap.txt）
 詳細：安裝說明.md
 建置：${stamp}
 `

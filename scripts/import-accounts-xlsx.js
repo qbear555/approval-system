@@ -8,6 +8,7 @@ const path = require('path');
 const XLSX = require('xlsx');
 const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcryptjs');
+const { generateBootstrapPassword } = require('../server/auth');
 
 const xlsxPath =
   process.argv[2] ||
@@ -107,7 +108,7 @@ function main() {
     for (const row of rows) {
       const name = String(row['姓名'] || '').trim();
       const username = String(row['帳號'] || '').trim();
-      const password = String(row['密碼'] || '').trim() || 'pass1234';
+      const password = String(row['密碼'] || '').trim() || generateBootstrapPassword();
       const email = String(row['Email'] || row['email'] || '').trim() || null;
       const roleLabel = String(row['角色'] || '').trim();
       const role = /管理/.test(roleLabel) ? 'admin' : 'user';

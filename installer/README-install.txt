@@ -14,7 +14,7 @@
 
 Install folder: %LOCALAPPDATA%\ApprovalSystem
 URL after install: http://127.0.0.1:3847/
-Admin: admin / admin123
+Admin: Admin / see data/.admin-bootstrap.txt (change immediately)
 
 ========================================
 [START / ENABLE the server]

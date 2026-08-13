@@ -254,7 +254,7 @@ let n = 0;
   const steps = [
     '複製 ApprovalSystem-Portable 到目標電腦',
     '執行 一鍵安裝.bat 或 start.bat',
-    '開啟 http://127.0.0.1:8080/',
+    '開啟 http://127.0.0.1:3847/',
     'Admin 登入 → 修改密碼',
     '系統設定：品牌／Email／備份加密／LINE',
     '更新時用 update.bat，勿覆蓋 data/',
@@ -575,7 +575,7 @@ let n = 0;
     ['容器一直重啟', 'docker logs；檢查 auth.js／labor.js 是否完整'],
     ['登入 500', '還原 labor.parseLeaveUsedManual 等完整 labor.js'],
     ['statCardHtml not defined', '補 public/js/ui-helpers.js 後 Ctrl+F5'],
-    ['本機連不上', '確認 8080 行程；勿用 NAS 的 3848 開本機'],
+    ['本機連不上', '確認 3847 行程；勿用 NAS 的 3848 開本機'],
     ['更新後資料沒了', '錯誤覆蓋 data/ → 應 NAS_SKIP_DB=1'],
   ];
   s.addTable(
