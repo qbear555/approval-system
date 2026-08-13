@@ -2816,7 +2816,7 @@ function isValidDepartment(name) {
   return !!row;
 }
 
-require('./routes/bind-routes')({
+const routeCtx = {
   app, db, fs, path, crypto, multer, express, tz, mail, labor, leaveReport, twCalendar,
   systemSettings, pdfSign, appVersion, deployLog, onlyoffice, systemPackage,
   workflowModule, flowGraph, flowEngine, importPayload, lineNotify,
@@ -2858,7 +2858,10 @@ require('./routes/bind-routes')({
   FIELD_TYPES, REQUEST_LIST_SELECT, REQUEST_NOT_DELETED, DEVICE_COOKIE, DEVICE_COOKIE_MS,
   CREDIT_LIMIT_COND, STEP_FINANCE_CONFIRM, STEP_APPLICANT_ACK, PERMISSION_DEFS,
   ALL_PERM_IDS, UPLOAD_DIR, MSG_LOCKED_AFTER_SIGN,
-});
+};
+require('./routes/auth')(routeCtx);
+require('./routes/workflows')(routeCtx);
+require('./routes/requests')(routeCtx);
 
 // SPA fallback
 app.get('*', (req, res) => {

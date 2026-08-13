@@ -4,7 +4,7 @@
 
 ### 架構
 
-- 後端路由抽出 `server/routes/bind-routes.js`（`index.js` 改為啟動、中介層與共用函式）。
+- 後端路由拆成 `server/routes/auth.js`、`workflows.js`、`requests.js`（`index.js` 負責啟動、中介層與共用函式）。
 - 前端管理頁抽出 `public/js/pages-admin.js`（成員／部門／帳號／系統設定）。
 - 移除未掛載、易改錯檔的 `src/` 影子專案。
 
