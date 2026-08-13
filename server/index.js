@@ -231,6 +231,12 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
+app.use((err, req, res, next) => {
+  console.error('[http]', err && err.stack ? err.stack : err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: '伺服器錯誤，請稍後再試' });
+});
+
 // 同時支援 IPv4 / IPv6；HTTP 預設 3847，HTTPS 預設 3848（entrypoint 產生憑證）
 const http = require('http');
 const https = require('https');

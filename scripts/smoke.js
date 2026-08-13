@@ -169,6 +169,24 @@ child.stderr.on('data', (d) => process.stderr.write(d));
     });
     if (vn.status !== 0) throw new Error('verify-notify 失敗: ' + (vn.stderr || vn.stdout || '').slice(0, 300));
     if (!String(vn.stdout || '').includes('"mail"')) throw new Error('verify-notify 輸出異常');
+    const pdf = require(path.join(ROOT, 'server/pdf'));
+    if (typeof pdf.writeApprovalPdf !== 'function') throw new Error('pdf.writeApprovalPdf 缺失');
+    const { PassThrough } = require('stream');
+    const sink = new PassThrough();
+    sink.resume();
+    await pdf.writeApprovalPdf(
+      {
+        id: 1,
+        workflow_name: '一般簽呈',
+        title: '煙霧',
+        status: 'pending',
+        form_data: {},
+        formFields: [],
+        steps: [],
+        actions: [],
+      },
+      sink
+    );
     console.log('煙霧測試通過');
   } catch (e) {
     console.error('失敗:', e.message);

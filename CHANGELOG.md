@@ -14,6 +14,7 @@
 - 修復拆 runtime 後登入 500：`publicUser` 補回 `normalizeUsername`，代理簽核補回 `tz`。
 - 煙霧測試涵蓋 `/line/webhook`、`verify-notify` 狀態、`publicUser`。
 - 申請表單再拆 fields／table／view；簽核動作再拆 extra／ack／pdf-download。
+- `pdf.js` 拆成 `pdf/font`、`meta`、`kit`、`comments`、`forms`；登入與 HTTP 未捕捉錯誤改回 JSON 500。
 - 回應加上 CSP、`X-Content-Type-Options: nosniff`、`X-Frame-Options`、`Referrer-Policy`。
 - 通知：`getAppBaseUrl` 空值回退 3847；最終通知模組補上拆檔後缺的依賴；新待簽核在無其他 modal 時顯示中央彈窗。
 - 移除未掛載、易改錯檔的 `src/` 影子專案。

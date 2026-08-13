@@ -85,6 +85,7 @@ function findUserByUsername(username, { activeOnly = true } = {}) {
 }
 
 app.post('/api/auth/login', (req, res) => {
+  try {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: '請輸入帳號與密碼' });
@@ -141,6 +142,12 @@ app.post('/api/auth/login', (req, res) => {
     permissionDefs: PERMISSION_DEFS,
     mustChangePassword,
   });
+  } catch (e) {
+    console.error('[login]', e);
+    if (!res.headersSent) {
+      res.status(500).json({ error: '登入時發生錯誤，請稍後再試' });
+    }
+  }
 });
 
 app.post('/api/auth/logout', (req, res) => {
