@@ -182,7 +182,7 @@ async function renderSystemSettings(body) {
       deployLogHtml = `
         <p class="muted" style="margin:0 0 10px;font-size:0.85rem;line-height:1.45">
           伺服器每次啟動會比對程式指紋；有變更時寫入
-          <code>data/修改紀錄-自動.md</code> 與 <code>data/deploy-history.json</code>。
+          <code>data/deploy-history.json</code>（執行期）。產品變更說明見倉庫 <code>CHANGELOG.md</code>。
           純重啟（檔案未改）不重複記一筆。
         </p>
         <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:10px">

@@ -1,8 +1,8 @@
 /**
  * 部署／重啟自動修改紀錄
  * - 每次行程啟動時比對 data/version-state.json 與目前程式指紋
- * - 若有變更：寫入 data/deploy-history.json，並附加 data/修改紀錄-自動.md
- * - 若 docs/ 可寫：同步 docs/修改紀錄-自動.md，並在 docs/修改紀錄.md 頂部更新「最近自動部署」摘要
+ * - 若有變更：寫入 data/deploy-history.json，並附加 data/修改紀錄-自動.md（執行期，不進 git）
+ * - 產品變更紀錄只維護倉庫根目錄 CHANGELOG.md（單一檔）
  */
 const tz = require('./tz');
 const fs = require('fs');
@@ -14,8 +14,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const STATE_PATH = path.join(DATA_DIR, 'version-state.json');
 const HISTORY_PATH = path.join(DATA_DIR, 'deploy-history.json');
 const AUTO_MD_DATA = path.join(DATA_DIR, '修改紀錄-自動.md');
-const AUTO_MD_DOCS = path.join(ROOT, 'docs', '修改紀錄-自動.md');
-const MAIN_MD_DOCS = path.join(ROOT, 'docs', '修改紀錄.md');
+const CHANGELOG_MD = path.join(ROOT, 'CHANGELOG.md');
 
 const MAX_HISTORY = 80;
 const MAX_FILES_LIST = 40;
@@ -168,12 +167,12 @@ function prependMarkdown(filePath, entry, headerTitle) {
   }
 }
 
-/** 更新 docs/修改紀錄.md 頂部「最近自動部署」區塊 */
+/** 更新 CHANGELOG.md 頂部「最近自動部署」區塊（產品修改紀錄只此一份） */
 function updateMainChangelogPointer(entry) {
-  if (!fs.existsSync(MAIN_MD_DOCS)) return false;
+  if (!fs.existsSync(CHANGELOG_MD)) return false;
   let text;
   try {
-    text = fs.readFileSync(MAIN_MD_DOCS, 'utf8');
+    text = fs.readFileSync(CHANGELOG_MD, 'utf8');
   } catch {
     return false;
   }
@@ -193,7 +192,7 @@ function updateMainChangelogPointer(entry) {
     `| 指紋 | \`${entry.build}\` |`,
     `| 變更檔 | 修改 ${(entry.changes?.modified || []).length} · 新增 ${(entry.changes?.added || []).length} · 移除 ${(entry.changes?.removed || []).length} |`,
     '',
-    '完整逐次紀錄請見同目錄 **[修改紀錄-自動.md](./修改紀錄-自動.md)**（及伺服器 `data/修改紀錄-自動.md`）。',
+    '執行期逐次指紋紀錄只寫在伺服器 `data/修改紀錄-自動.md`（不進 git）。產品說明以此檔為準。',
     '',
     markerEnd,
   ].join('\n');
@@ -204,7 +203,6 @@ function updateMainChangelogPointer(entry) {
       summary
     );
   } else {
-    // 插在第一個 --- 之後，或檔首標題後
     const h1 = text.match(/^# .+\n/);
     if (h1) {
       text = text.replace(h1[0], `${h1[0]}\n${summary}\n`);
@@ -213,10 +211,10 @@ function updateMainChangelogPointer(entry) {
     }
   }
   try {
-    fs.writeFileSync(MAIN_MD_DOCS, text, 'utf8');
+    fs.writeFileSync(CHANGELOG_MD, text, 'utf8');
     return true;
   } catch (e) {
-    console.warn('[deploy-log] update 修改紀錄.md failed', e.message);
+    console.warn('[deploy-log] update CHANGELOG.md failed', e.message);
     return false;
   }
 }
@@ -304,7 +302,6 @@ function recordOnStartup(opts = {}) {
     });
 
     prependMarkdown(AUTO_MD_DATA, entry, '線上簽核系統 — 自動部署修改紀錄');
-    prependMarkdown(AUTO_MD_DOCS, entry, '線上簽核系統 — 自動部署修改紀錄');
     if (type === 'deploy' || type === 'first') {
       updateMainChangelogPointer(entry);
     }
