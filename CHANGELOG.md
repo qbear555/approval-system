@@ -4,9 +4,11 @@
 
 ### 架構
 
-- 後端路由拆成 `server/routes/auth.js`、`workflows.js`、`requests.js`（`index.js` 負責啟動、中介層與共用函式）。
-- 前端管理頁抽出 `public/js/pages-admin.js`（成員／部門／帳號／系統設定）。
+- 後端路由拆成 `server/routes/auth.js`、`workflows.js`、`requests.js`，並改為明確解構 `ctx`（不再使用 `with`）。
+- 前端再拆 `pages-requests.js`、`pages-workflows.js`；管理頁仍在 `pages-admin.js`。
 - 移除未掛載、易改錯檔的 `src/` 影子專案。
+- 登入頁／側欄顯示環境徽章（NAS／本機）與版本。
+- 文件與 Skill 對齊：本機埠 **3847**；全新庫密碼見 `data/.admin-bootstrap.txt`。
 
 ### P2 安全／權限
 

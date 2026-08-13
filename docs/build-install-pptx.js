@@ -179,7 +179,7 @@ let n = 0;
   s.background = { color: C.bg2 };
   titleBar(s, '1. 系統架構與埠號', '三平台 ＋ 獨立 LINE 服務');
   const cards = [
-    { t: '簽核主系統', d: 'Node / Express\nNAS 3847/3848\n本機 8080', x: 0.5 },
+    { t: '簽核主系統', d: 'Node / Express\nNAS 3847/3848\n本機 3847', x: 0.5 },
     { t: 'LINE NOTIFY', d: 'D:\\Line 專案\n埠 3850\nWebhook 需 HTTPS', x: 3.5 },
     { t: '資料 data/', d: 'DB／上傳／備份\nmail-config\n部署永不覆蓋', x: 6.5 },
   ];

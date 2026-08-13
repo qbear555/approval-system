@@ -2,9 +2,25 @@
  * 簽核流程與請假報表路由
  * 由 server/index.js 傳入執行期 ctx。
  */
-/* eslint-disable no-with */
 module.exports = function register(ctx) {
-  with (ctx) {
+  const {
+    app,
+    db,
+    tz,
+    leaveReport,
+    workflowModule,
+    flowGraph,
+    importPayload,
+    authMiddleware,
+    requirePerm,
+    userHasPermission,
+    parseSteps,
+    validateStepTemplate,
+    parseFormFields,
+    resolveFinalNotifyJson,
+    enrichFinalNotifyUsers,
+    serializeWorkflow,
+  } = ctx;
 // ---------- Workflow export / import（流程＋表單＋PDF 排版一體模組）----------
 // workflowModule 已於檔案頂部 require；匯出／匯入不碰系統設定、Email、使用者
 
@@ -474,5 +490,4 @@ app.post(
     }
   }
 );
-  }
 };

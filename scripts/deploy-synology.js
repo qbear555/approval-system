@@ -244,7 +244,7 @@ async function main() {
   console.log('\nDONE');
   console.log(`HTTP:  http://${HOST}:3847`);
   console.log(`HTTPS: https://${HOST}:3848  (self-signed — browser may warn)`);
-  console.log('If fresh DB: admin / admin123 — change immediately.');
+  console.log('If fresh DB: Admin password is in data/.admin-bootstrap.txt — change immediately.');
   console.log('SECURITY: change NAS password (shared in chat) ASAP.');
 }
 

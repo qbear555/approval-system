@@ -409,10 +409,18 @@ function logoPublicUrl(settings) {
 }
 
 /** 登入頁可用：公司名／Logo／版本，不含組織或簽章狀態 */
+function inferRuntimeEnv() {
+  const forced = String(process.env.APP_ENV || '').trim();
+  if (/^nas$/i.test(forced)) return 'NAS';
+  if (/^local|dev|development$/i.test(forced)) return '本機';
+  return '';
+}
+
 function getBrandingSettings() {
   const s = loadRaw();
   const ver = require('./version').getVersionInfo();
   return {
+    env: inferRuntimeEnv(),
     companyName: s.companyName,
     logoUrl: logoPublicUrl(s),
     hasCustomLogo: !!(s.logoFile && fs.existsSync(path.join(BRAND_DIR, s.logoFile))),

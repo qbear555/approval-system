@@ -80,7 +80,7 @@ docker compose logs -f
 **預設管理員（全新資料庫時）**
 
 - 帳號：`admin`
-- 密碼：`admin123`  
+- 密碼：見 `data/.admin-bootstrap.txt`（全新庫；登入後立刻改密）  
 請立刻修改。
 
 若已放入備份的 `approval.db`，請用原本的帳號密碼。

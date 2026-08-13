@@ -132,12 +132,12 @@ description: >
 ### 3.4 安全
 
 - 不在聊天或 Git 留下真實密碼；Email／LINE 密鑰僅執行期環境  
-- 預設弱密碼 admin 應提示修改  
+- 預設弱密碼（舊的 `admin123`）登入後必須先改密；全新庫初始密碼在 `data/.admin-bootstrap.txt`  
 - 內網為主；外網需 HTTPS／VPN 再討論  
 
 ### 3.5 本機執行（常見缺檔）
 
-- 埠：**8080**（`start-server.js`），非 NAS 的 3847/3848  
+- 埠：**3847**（`start-server.js`，與 NAS HTTP 相同）；NAS HTTPS 另開 **3848**
 - 必備 server：`pdf-sign.js`、`system-settings.js`、`version.js`、`deploy-log.js`、`tw-calendar.js`（可從 NAS 或完整包拉回）  
 - 必備前端：`public/js/ui-helpers.js`（`statCardHtml` / `emptyState` / `bindDataGo`）  
 - 缺 `ui-helpers.js` → 總覽／我的申請／簽核紀錄 not defined  

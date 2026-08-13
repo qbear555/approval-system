@@ -2,9 +2,61 @@
  * 帳號／部門／系統設定路由
  * 由 server/index.js 傳入執行期 ctx。
  */
-/* eslint-disable no-with */
 module.exports = function register(ctx) {
-  with (ctx) {
+  const {
+    app,
+    db,
+    fs,
+    path,
+    multer,
+    tz,
+    mail,
+    labor,
+    twCalendar,
+    systemSettings,
+    pdfSign,
+    appVersion,
+    deployLog,
+    systemPackage,
+    lineNotify,
+    PassThrough,
+    authMiddleware,
+    adminOnly,
+    builtinAdminOnly,
+    lineSettingsOnly,
+    normalizeUsername,
+    isBuiltinAdminUsername,
+    isBuiltinAdminUser,
+    hashPassword,
+    verifyPassword,
+    isWeakPlainPassword,
+    hashMatchesWeakPassword,
+    generateBootstrapPassword,
+    signToken,
+    setAuthCookie,
+    clearAuthCookie,
+    loginRateLimit,
+    contentDispositionAttachment,
+    getChineseFontPath,
+    bindOrCheckDevice,
+    listUserDevices,
+    getClientIp,
+    logAudit,
+    parsePermissions,
+    getUserDepartments,
+    publicUser,
+    canConfigureLineSettings,
+    addUserToDepartment,
+    removeUserFromDepartment,
+    userHasPermission,
+    resolveNextHireDate,
+    getActiveDelegationForUser,
+    getGrantorUserIdsForDelegate,
+    isValidDepartment,
+    upload,
+    uploadPackage,
+    PERMISSION_DEFS,
+  } = ctx;
 // ---------- Departments ----------
 /**
  * 台灣國定假日／補班（請假試算用）
@@ -2219,5 +2271,4 @@ app.post(
   }
 );
 
-  }
 };

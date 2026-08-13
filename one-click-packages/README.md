@@ -4,7 +4,7 @@
 |------|------|
 | 建置／同步 | 2026-07-24（含 HTTPS：NAS/Ubuntu 3848、Windows 8443） |
 | 存放位置 | `D:\一鍵安裝包\` |
-| 預設管理員 | `admin` / `admin123`（**安裝後請立刻修改密碼**） |
+| 預設管理員 | 帳號 `Admin`；全新庫密碼見 `data/.admin-bootstrap.txt`（登入後立刻改密） |
 
 > **維護約定：** 之後任何程式修改，請**同時更新**本目錄下 **NAS / Ubuntu / Windows** 三個平台安裝包（勿只改單一平台）。  
 > 開發 repo 約定見：`C:\Users\TsuMing\Documents\approval-system\AGENTS.md`  
@@ -17,7 +17,7 @@
 
 | 資料夾 | 適用環境 | 預設埠 | 詳細說明 |
 |--------|----------|--------|----------|
-| **Windows\** | Windows 10 / 11 本機或伺服器 | HTTP **8080** / HTTPS **8443** | [Windows/安裝說明.md](Windows/安裝說明.md) |
+| **Windows** | Windows 10 / 11 本機或伺服器 | HTTP **3847** | [Windows/安裝說明.md](Windows/安裝說明.md) |
 | **Ubuntu\** | Ubuntu 22.04 / 24.04（Docker 或原生 Node） | HTTP **3847** / HTTPS **3848** | [Ubuntu/安裝說明.md](Ubuntu/安裝說明.md) |
 | **NAS\** | Synology DSM 7（Container Manager）等 | HTTP **3847** / HTTPS **3848** | [NAS/安裝說明.md](NAS/安裝說明.md) |
 | **_共用種子資料\** | 流程 JSON、成員清單、憑證備份 | — | 見該資料夾 README |
@@ -29,8 +29,8 @@
 ### Windows
 1. 開啟 `Windows\ApprovalSystem-Portable`（或解壓 zip）
 2. 雙擊 `一鍵安裝.bat`（或資料夾內 `install.bat`）
-3. 瀏覽器開 `http://127.0.0.1:8080`（HTTPS：`https://127.0.0.1:8443`，若已產生憑證）
-4. 登入 `admin` / `admin123`
+3. 瀏覽器開 `http://127.0.0.1:3847`
+4. 全新庫：帳號 `Admin`，密碼見安裝目錄 `data/.admin-bootstrap.txt`
 5. 到「系統設定」改密碼、確認公司名稱／Logo／PDF 簽章
 
 ### Ubuntu

@@ -5,7 +5,7 @@
  *   node scripts/one-click-update.js              # 互動選單
  *   node scripts/one-click-update.js --nas        # 部署 NAS（需 NAS_PASS）
  *   node scripts/one-click-update.js --packages   # 同步 D:\一鍵安裝包
- *   node scripts/one-click-update.js --local      # 本機啟動 8080
+ *   node scripts/one-click-update.js --local      # 本機啟動 3847
  *   node scripts/one-click-update.js --all        # NAS + 一鍵包 + 本機
  *   node scripts/one-click-update.js --list       # 列出本次功能
  *
@@ -375,7 +375,7 @@ function stopLocal8080() {
 }
 
 function startLocal() {
-  log('啟動本機 Server（8080）…');
+  log('啟動本機 Server（3847）…');
   stopLocal8080();
   const node =
     process.env.NODE ||
@@ -386,7 +386,7 @@ function startLocal() {
     cwd: ROOT,
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, PORT: '8080', HTTPS_ENABLED: '0' },
+    env: { ...process.env, PORT: '3847', HTTPS_ENABLED: '0' },
     windowsHide: true,
   });
   child.unref();
@@ -410,7 +410,7 @@ function startLocal() {
       });
       req.on('error', () => {
         if (tries >= 20) {
-          log('[警告] 已送出啟動，但尚未偵測到 8080，請手動開啟 local-server-control.bat');
+          log('[警告] 已送出啟動，但尚未偵測到 3847，請手動開啟 local-server-control.bat');
           resolve(false);
         } else setTimeout(tick, 400);
       });
@@ -424,7 +424,7 @@ async function interactiveMenu() {
   log('請選擇：');
   log('  1) 部署到 NAS（保留 data）');
   log('  2) 同步到 D:\\一鍵安裝包');
-  log('  3) 啟動本機開發 Server（8080）');
+  log('  3) 啟動本機開發 Server（3847）');
   log('  4) 全部執行（1 → 2 → 3）');
   log('  0) 取消');
   const ans = await ask('輸入選項 [1/2/3/4/0]: ');

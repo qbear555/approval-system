@@ -23,6 +23,7 @@ services:
       - HTTPS_PORT=3848
       - HTTPS_ENABLED=1
       - NODE_ENV=production
+      - APP_ENV=nas
       # 未設定或為公開預設值時，程式會在 data/.jwt-secret 自動產生並沿用
       - JWT_SECRET=${JWT_SECRET:-}
       - TZ=${TZ:-Asia/Taipei}

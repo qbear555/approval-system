@@ -3179,7 +3179,7 @@ async function renderSystemSettings(body) {
         <div class="field"><label>寄件者名稱</label>
           <input name="fromName" value="${esc(mailCfg.fromName || brand.companyName || '線上簽核系統')}" /></div>
         <div class="field"><label>系統網址（信內連結）</label>
-          <input name="baseUrl" value="${esc(mailCfg.baseUrl || 'http://127.0.0.1:8080')}" placeholder="http://公司IP:端口" /></div>
+          <input name="baseUrl" value="${esc(mailCfg.baseUrl || 'http://127.0.0.1:3847')}" placeholder="http://公司IP:端口" /></div>
         <div class="form-actions" style="display:flex;gap:8px;flex-wrap:wrap">
           <button type="submit" class="btn primary">儲存 Email 設定</button>
           <button type="button" class="btn outline" id="btn-mail-test">寄送測試信</button>
@@ -3635,7 +3635,7 @@ async function renderSystemSettings(body) {
             pass: fd.get('pass') || '',
             from: fd.get('from') || '',
             fromName: fd.get('fromName') || brand.companyName || '線上簽核系統',
-            baseUrl: fd.get('baseUrl') || 'http://127.0.0.1:8080',
+            baseUrl: fd.get('baseUrl') || 'http://127.0.0.1:3847',
           },
         });
         toast('Email 設定已儲存', 'success');
