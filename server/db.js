@@ -452,6 +452,25 @@ db.exec(`
       }
     }
   }
+  const reqDelCols = db.prepare(`PRAGMA table_info(approval_requests)`).all().map((c) => c.name);
+  if (!reqDelCols.includes('deleted_at')) {
+    db.exec(`ALTER TABLE approval_requests ADD COLUMN deleted_at TEXT`);
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_devices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      device_token TEXT NOT NULL UNIQUE,
+      label TEXT DEFAULT '',
+      ip_address TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_devices_user ON user_devices(user_id)`);
 })();
 
 // Seed default departments (idempotent)

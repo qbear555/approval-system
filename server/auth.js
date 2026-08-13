@@ -240,6 +240,7 @@ module.exports = {
   authMiddleware,
   setAuthCookie,
   clearAuthCookie,
+  parseCookies,
   AUTH_COOKIE,
   adminOnly,
   builtinAdminOnly,

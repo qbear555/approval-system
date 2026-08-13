@@ -22,8 +22,10 @@ const {
   adminOnly,
   builtinAdminOnly,
   JWT_SECRET_SOURCE,
+  parseCookies,
 } = require('./auth');
 const loginRateLimit = require('./login-rate-limit');
+const accessControl = require('./access-control');
 const {
   generateApprovalPdf,
   writeApprovalPdf,
@@ -222,6 +224,59 @@ function canUserAttachOnStep(userId, detail) {
   if (!canUserApproveStep(userId, step, detail.id)) return false;
   if (isFinalApprovalStep(steps, step)) return false;
   return true;
+}
+
+function setDeviceCookie(req, res, token) {
+  res.cookie(DEVICE_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: DEVICE_COOKIE_MS,
+    secure: !!(req && req.secure),
+  });
+}
+
+function bindOrCheckDevice(req, res, user) {
+  const cfg = systemSettings.getAccessControl();
+  if (!cfg.deviceBindEnabled) return { ok: true };
+  const cookies = parseCookies(req);
+  let token = String(cookies[DEVICE_COOKIE] || '').trim();
+  if (token) {
+    const row = db
+      .prepare(`SELECT id FROM user_devices WHERE user_id = ? AND device_token = ?`)
+      .get(user.id, token);
+    if (row) {
+      db.prepare(
+        `UPDATE user_devices SET last_seen_at = datetime('now','localtime'), ip_address = ? WHERE id = ?`
+      ).run(getClientIp(req), row.id);
+      setDeviceCookie(req, res, token);
+      return { ok: true };
+    }
+  }
+  const count = db.prepare(`SELECT COUNT(*) AS c FROM user_devices WHERE user_id = ?`).get(user.id).c;
+  const max = cfg.deviceBindMax || 3;
+  if (count >= max && !isBuiltinAdminUser(user)) {
+    return {
+      ok: false,
+      error: `此電腦尚未綁定（本帳號已達 ${max} 台）。請洽系統管理員在成員名單解除舊裝置。`,
+    };
+  }
+  token = crypto.randomBytes(16).toString('hex');
+  const ua = String(req.headers['user-agent'] || '').slice(0, 180);
+  db.prepare(
+    `INSERT INTO user_devices (user_id, device_token, label, ip_address, user_agent)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(user.id, token, ua.slice(0, 80) || '瀏覽器', getClientIp(req), ua);
+  setDeviceCookie(req, res, token);
+  return { ok: true };
+}
+
+function listUserDevices(userId) {
+  return db
+    .prepare(
+      `SELECT id, label, ip_address, last_seen_at, created_at FROM user_devices WHERE user_id = ? ORDER BY last_seen_at DESC`
+    )
+    .all(userId);
 }
 
 /** 取得請求端 IP：未設 TRUST_PROXY 時不採信 X-Forwarded-For */
@@ -1017,6 +1072,28 @@ app.get(['/health', '/api/health'], (req, res) => {
   }
 });
 
+/** 內網限制：探活／品牌／Logo 除外 */
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (
+    req.path === '/api/health' ||
+    req.path === '/api/system/branding' ||
+    req.path === '/api/system/logo'
+  ) {
+    return next();
+  }
+  const cfg = systemSettings.getAccessControl();
+  if (!cfg.intranetOnly) return next();
+  const ip = getClientIp(req);
+  if (accessControl.ipAllowed(ip, cfg.loginCidrs)) return next();
+  logAudit(req, {
+    action_type: 'intranet_blocked',
+    category: 'auth',
+    description: `拒絕非內網存取（IP：${ip}）`,
+  });
+  return res.status(403).json({ error: '僅限公司內網存取' });
+});
+
 /** 瀏覽器預設請求 /favicon.ico → 使用公司 Logo（自訂或預設 ARGO） */
 app.get(['/favicon.ico', '/favicon.png'], (req, res) => {
   try {
@@ -1039,6 +1116,9 @@ const REQUEST_LIST_SELECT = `SELECT r.*, w.name AS workflow_name, w.steps_json, 
        FROM approval_requests r
        JOIN workflows w ON w.id = r.workflow_id
        JOIN users u ON u.id = r.requester_id`;
+const REQUEST_NOT_DELETED = `(IFNULL(r.deleted_at,'') = '')`;
+const DEVICE_COOKIE = 'approval_device';
+const DEVICE_COOKIE_MS = 400 * 24 * 60 * 60 * 1000;
 
 /** 信用額度單判定（流程名稱或主旨含「信用額度」） */
 const CREDIT_LIMIT_COND = `(IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')`;
@@ -2065,6 +2145,7 @@ function getPendingFinalNotifyRequests(userId) {
        JOIN workflows w ON w.id = r.workflow_id
        JOIN users u ON u.id = r.requester_id
        WHERE fn.user_id = ? AND fn.acked_at IS NULL
+         AND ${REQUEST_NOT_DELETED}
        ORDER BY fn.created_at DESC`
     )
     .all(Number(userId));
@@ -2076,6 +2157,7 @@ function getPendingFinanceConfirmRequests() {
     .prepare(
       `${REQUEST_LIST_SELECT}
        WHERE r.status = 'approved'
+         AND ${REQUEST_NOT_DELETED}
          AND ${CREDIT_LIMIT_COND}
          AND r.id NOT IN (
            SELECT request_id FROM approval_actions WHERE step_name = ?
@@ -2091,6 +2173,7 @@ function getPendingApplicantAckRequests(userId) {
     .prepare(
       `${REQUEST_LIST_SELECT}
        WHERE r.status = 'approved'
+         AND ${REQUEST_NOT_DELETED}
          AND r.requester_id = ?
          AND ${CREDIT_LIMIT_COND}
          AND r.id IN (
@@ -2317,6 +2400,7 @@ function getRequestDetail(id) {
     )
     .get(id);
   if (!row) return null;
+  if (row.deleted_at) return null;
 
   const actions = db
     .prepare(
@@ -3060,6 +3144,15 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ error: '帳號或密碼錯誤' });
   }
   loginRateLimit.recordSuccess(ip, uStr);
+  const device = bindOrCheckDevice(req, res, user);
+  if (!device.ok) {
+    logAudit(req, {
+      action_type: 'device_blocked',
+      category: 'auth',
+      description: `裝置未綁定（帳號：${user.username}）`,
+    });
+    return res.status(403).json({ error: device.error });
+  }
   const safe = publicUser(user);
   const token = signToken(safe);
   setAuthCookie(req, res, token);
@@ -3076,6 +3169,36 @@ app.post('/api/auth/login', (req, res) => {
 app.post('/api/auth/logout', (req, res) => {
   clearAuthCookie(req, res);
   res.json({ ok: true });
+});
+
+app.get('/api/devices/my', authMiddleware, (req, res) => {
+  res.json({ devices: listUserDevices(req.user.id), access: systemSettings.getAccessControl() });
+});
+
+app.delete('/api/devices/my/:id', authMiddleware, (req, res) => {
+  const id = Number(req.params.id);
+  const row = db.prepare(`SELECT id FROM user_devices WHERE id = ? AND user_id = ?`).get(id, req.user.id);
+  if (!row) return res.status(404).json({ error: '找不到此裝置' });
+  db.prepare(`DELETE FROM user_devices WHERE id = ?`).run(id);
+  res.json({ ok: true });
+});
+
+app.get('/api/users/:id/devices', authMiddleware, adminOnly, (req, res) => {
+  const id = Number(req.params.id);
+  res.json({ devices: listUserDevices(id) });
+});
+
+app.delete('/api/users/:id/devices/:deviceId', authMiddleware, adminOnly, (req, res) => {
+  const userId = Number(req.params.id);
+  const deviceId = Number(req.params.deviceId);
+  db.prepare(`DELETE FROM user_devices WHERE id = ? AND user_id = ?`).run(deviceId, userId);
+  res.json({ ok: true });
+});
+
+app.post('/api/users/:id/devices/clear', authMiddleware, adminOnly, (req, res) => {
+  const userId = Number(req.params.id);
+  const r = db.prepare(`DELETE FROM user_devices WHERE user_id = ?`).run(userId);
+  res.json({ ok: true, deleted: r.changes || 0 });
 });
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {
@@ -3433,6 +3556,16 @@ app.put('/api/system/settings', authMiddleware, builtinAdminOnly, (req, res) => 
       backupEncryptPass: body.backupEncryptPass,
       backupEncryptPassClear: body.backupEncryptPassClear,
       ...(Object.prototype.hasOwnProperty.call(body, 'backupDir') ? { backupDir: body.backupDir } : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, 'intranetOnly')
+        ? { intranetOnly: body.intranetOnly }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, 'loginCidrs') ? { loginCidrs: body.loginCidrs } : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, 'deviceBindEnabled')
+        ? { deviceBindEnabled: body.deviceBindEnabled }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, 'deviceBindMax')
+        ? { deviceBindMax: body.deviceBindMax }
+        : {}),
     });
     res.json({
       ok: true,
@@ -5419,6 +5552,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
          JOIN workflows w ON w.id = r.workflow_id
          JOIN users u ON u.id = r.requester_id
          WHERE r.requester_id = ?
+           AND ${REQUEST_NOT_DELETED}
          ORDER BY r.updated_at DESC`
       )
       .all(uid);
@@ -5430,7 +5564,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
     const allPending = db
       .prepare(
         `${REQUEST_LIST_SELECT}
-         WHERE r.status = 'pending'
+         WHERE r.status = 'pending' AND ${REQUEST_NOT_DELETED}
          ORDER BY r.updated_at DESC`
       )
       .all();
@@ -5498,6 +5632,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
       .prepare(
         `${REQUEST_LIST_SELECT}
          WHERE r.status IN ('approved', 'rejected', 'cancelled')
+           AND ${REQUEST_NOT_DELETED}
          ORDER BY r.completed_at DESC, r.updated_at DESC
          LIMIT 800`
       )
@@ -5517,6 +5652,7 @@ app.get('/api/requests', authMiddleware, (req, res) => {
     const candidates = db
       .prepare(
         `${REQUEST_LIST_SELECT}
+         WHERE ${REQUEST_NOT_DELETED}
          ORDER BY r.updated_at DESC
          LIMIT 800`
       )
@@ -7753,7 +7889,7 @@ function deleteApprovalRequestHard(requestId, opts = {}) {
   const id = Number(requestId);
   const row = db
     .prepare(
-      `SELECT r.id, r.title, r.status, r.requester_id, r.current_step,
+      `SELECT r.id, r.title, r.status, r.requester_id, r.current_step, r.deleted_at,
               w.name AS workflow_name
        FROM approval_requests r
        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -7790,35 +7926,28 @@ function deleteApprovalRequestHard(requestId, opts = {}) {
     }
   }
 
-  // 附件實體檔
-  const atts = db
-    .prepare(`SELECT stored_name FROM request_attachments WHERE request_id = ?`)
-    .all(id);
-  for (const a of atts) {
-    if (!a.stored_name) continue;
-    const p = path.join(UPLOAD_DIR, a.stored_name);
-    try {
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    } catch (e) {
-      console.warn('[delete request] attach unlink', p, e.message);
-    }
+  if (row.deleted_at) {
+    return { ok: false, error: '此申請已刪除' };
   }
 
-  // 相關備份 PDF
-  const backups = db.prepare(`SELECT id FROM backup_files WHERE request_id = ?`).all(id);
-  for (const b of backups) {
-    deleteBackup(b.id);
-  }
+  db.prepare(
+    `UPDATE approval_requests
+     SET deleted_at = datetime('now', 'localtime'),
+         updated_at = datetime('now', 'localtime')
+     WHERE id = ?`
+  ).run(id);
+  logAudit(opts.req || { user: actor }, {
+    action_type: 'request_soft_delete',
+    category: 'approval',
+    description: `軟刪申請 #${id}「${row.title || ''}」`,
+    target_id: id,
+  });
 
-  db.prepare(`DELETE FROM request_attachments WHERE request_id = ?`).run(id);
-  db.prepare(`DELETE FROM approval_actions WHERE request_id = ?`).run(id);
-  db.prepare(`DELETE FROM approval_requests WHERE id = ?`).run(id);
-
-  return { ok: true, id, title: row.title, status: row.status };
+  return { ok: true, id, title: row.title, status: row.status, soft: true };
 }
 
 app.delete('/api/requests/:id', authMiddleware, (req, res) => {
-  const result = deleteApprovalRequestHard(req.params.id, { actor: req.user });
+  const result = deleteApprovalRequestHard(req.params.id, { actor: req.user, req });
   if (!result.ok) {
     const code =
       result.error === '找不到簽核單'
@@ -7841,7 +7970,7 @@ app.post('/api/requests/bulk-delete', authMiddleware, (req, res) => {
   const deleted = [];
   const failed = [];
   for (const id of ids) {
-    const r = deleteApprovalRequestHard(id, { actor: req.user });
+    const r = deleteApprovalRequestHard(id, { actor: req.user, req });
     if (r.ok) deleted.push({ id: r.id, title: r.title });
     else failed.push({ id, error: r.error });
   }
@@ -7859,16 +7988,16 @@ app.post('/api/requests/bulk-delete', authMiddleware, (req, res) => {
 app.get('/api/stats', authMiddleware, (req, res) => {
   const uid = req.user.id;
   const minePending = db
-    .prepare(`SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'pending'`)
+    .prepare(`SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'pending' AND IFNULL(deleted_at,'') = ''`)
     .get(uid).c;
   const mineDone = db
-    .prepare(`SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'approved'`)
+    .prepare(`SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'approved' AND IFNULL(deleted_at,'') = ''`)
     .get(uid).c;
   // 必須用 steps_snapshot（實際解析後簽核人），不可只用流程模板
   const allPending = db
     .prepare(
       `SELECT r.*, w.steps_json, r.steps_snapshot_json FROM approval_requests r
-       JOIN workflows w ON w.id = r.workflow_id WHERE r.status = 'pending'`
+       JOIN workflows w ON w.id = r.workflow_id WHERE r.status = 'pending' AND ${REQUEST_NOT_DELETED}`
     )
     .all();
   const pendingMe = allPending.filter((r) => {
@@ -7885,6 +8014,7 @@ app.get('/api/stats', authMiddleware, (req, res) => {
           `SELECT COUNT(*) AS c FROM approval_requests r
            JOIN workflows w ON w.id = r.workflow_id
            WHERE r.status = 'approved'
+             AND ${REQUEST_NOT_DELETED}
              AND ${CREDIT_LIMIT_COND}
              AND r.id NOT IN (
                SELECT request_id FROM approval_actions WHERE step_name = ?
@@ -7897,6 +8027,7 @@ app.get('/api/stats', authMiddleware, (req, res) => {
       `SELECT COUNT(*) AS c FROM approval_requests r
        JOIN workflows w ON w.id = r.workflow_id
        WHERE r.status = 'approved'
+         AND ${REQUEST_NOT_DELETED}
          AND r.requester_id = ?
          AND ${CREDIT_LIMIT_COND}
          AND r.id IN (

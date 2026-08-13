@@ -40,6 +40,11 @@ const DEFAULTS = {
   announcementStartAt: null, // ISO；null＝不限制開始
   announcementEndAt: null, // ISO；null＝不限制結束；超過則自動不顯示
   announcementUpdatedAt: null,
+  // 內網與裝置綁定
+  intranetOnly: true,
+  loginCidrs: '192.168.99.0/24,172.16.0.0/12,127.0.0.1,::1',
+  deviceBindEnabled: true,
+  deviceBindMax: 3,
   updatedAt: null,
 };
 
@@ -123,6 +128,14 @@ function loadRaw() {
       announcementStartAt: normalizeAnnounceIso(raw.announcementStartAt),
       announcementEndAt: normalizeAnnounceIso(raw.announcementEndAt),
       announcementUpdatedAt: raw.announcementUpdatedAt || null,
+      intranetOnly: raw.intranetOnly === undefined ? true : !!raw.intranetOnly,
+      loginCidrs:
+        raw.loginCidrs != null && String(raw.loginCidrs).trim()
+          ? String(raw.loginCidrs).trim().slice(0, 500)
+          : DEFAULTS.loginCidrs,
+      deviceBindEnabled:
+        raw.deviceBindEnabled === undefined ? true : !!raw.deviceBindEnabled,
+      deviceBindMax: Math.min(10, Math.max(1, Number(raw.deviceBindMax) || 3)),
       updatedAt: raw.updatedAt || null,
     };
   } catch {
@@ -169,6 +182,14 @@ function saveRaw(settings) {
     announcementStartAt: normalizeAnnounceIso(cur.announcementStartAt),
     announcementEndAt: normalizeAnnounceIso(cur.announcementEndAt),
     announcementUpdatedAt: cur.announcementUpdatedAt || null,
+    intranetOnly: cur.intranetOnly === undefined ? true : !!cur.intranetOnly,
+    loginCidrs:
+      cur.loginCidrs != null && String(cur.loginCidrs).trim()
+        ? String(cur.loginCidrs).trim().slice(0, 500)
+        : DEFAULTS.loginCidrs,
+    deviceBindEnabled:
+      cur.deviceBindEnabled === undefined ? true : !!cur.deviceBindEnabled,
+    deviceBindMax: Math.min(10, Math.max(1, Number(cur.deviceBindMax) || 3)),
     updatedAt: tz.nowIso(),
   };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(payload, null, 2), 'utf8');
@@ -444,6 +465,17 @@ function getAdminSettings() {
     },
     backupDir: s.backupDir || '',
     announcement: getAnnouncementPublic(),
+    access: getAccessControl(s),
+  };
+}
+
+function getAccessControl(raw) {
+  const s = raw || loadRaw();
+  return {
+    intranetOnly: s.intranetOnly !== false,
+    loginCidrs: s.loginCidrs || DEFAULTS.loginCidrs,
+    deviceBindEnabled: s.deviceBindEnabled !== false,
+    deviceBindMax: Math.min(10, Math.max(1, Number(s.deviceBindMax) || 3)),
   };
 }
 
@@ -502,6 +534,18 @@ function updateSettings(patch = {}) {
       throw new Error('備份目錄不可包含「..」路徑穿越');
     }
     cur.backupDir = dir.slice(0, 500);
+  }
+  if (patch.intranetOnly !== undefined) {
+    cur.intranetOnly = !!patch.intranetOnly;
+  }
+  if (patch.loginCidrs !== undefined) {
+    cur.loginCidrs = String(patch.loginCidrs || '').trim().slice(0, 500) || DEFAULTS.loginCidrs;
+  }
+  if (patch.deviceBindEnabled !== undefined) {
+    cur.deviceBindEnabled = !!patch.deviceBindEnabled;
+  }
+  if (patch.deviceBindMax !== undefined) {
+    cur.deviceBindMax = Math.min(10, Math.max(1, Number(patch.deviceBindMax) || 3));
   }
   return saveRaw(cur);
 }
@@ -877,6 +921,7 @@ module.exports = {
   createSelfSignedPdfSignCert,
   getBackupEncryptConfig,
   getBackupDir,
+  getAccessControl,
   DEFAULT_LOGO_URL,
   DEFAULT_COMPANY_NAME,
   BRAND_DIR,

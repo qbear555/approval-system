@@ -2091,11 +2091,11 @@ async function renderRequestList(body, filter) {
         return;
       }
       const adminWarn = isAdmin()
-        ? '\n（系統管理員：將永久刪除此單，含已簽核／任何狀態）'
+        ? '\n（系統管理員：將從所有人列表隱藏，檔案仍保留）'
         : '';
       if (
         !confirm(
-          `確定刪除申請 #${id}${r ? `「${r.title}」` : ''}？\n將永久刪除單據、歷程、附件與相關備份，無法復原。${adminWarn}`
+          `確定刪除申請 #${id}${r ? `「${r.title}」` : ''}？\n將從列表隱藏；單據、附件與備份仍保留供稽核。${adminWarn}`
         )
       ) {
         return;
@@ -5768,7 +5768,7 @@ async function renderDetail(body, id) {
     }
     if (
       !confirm(
-        `確定刪除申請 #${id}「${request.title}」？\n將一併刪除歷程、附件與相關備份，無法復原。`
+        `確定刪除申請 #${id}「${request.title}」？\n將從列表隱藏；單據、附件與備份仍保留供稽核。`
       )
     ) {
       return;
@@ -9555,6 +9555,16 @@ async function renderSettings(body) {
     ? grantors.map((g) => `<strong>${esc(g.grantor_name)}</strong>`).join('、')
     : '';
 
+  let myDevices = [];
+  let accessCfg = {};
+  try {
+    const d = await api('/api/devices/my');
+    myDevices = d.devices || [];
+    accessCfg = d.access || {};
+  } catch {
+    /* ignore */
+  }
+
   body.innerHTML = `
     <div class="card" style="max-width:560px">
       <h3>我的資料</h3>
@@ -9873,6 +9883,41 @@ async function renderSettings(body) {
     });
     toast('已還原為預設經典藍調主題！', 'success');
   });
+
+  if (accessCfg.deviceBindEnabled) {
+    const box = document.createElement('div');
+    box.className = 'card';
+    box.style.maxWidth = '560px';
+    box.style.marginTop = '16px';
+    box.innerHTML = `
+      <h3>已綁定的電腦</h3>
+      <p class="muted" style="margin-top:0">此帳號最多 ${esc(String(accessCfg.deviceBindMax || 3))} 台。解除後需在該電腦重新登入才會再綁定。</p>
+      ${
+        myDevices.length
+          ? `<ul class="muted" style="padding-left:18px">${myDevices
+              .map(
+                (d) =>
+                  `<li style="margin:8px 0">${esc(d.label || '瀏覽器')} · ${esc(d.ip_address || '')} · 上次 ${esc(
+                    String(d.last_seen_at || '').replace('T', ' ')
+                  )} <button type="button" class="btn ghost sm" data-unbind="${d.id}">解除</button></li>`
+              )
+              .join('')}</ul>`
+          : '<p class="muted">尚無綁定紀錄（下次登入會登記此電腦）</p>'
+      }`;
+    body.appendChild(box);
+    box.querySelectorAll('[data-unbind]').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('解除此電腦綁定？')) return;
+        try {
+          await api(`/api/devices/my/${btn.dataset.unbind}`, { method: 'DELETE' });
+          toast('已解除', 'success');
+          navigate('settings');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      };
+    });
+  }
 
   $('#profile-form').onsubmit = async (e) => {
     e.preventDefault();
@@ -10337,6 +10382,12 @@ async function renderSystemSettings(body) {
     scheduleStatus: 'open',
     updatedAt: null,
   };
+  let accessCfgAdmin = {
+    intranetOnly: true,
+    loginCidrs: '192.168.99.0/24,172.16.0.0/12,127.0.0.1,::1',
+    deviceBindEnabled: true,
+    deviceBindMax: 3,
+  };
   try {
     const adminCfg = await api('/api/system/settings/admin');
     brand = adminCfg;
@@ -10345,6 +10396,7 @@ async function renderSystemSettings(body) {
     backupEncrypt = { ...backupEncrypt, ...(adminCfg.backupEncrypt || {}) };
     backupDir = adminCfg.backupDir || '';
     announcement = { ...announcement, ...(adminCfg.announcement || {}) };
+    accessCfgAdmin = { ...accessCfgAdmin, ...(adminCfg.access || {}) };
   } catch {
     try {
       brand = await api('/api/system/settings');
@@ -10514,6 +10566,38 @@ async function renderSystemSettings(body) {
         </div>
         <div class="form-actions">
           <button type="submit" class="btn primary">儲存公司名稱</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">內網與電腦綁定</h3>
+      <p class="muted" style="margin-top:0;line-height:1.55">
+        限制只能從公司網段登入；並把帳號綁在常用電腦。本機 <code>127.0.0.1</code> 永遠允許，以免管理端鎖死。
+      </p>
+      <form id="access-form" class="form-grid">
+        <div class="field check-row-box" style="grid-column:1/-1">
+          <label class="check-row">
+            <input type="checkbox" name="intranetOnly" ${accessCfgAdmin.intranetOnly !== false ? 'checked' : ''} />
+            <span><strong>僅限內網存取</strong></span>
+          </label>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>允許網段（CIDR，逗號分隔）</label>
+          <input name="loginCidrs" value="${esc(accessCfgAdmin.loginCidrs || '192.168.99.0/24,172.16.0.0/12,127.0.0.1,::1')}" />
+        </div>
+        <div class="field check-row-box">
+          <label class="check-row">
+            <input type="checkbox" name="deviceBindEnabled" ${accessCfgAdmin.deviceBindEnabled !== false ? 'checked' : ''} />
+            <span><strong>綁定登入電腦</strong></span>
+          </label>
+        </div>
+        <div class="field">
+          <label>每帳號最多幾台</label>
+          <input name="deviceBindMax" type="number" min="1" max="10" value="${esc(String(accessCfgAdmin.deviceBindMax || 3))}" />
+        </div>
+        <div class="form-actions" style="grid-column:1/-1">
+          <button type="submit" class="btn primary">儲存存取限制</button>
         </div>
       </form>
     </div>
@@ -10935,6 +11019,26 @@ async function renderSystemSettings(body) {
     </div>`;
 
   // 公司名稱
+  $('#access-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/api/system/settings', {
+        method: 'PUT',
+        body: {
+          intranetOnly: fd.get('intranetOnly') === 'on',
+          loginCidrs: fd.get('loginCidrs'),
+          deviceBindEnabled: fd.get('deviceBindEnabled') === 'on',
+          deviceBindMax: Number(fd.get('deviceBindMax') || 3),
+        },
+      });
+      toast('存取限制已儲存', 'success');
+      navigate('system-settings');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
   $('#brand-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
