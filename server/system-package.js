@@ -426,9 +426,9 @@ function importPackage(pack, options = {}) {
       result.users.updated++;
     } else {
       if (!hash) {
-        // 無雜湊時給臨時密碼 pass1234
-        const bcrypt = require('bcryptjs');
-        const tempHash = bcrypt.hashSync('pass1234', 10);
+        // 無雜湊時給一次性隨機密碼（匯入後須由管理員重設）
+        const { hashPassword, generateBootstrapPassword } = require('./auth');
+        const tempHash = hashPassword(generateBootstrapPassword());
         const info = db
           .prepare(
             `INSERT INTO users

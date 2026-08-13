@@ -114,6 +114,24 @@ function verifyPassword(password, hash) {
   return bcrypt.compareSync(password, hash);
 }
 
+/** 曾寫進程式／安裝說明的公開弱密碼，禁止再當正式密碼 */
+const WEAK_PLAIN_PASSWORDS = ['admin123', 'pass1234', 'password', '123456', 'admin'];
+
+function isWeakPlainPassword(password) {
+  const p = String(password || '');
+  if (!p) return true;
+  return WEAK_PLAIN_PASSWORDS.some((w) => p === w || p.toLowerCase() === w.toLowerCase());
+}
+
+function hashMatchesWeakPassword(hash) {
+  if (!hash) return false;
+  return WEAK_PLAIN_PASSWORDS.some((w) => verifyPassword(w, hash));
+}
+
+function generateBootstrapPassword() {
+  return crypto.randomBytes(12).toString('base64url');
+}
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, username: user.username, role: user.role, name: user.name },
@@ -215,6 +233,9 @@ module.exports = {
   isBuiltinAdminUser,
   hashPassword,
   verifyPassword,
+  isWeakPlainPassword,
+  hashMatchesWeakPassword,
+  generateBootstrapPassword,
   signToken,
   authMiddleware,
   setAuthCookie,

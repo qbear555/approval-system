@@ -12,6 +12,9 @@ const {
   isBuiltinAdminUser,
   hashPassword,
   verifyPassword,
+  isWeakPlainPassword,
+  hashMatchesWeakPassword,
+  generateBootstrapPassword,
   signToken,
   authMiddleware,
   setAuthCookie,
@@ -442,22 +445,10 @@ const ALL_PERM_IDS = PERMISSION_DEFS.map((p) => p.id);
  * 用於：建檔確認按鈕、待建檔列表、核准後 Email 通知對象。
  */
 function isFinanceUser(user) {
-  if (!user) return false;
-  if (user.department === '財務部') return true;
-  try {
-    const depts = getUserDepartments(user.id);
-    if (depts.includes('財務部')) return true;
-  } catch {
-    /* ignore */
-  }
-  const uname = String(user.username || '');
-  if (/^gigi$/i.test(uname) || user.name === '張美雯') return true;
-  if (/^joan$/i.test(uname) || user.name === '詹慈敏') return true;
-  // 一般帳號有 finance_confirm；admin 的 userHasPermission 會全開，故排除 admin
-  if (user.role !== 'admin' && userHasPermission(user.id, 'finance_confirm')) {
-    return true;
-  }
-  return false;
+  if (!user || !user.id) return false;
+  // 系統管理員／總經理 role=admin 不自動算財務
+  if (user.role === 'admin') return false;
+  return userHasPermission(user.id, 'finance_confirm');
 }
 
 function isCreditLimitRequestRow(rowOrDetail) {
@@ -837,22 +828,82 @@ function requirePerm(permId) {
   };
 }
 
-// Ensure admin exists on first boot
+// Ensure admin exists on first boot（不使用公開弱密碼）
 (function ensureAdmin() {
   const c = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-  if (c === 0) {
-    db.prepare(
-      `INSERT INTO users (username, password_hash, name, email, department, role)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
-      normalizeUsername('admin'),
-      hashPassword('admin123'),
-      '系統管理員',
-      'admin@example.com',
-      '管理部',
-      'admin'
+  if (c !== 0) return;
+  const pwd = generateBootstrapPassword();
+  db.prepare(
+    `INSERT INTO users (username, password_hash, name, email, department, role)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    normalizeUsername('admin'),
+    hashPassword(pwd),
+    '系統管理員',
+    'admin@example.com',
+    '管理部',
+    'admin'
+  );
+  const bootFile = path.join(__dirname, '..', 'data', '.admin-bootstrap.txt');
+  try {
+    fs.writeFileSync(
+      bootFile,
+      [
+        `username=Admin`,
+        `password=${pwd}`,
+        `created=${tz.nowStamp()}`,
+        '請登入後立刻修改密碼，並刪除此檔。',
+        '',
+      ].join('\n'),
+      { encoding: 'utf8', mode: 0o600 }
     );
-    console.log('[seed] 已建立預設管理員 Admin / admin123（部門：管理部；登入不分大小寫）');
+    console.log('[seed] 已建立內建 Admin。初始密碼寫入 data/.admin-bootstrap.txt（勿提交、登入後請改密並刪檔）');
+  } catch (e) {
+    console.error('[seed] 無法寫入 data/.admin-bootstrap.txt：', e.message);
+    console.error('[seed] 請刪除空資料庫後重試，或手動重設 Admin 密碼');
+  }
+})();
+
+/** 舊版用部門／姓名判斷財務：補上 finance_confirm，之後只看權限 */
+(function migrateFinanceConfirmPermission() {
+  try {
+    const rows = db
+      .prepare(
+        `SELECT id, username, name, department, role, permissions_json
+         FROM users WHERE active = 1 AND role != 'admin'`
+      )
+      .all();
+    let n = 0;
+    for (const u of rows) {
+      const uname = String(u.username || '');
+      let depts = [];
+      try {
+        depts = getUserDepartments(u.id);
+      } catch {
+        depts = [];
+      }
+      const legacy =
+        u.department === '財務部' ||
+        depts.includes('財務部') ||
+        /^gigi$/i.test(uname) ||
+        /^joan$/i.test(uname) ||
+        u.name === '張美雯' ||
+        u.name === '詹慈敏';
+      if (!legacy) continue;
+      const perms = parsePermissions(u.permissions_json);
+      if (perms.includes('finance_confirm')) continue;
+      perms.push('finance_confirm');
+      db.prepare(`UPDATE users SET permissions_json = ? WHERE id = ?`).run(
+        JSON.stringify(perms),
+        u.id
+      );
+      n += 1;
+    }
+    if (n > 0) {
+      console.log(`[migrate] 已為 ${n} 位既有財務人員補上 finance_confirm 權限`);
+    }
+  } catch (e) {
+    console.warn('[migrate] finance_confirm', e.message);
   }
 })();
 
@@ -3012,8 +3063,14 @@ app.post('/api/auth/login', (req, res) => {
   const safe = publicUser(user);
   const token = signToken(safe);
   setAuthCookie(req, res, token);
+  const mustChangePassword = hashMatchesWeakPassword(user.password_hash);
   logAudit(req, { action_type: 'login', category: 'auth', description: `使用者 ${safe.name} (${safe.username}) 登入成功` });
-  res.json({ ok: true, user: safe, permissionDefs: PERMISSION_DEFS });
+  res.json({
+    ok: true,
+    user: safe,
+    permissionDefs: PERMISSION_DEFS,
+    mustChangePassword,
+  });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -3030,6 +3087,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json({
     user: publicUser(user, { withLabor: true }),
     permissionDefs: PERMISSION_DEFS,
+    mustChangePassword: hashMatchesWeakPassword(user.password_hash),
   });
 });
 
@@ -3038,12 +3096,18 @@ app.put('/api/auth/password', authMiddleware, (req, res) => {
   if (!currentPassword || !newPassword || String(newPassword).length < 6) {
     return res.status(400).json({ error: '請提供正確的舊密碼，且新密碼至少 6 字元' });
   }
+  if (isWeakPlainPassword(newPassword)) {
+    return res.status(400).json({ error: '新密碼過於常見，請改用更安全的密碼' });
+  }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!verifyPassword(currentPassword, user.password_hash)) {
     return res.status(400).json({ error: '舊密碼不正確' });
   }
+  if (String(currentPassword) === String(newPassword)) {
+    return res.status(400).json({ error: '新密碼不可與舊密碼相同' });
+  }
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.user.id);
-  res.json({ ok: true });
+  res.json({ ok: true, mustChangePassword: false });
 });
 
 /** 任何登入成員可自行修改：姓名、Email、分機、電話、Email 通知偏好 */
@@ -4345,7 +4409,7 @@ function buildUsersWorkbook(userRows, { includePasswords = false, passwordMap = 
     ['匯入欄位說明'],
     ['姓名', '必填'],
     ['帳號', '必填；英文數字，至少 3 字元'],
-    ['密碼', '選填；空白＝不變更既有密碼；新帳號空白則預設 pass1234'],
+    ['密碼', '選填；空白＝不變更既有密碼；新帳號空白則自動產生隨機密碼'],
     ['部門', '可多個，以「、」分隔'],
     ['主部門', '主要顯示部門'],
     ['Email', '選填'],
@@ -4367,8 +4431,6 @@ app.post('/api/users/export', authMiddleware, adminOnly, (req, res) => {
     ? [...new Set(req.body.ids.map(Number).filter(Boolean))]
     : [];
   const resetPasswords = !!req.body?.resetPasswords;
-  const defaultPwd = String(req.body?.defaultPassword || 'pass1234');
-
   let users;
   if (ids.length) {
     users = ids
@@ -4391,7 +4453,7 @@ app.post('/api/users/export', authMiddleware, adminOnly, (req, res) => {
     for (const u of users) {
       // 非內建 Admin 不可重設 Admin 密碼（已過濾）；內建可重設自己
       if (isBuiltinAdminUser(u) && !isBuiltinAdminUsername(req.user.username)) continue;
-      const pwd = isBuiltinAdminUser(u) ? 'admin123' : defaultPwd;
+      const pwd = generateBootstrapPassword();
       upd.run(hashPassword(pwd), u.id);
       passwordMap[u.id] = pwd;
     }
@@ -4421,7 +4483,7 @@ app.get('/api/users/export-template', authMiddleware, adminOnly, (req, res) => {
     {
       姓名: '王小明',
       帳號: 'wangxm',
-      密碼: 'pass1234',
+      密碼: '',
       部門: '業務部',
       主部門: '業務部',
       Email: 'wang@example.com',
@@ -4583,7 +4645,7 @@ app.post(
               );
             } else {
               db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(
-                hashPassword('pass1234'),
+                hashPassword(generateBootstrapPassword()),
                 user.id
               );
             }
@@ -4624,7 +4686,7 @@ app.post(
             applyLeaveUsed(user.id, user);
             updated += 1;
           } else {
-            const pwd = passwordRaw || 'pass1234';
+            const pwd = passwordRaw || generateBootstrapPassword();
             if (pwd.length < 6) {
               errors.push(`第 ${i + 2} 列（${username}）：密碼至少 6 字元`);
               continue;
@@ -7948,7 +8010,7 @@ listenDual(server, PORT, '線上簽核系統 HTTP', [
     console.log(`  時間: ${tz.nowStamp()}（台灣時間）`);
     // 主機時區不是 UTC+8 時大聲提醒：資料庫寫入的時間會錯，且只能在啟動前修正
     tz.warnIfHostTzMismatch();
-    console.log(`預設管理員: admin / admin123（若為首次啟動）`);
+    console.log('內建管理員帳號: Admin（首次安裝請看 data/.admin-bootstrap.txt，並立刻改密）');
     try {
       deployLog.recordOnStartup();
     } catch (e) {

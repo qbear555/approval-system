@@ -8039,7 +8039,7 @@ async function renderUsers(body) {
   $('#btn-export-all-user')?.addEventListener('click', async () => {
     try {
       const reset = confirm(
-        '是否在匯出時重設密碼並寫入 Excel？\n\n「確定」＝重設（admin→admin123，其餘→pass1234）並寫入密碼欄\n「取消」＝僅匯出名單，密碼欄空白（保留原密碼）'
+        '是否在匯出時重設密碼並寫入 Excel？\n\n「確定」＝為每位成員產生隨機密碼並寫入密碼欄\n「取消」＝僅匯出名單，密碼欄空白（保留原密碼）'
       );
       await downloadUsersExcel([], { resetPasswords: reset });
       toast('已匯出全部成員', 'success');
@@ -8070,7 +8070,7 @@ async function renderUsers(body) {
     }
     if (
       !confirm(
-        `確定重設並匯出 ${ids.length} 人的密碼？\n（admin 為 admin123，其餘為 pass1234）`
+        `確定重設並匯出 ${ids.length} 人的密碼？\n（每人一組隨機密碼，將寫入 Excel）`
       )
     ) {
       return;
@@ -11452,6 +11452,66 @@ async function loadDepartmentOptions() {
   }
 }
 
+function showForceChangePassword() {
+  const loginForm = $('#login-form');
+  if (loginForm) loginForm.classList.add('hidden');
+  let form = $('#force-pwd-form');
+  if (!form) {
+    form = document.createElement('form');
+    form.id = 'force-pwd-form';
+    form.className = 'auth-form';
+    form.innerHTML = `
+      <p class="muted" style="margin:0 0 10px">此帳號仍使用系統預設弱密碼，必須先修改才能進入。</p>
+      <div class="input-group-icon">
+        <span class="input-icon">🔒</span>
+        <input name="currentPassword" type="password" autocomplete="current-password" required placeholder="目前密碼" />
+      </div>
+      <div class="input-group-icon">
+        <span class="input-icon">🔑</span>
+        <input name="newPassword" type="password" autocomplete="new-password" required minlength="6" placeholder="新密碼（勿用常見密碼）" />
+      </div>
+      <div class="input-group-icon">
+        <span class="input-icon">🔑</span>
+        <input name="confirmPassword" type="password" autocomplete="new-password" required minlength="6" placeholder="再輸入一次新密碼" />
+      </div>
+      <button type="submit" class="btn primary block auth-submit-btn">儲存新密碼並進入</button>
+    `;
+    loginForm?.parentNode?.insertBefore(form, loginForm.nextSibling);
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const cur = String(fd.get('currentPassword') || '');
+      const next = String(fd.get('newPassword') || '');
+      const confirm = String(fd.get('confirmPassword') || '');
+      const errEl = $('#auth-error');
+      if (next !== confirm) {
+        if (errEl) {
+          errEl.textContent = '兩次新密碼不一致';
+          errEl.classList.remove('hidden');
+        }
+        return;
+      }
+      try {
+        await api('/api/auth/password', {
+          method: 'PUT',
+          body: { currentPassword: cur, newPassword: next },
+        });
+        form.classList.add('hidden');
+        if (loginForm) loginForm.classList.remove('hidden');
+        if (errEl) errEl.classList.add('hidden');
+        showMain({ requestPermission: true });
+        toast('密碼已更新', 'success');
+      } catch (err) {
+        if (errEl) {
+          errEl.textContent = err.message || '修改失敗';
+          errEl.classList.remove('hidden');
+        }
+      }
+    };
+  }
+  form.classList.remove('hidden');
+}
+
 function bindAuthUI() {
   $('#login-form').onsubmit = async (e) => {
     e.preventDefault();
@@ -11462,6 +11522,11 @@ function bindAuthUI() {
         body: { username: fd.get('username'), password: fd.get('password') },
       });
       setAuth('1', data.user);
+      if (data.mustChangePassword) {
+        showForceChangePassword();
+        toast('偵測到預設弱密碼，請先修改後再使用系統', 'error');
+        return;
+      }
       // 登入手勢下請求桌面通知權限
       showMain({ requestPermission: true });
       toast(`歡迎，${data.user.name}`, 'success');
@@ -11519,9 +11584,13 @@ async function boot() {
     /* ignore */
   }
   try {
-    const { user } = await api('/api/auth/me');
-    if (!user) throw new Error('no user');
-    setAuth('1', user);
+    const me = await api('/api/auth/me');
+    if (!me.user) throw new Error('no user');
+    setAuth('1', me.user);
+    if (me.mustChangePassword) {
+      showForceChangePassword();
+      return;
+    }
     loadDepartmentOptions();
     showMain();
   } catch (e) {

@@ -92,7 +92,7 @@ npm.cmd run build:installer
    （或只解壓 zip 後雙擊其中的 `install.bat`）
 2. 雙擊 **Install-ApprovalSystem.bat**
 3. 桌面捷徑「線上簽核系統」→ 自動啟動並開啟瀏覽器
-4. 預設帳號 `admin` / `admin123`
+4. 全新資料庫：帳號 `Admin`，初始密碼在 `data/.admin-bootstrap.txt`（登入後立刻改密並刪檔）
 
 - 安裝位置：`%LOCALAPPDATA%\ApprovalSystem`
 - 資料庫：`%LOCALAPPDATA%\ApprovalSystem\app\data\approval.db`（請定期備份）
@@ -102,10 +102,10 @@ npm.cmd run build:installer
 
 | 項目 | 值 |
 |------|-----|
-| 帳號 | `admin` |
-| 密碼 | `admin123` |
+| 帳號 | `Admin` |
+| 密碼 | 全新庫寫入 `data/.admin-bootstrap.txt`（不使用公開預設密碼） |
 
-**請登入後立即到「帳號設定」修改密碼。**
+**請登入後立即修改密碼，並刪除 `.admin-bootstrap.txt`。**
 
 ## 使用流程建議
 

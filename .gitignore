@@ -29,6 +29,7 @@ Thumbs.db
 
 # Runtime secrets / local data (never commit)
 data/.jwt-secret
+data/.admin-bootstrap.txt
 data/system-settings.json
 data/announcements/
 data/branding/
