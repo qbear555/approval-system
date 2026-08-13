@@ -131,6 +131,16 @@ child.stderr.on('data', (d) => process.stderr.write(d));
     const base = runtime.getAppBaseUrl();
     if (!/^https?:\/\//.test(String(base || ''))) throw new Error('getAppBaseUrl 無效: ' + base);
     runtime.resolveFinalNotifyJson({ enabled: false });
+    const fake = runtime.publicUser({
+      id: 1,
+      username: 'admin',
+      name: '系統管理員',
+      role: 'admin',
+      active: 1,
+      email: '',
+    });
+    if (!fake || !fake.username) throw new Error('publicUser 失敗');
+    runtime.getGrantorUserIdsForDelegate(1);
     const brand = await req('/api/system/branding');
     if (brand.status !== 200) throw new Error('branding ' + brand.status);
     const dept = await req('/api/departments');

@@ -3,7 +3,12 @@
  */
 const db = require('../db');
 const labor = require('../labor');
-const { isBuiltinAdminUser, isBuiltinAdminUsername } = require('../auth');
+const lineNotify = require('../line-notify');
+const {
+  isBuiltinAdminUser,
+  isBuiltinAdminUsername,
+  normalizeUsername,
+} = require('../auth');
 
 const PERMISSION_DEFS = [
   { id: 'workflows', label: '管理簽核流程', description: '建立／編輯／停用簽核流程模板' },
