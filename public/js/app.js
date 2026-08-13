@@ -705,7 +705,7 @@ async function refreshLineAccess() {
 /** 載入並套用系統品牌（公司名稱／Logo） */
 async function loadSystemSettings() {
   try {
-    const s = await api('/api/system/settings');
+    const s = await api('/api/system/branding');
     state.systemSettings = s || {};
     applySystemBranding(s);
     return s;
@@ -10903,8 +10903,8 @@ async function renderSystemSettings(body) {
           <span>包含歷史申請單、簽核歷程與附件</span>
         </label>
         <label class="check-row">
-          <input type="checkbox" id="pkg-export-mail-pass" checked />
-          <span>包含 SMTP 密碼</span>
+          <input type="checkbox" id="pkg-export-mail-pass" />
+          <span>包含 SMTP 密碼（明文寫入 JSON，預設不匯出）</span>
         </label>
         <button type="button" class="btn primary" id="btn-pkg-export" style="margin-top:4px">下載設定完整包（JSON）</button>
       </div>
@@ -11361,9 +11361,16 @@ async function renderSystemSettings(body) {
   $('#btn-pkg-export')?.addEventListener('click', async () => {
     const history = $('#pkg-export-history')?.checked ? '1' : '0';
     const mailSecrets = $('#pkg-export-mail-pass')?.checked ? '1' : '0';
+    if (mailSecrets === '1') {
+      const ok = confirm(
+        '將把 SMTP 密碼以明文寫入 JSON 設定包。\n檔案請勿放入一鍵安裝包或 Git。\n確定仍要匯出密碼？'
+      );
+      if (!ok) return;
+    }
     try {
+      const confirmMail = mailSecrets === '1' ? '1' : '0';
       const blob = await api(
-        `/api/system/package/export?includeHistory=${history}&includeMailSecrets=${mailSecrets}`,
+        `/api/system/package/export?includeHistory=${history}&includeMailSecrets=${mailSecrets}&confirmMailSecrets=${confirmMail}`,
         { expectBlob: true }
       );
       const url = URL.createObjectURL(blob);
@@ -11495,9 +11502,9 @@ async function boot() {
   } catch (e) {
     console.error('bindAuthUI', e);
   }
-  // 登入頁也套用公司名稱／Logo（公開 API）
+  // 登入頁只讀品牌（公司名／Logo／版本）；部門名單需登入後才載
   loadSystemSettings().catch(() => {});
-  loadDepartmentOptions();
+  if (state.token) loadDepartmentOptions();
   if (!state.token) {
     return;
   }

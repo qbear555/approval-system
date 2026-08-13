@@ -2,6 +2,12 @@
 
 ## [1.1.0] — 2026-08-13
 
+### P1 安全
+
+- **公開 API**：部門、台灣日曆、系統版本、完整系統設定改需登入。登入頁改讀 `/api/system/branding`（僅公司名／Logo／版本）。
+- **探活**：新增 `/health`、`/api/health`（檢查 SQLite）；Docker healthcheck 不再打 `/api/departments`。
+- **設定包**：預設不含 SMTP 密碼；勾選匯出密碼須再確認（`confirmMailSecrets=1`）。
+
 ### P0 安全
 
 - **JWT**：不再使用倉庫內公開預設密鑰。優先讀 `JWT_SECRET`（夠長且非已知弱值）；否則沿用或自動產生 `data/.jwt-secret`（不進 git、部署不覆蓋）。

@@ -75,7 +75,7 @@ if [[ "$MODE" == "docker" ]]; then
     docker-compose up -d --build
   fi
   sleep 4
-  curl -s -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${PORT:-3847}/api/departments" || true
+  curl -s -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${PORT:-3847}/health" || true
 elif [[ "$MODE" == "native" ]]; then
   info "更新 npm 依賴並重啟服務..."
   if [[ "$(id -u)" -eq 0 ]]; then

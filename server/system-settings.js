@@ -387,16 +387,14 @@ function logoPublicUrl(settings) {
   return DEFAULT_LOGO_URL;
 }
 
-function getPublicSettings() {
+/** 登入頁可用：公司名／Logo／版本，不含組織或簽章狀態 */
+function getBrandingSettings() {
   const s = loadRaw();
   const ver = require('./version').getVersionInfo();
   return {
     companyName: s.companyName,
     logoUrl: logoPublicUrl(s),
     hasCustomLogo: !!(s.logoFile && fs.existsSync(path.join(BRAND_DIR, s.logoFile))),
-    // 公開端只回「是否啟用簽章」，不回傳憑證／密碼
-    pdfSignEnabled: !!s.pdfSignEnabled,
-    // 版本宣告：主版號 + 自動建置指紋（改程式後重啟即變）
     version: ver.version,
     fullVersion: ver.fullVersion,
     versionLabel: ver.label,
@@ -406,6 +404,14 @@ function getPublicSettings() {
     versionBuiltAt: ver.builtAt,
     versionAuto: !!ver.auto,
     updatedAt: s.updatedAt,
+  };
+}
+
+function getPublicSettings() {
+  const s = loadRaw();
+  return {
+    ...getBrandingSettings(),
+    pdfSignEnabled: !!s.pdfSignEnabled,
   };
 }
 
@@ -851,6 +857,7 @@ function getBackupDir() {
 }
 
 module.exports = {
+  getBrandingSettings,
   getPublicSettings,
   getAdminSettings,
   updateSettings,

@@ -33,7 +33,7 @@ function getUserDepartments(userId) {
 }
 
 /** 建置匯出內容 */
-function buildPackage({ includeHistory = false, includeMailSecrets = true } = {}) {
+function buildPackage({ includeHistory = false, includeMailSecrets = false } = {}) {
   const departments = db
     .prepare(
       `SELECT id, name, sort_order, active FROM departments WHERE active = 1 ORDER BY sort_order, id`

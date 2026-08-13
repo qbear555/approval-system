@@ -948,6 +948,16 @@ app.use(cors());
 app.use(onlyoffice.createDocsProxy());
 app.use(express.json({ limit: '2mb' }));
 
+/** 探活（無需登入；勿改打業務 API） */
+app.get(['/health', '/api/health'], (req, res) => {
+  try {
+    db.prepare('SELECT 1 AS ok').get();
+    res.json({ ok: true, status: 'ok' });
+  } catch (e) {
+    res.status(503).json({ ok: false, status: 'db_error' });
+  }
+});
+
 /** 瀏覽器預設請求 /favicon.ico → 使用公司 Logo（自訂或預設 ARGO） */
 app.get(['/favicon.ico', '/favicon.png'], (req, res) => {
   try {
@@ -2666,10 +2676,9 @@ function isValidDepartment(name) {
 // ---------- Departments ----------
 /**
  * 台灣國定假日／補班（請假試算用）
- * GET 公開：前端 TwCalendar 啟動時載入
- * POST refresh：管理員強制從遠端更新
+ * GET：需登入；POST refresh：管理員強制從遠端更新
  */
-app.get('/api/tw-calendar', (req, res) => {
+app.get('/api/tw-calendar', authMiddleware, (req, res) => {
   res.json(twCalendar.getPublic());
 });
 
@@ -2686,8 +2695,7 @@ app.post('/api/tw-calendar/refresh', authMiddleware, adminOnly, async (req, res)
   }
 });
 
-app.get('/api/departments', (req, res) => {
-  // Public list for registration dropdown
+app.get('/api/departments', authMiddleware, (req, res) => {
   const departments = db
     .prepare(
       `SELECT id, name, sort_order FROM departments WHERE active = 1 ORDER BY sort_order ASC, id ASC`
@@ -3287,13 +3295,18 @@ const logoUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024, files: 1 },
 });
 
-/** 公開：公司名稱／Logo／版本（登入頁不需登入也可讀） */
-app.get('/api/system/settings', (req, res) => {
+/** 公開：登入頁品牌（公司名／Logo／版本），不含部門與簽章狀態 */
+app.get('/api/system/branding', (req, res) => {
+  res.json(systemSettings.getBrandingSettings());
+});
+
+/** 已登入：公司名稱／Logo／版本／是否啟用 PDF 簽章 */
+app.get('/api/system/settings', authMiddleware, (req, res) => {
   res.json(systemSettings.getPublicSettings());
 });
 
-/** 公開：應用程式版本宣告 */
-app.get('/api/system/version', (req, res) => {
+/** 已登入：應用程式版本宣告 */
+app.get('/api/system/version', authMiddleware, (req, res) => {
   res.json(appVersion.getVersionInfo());
 });
 
@@ -4781,7 +4794,8 @@ app.post('/api/workflows/import', authMiddleware, requirePerm('workflows'), (req
 // ---------- 系統設定完整包（僅系統管理員）----------
 /**
  * 匯出系統設定完整包
- * query/body: includeHistory=1 含歷史申請與附件；includeMailSecrets=0 不含 SMTP 密碼
+ * query: includeHistory=1 含歷史申請與附件
+ * 含 SMTP 密碼須同時 includeMailSecrets=1 且 confirmMailSecrets=1（預設不含）
  */
 app.get('/api/system/package/export', authMiddleware, builtinAdminOnly, (req, res) => {
   try {
@@ -4789,10 +4803,16 @@ app.get('/api/system/package/export', authMiddleware, builtinAdminOnly, (req, re
       req.query.includeHistory === '1' ||
       req.query.includeHistory === 'true' ||
       req.query.history === '1';
-    const includeMailSecrets = !(
-      req.query.includeMailSecrets === '0' ||
-      req.query.includeMailSecrets === 'false'
-    );
+    const wantMailSecrets =
+      req.query.includeMailSecrets === '1' || req.query.includeMailSecrets === 'true';
+    const confirmMailSecrets =
+      req.query.confirmMailSecrets === '1' || req.query.confirmMailSecrets === 'true';
+    const includeMailSecrets = wantMailSecrets && confirmMailSecrets;
+    if (wantMailSecrets && !confirmMailSecrets) {
+      return res.status(400).json({
+        error: '匯出 SMTP 密碼須再確認（confirmMailSecrets=1）',
+      });
+    }
     const pack = systemPackage.buildPackage({ includeHistory, includeMailSecrets });
     const tag = includeHistory ? '完整含歷史' : '設定';
     const fname = `簽核系統_${tag}包_${tz.today()}.json`;

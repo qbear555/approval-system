@@ -159,8 +159,8 @@ echo "[$(date)] approval-system certs refreshed from $SRC"
   console.log('\nHealth check from NAS...');
   await exec(
     conn,
-    'curl -s -o /dev/null -w "http_3847=%{http_code}\\n" http://127.0.0.1:3847/api/departments || true; ' +
-      'curl -s -o /dev/null -w "https_3848=%{http_code}\\n" https://127.0.0.1:3848/api/departments || true; ' +
+    'curl -s -o /dev/null -w "http_3847=%{http_code}\\n" http://127.0.0.1:3847/health || true; ' +
+      'curl -s -o /dev/null -w "https_3848=%{http_code}\\n" https://127.0.0.1:3848/health || true; ' +
       'echo | openssl s_client -connect 127.0.0.1:3848 -servername catshome.tw 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null || true'
   );
 

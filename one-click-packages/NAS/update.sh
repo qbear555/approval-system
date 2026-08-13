@@ -67,8 +67,8 @@ fi
 
 echo "[*] 等待服務..."
 sleep 5
-CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3847/api/departments 2>/dev/null || echo 000)"
-CODE2="$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:3848/api/departments 2>/dev/null || echo 000)"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3847/health 2>/dev/null || echo 000)"
+CODE2="$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:3848/health 2>/dev/null || echo 000)"
 echo "  HTTP  3847 -> $CODE"
 echo "  HTTPS 3848 -> $CODE2"
 

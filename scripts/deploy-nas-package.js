@@ -257,9 +257,9 @@ async function main() {
   console.log('\nHealth checks...');
   await exec(
     conn,
-    'curl -s -o /dev/null -w "http_3847=%{http_code}\\n" http://127.0.0.1:3847/api/departments || true; ' +
-      'curl -sk -o /dev/null -w "https_3848=%{http_code}\\n" https://127.0.0.1:3848/api/departments || true; ' +
-      'curl -s http://127.0.0.1:3847/api/system/version 2>/dev/null || curl -s http://127.0.0.1:3847/api/version 2>/dev/null || true'
+    'curl -s -o /dev/null -w "http_3847=%{http_code}\\n" http://127.0.0.1:3847/health || true; ' +
+      'curl -sk -o /dev/null -w "https_3848=%{http_code}\\n" https://127.0.0.1:3848/health || true; ' +
+      'curl -s http://127.0.0.1:3847/health 2>/dev/null || true'
   );
 
   conn.end();
