@@ -272,6 +272,9 @@ function buildApprovalDownloadFileName(request, { zip = false, hasAttachments } 
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
+  if (state.bearerToken && !headers.Authorization) {
+    headers.Authorization = `Bearer ${state.bearerToken}`;
+  }
   const isForm = options.body instanceof FormData;
   if (options.body && !isForm) {
     headers['Content-Type'] = 'application/json';
@@ -329,6 +332,8 @@ async function api(path, options = {}) {
 function setAuth(token, user) {
   state.token = user ? '1' : '';
   state.user = user;
+  if (token && token !== '1') state.bearerToken = token;
+  if (!user) state.bearerToken = '';
   try {
     localStorage.removeItem('approval_token');
   } catch {
@@ -2218,7 +2223,7 @@ function bindAuthUI() {
         method: 'POST',
         body: { username: fd.get('username'), password: fd.get('password') },
       });
-      setAuth('1', data.user);
+      setAuth(data.token || '1', data.user);
       if (data.mustChangePassword) {
         showForceChangePassword();
         toast('偵測到預設弱密碼，請先修改後再使用系統', 'error');

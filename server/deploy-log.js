@@ -342,5 +342,4 @@ module.exports = {
   getLatest,
   HISTORY_PATH,
   AUTO_MD_DATA,
-  AUTO_MD_DOCS,
 };
