@@ -883,6 +883,26 @@ function createSimpleTableKit(ctx, theme = {}) {
     y += metaH + 8;
   }
 
+  /** 版面介面：供 drawApproverComments 等共用區塊使用（y 需可讀寫） */
+  const surface = {
+    doc,
+    useFont,
+    C,
+    leftX,
+    contentW,
+    ensureSpace,
+    fillRect,
+    strokeRect,
+    textAt,
+    textMid,
+    get y() {
+      return y;
+    },
+    set y(v) {
+      y = v;
+    },
+  };
+
   function drawActionsHistory(actions) {
     const list = (actions || []).filter(
       (a) =>
@@ -890,6 +910,11 @@ function createSimpleTableKit(ctx, theme = {}) {
         (a.comment && !/Email 催辦/.test(a.comment || ''))
     );
     if (!list.length) return;
+    // 簽核人員填寫的意見另外完整列在歷程之上
+    drawApproverComments(surface, actions, () => {
+      textAt('簽核意見', leftX, y, contentW, { size: 11.5, color: C.header });
+      y += 16;
+    });
     ensureSpace(36);
     textAt('簽核歷程', leftX, y, contentW, {
       size: 11.5,
@@ -932,7 +957,7 @@ function createSimpleTableKit(ctx, theme = {}) {
         ACTION_LABEL[a.action] || a.action,
         actorLabel,
         String(a.created_at || '').replace('T', ' ').slice(0, 16),
-        a.comment || '—',
+        historyCommentCell(a),
       ];
       const widths = [
         colW.step,
@@ -1758,6 +1783,95 @@ function pickFormValue(formData, formFields, ids, labelRe) {
  * v2 圖模型的系統動作（匯合、路徑判定）不屬於任何編號關卡，
  * step_order 為 NULL，直接內插會在 PDF 上印出「null · 匯合」。
  */
+/** 簽核人未填意見時，系統自動代入的預設值（server/index.js） */
+const DEFAULT_APPROVAL_COMMENTS = new Set(['同意', '駁回']);
+/**
+ * 意見欄由簽核人自由填寫的動作。
+ * 不含 cosign／forward：它們的 comment 是系統組出來的加簽／轉簽紀錄，屬於歷程而非意見。
+ */
+const COMMENTABLE_ACTIONS = new Set(['approve', 'reject', 'return', 'cancel']);
+
+/**
+ * 取出簽核人員「實際填寫」的意見。
+ * 未填寫（系統預設的同意／駁回）、代理標記、Email 催辦通知一律視為沒有意見。
+ * @returns {string} 意見內容；沒有則為空字串
+ */
+function approverWrittenComment(a) {
+  if (!a || !COMMENTABLE_ACTIONS.has(a.action)) return '';
+  let s = String(a.comment || '').trim();
+  if (!s || /Email 催辦/.test(s)) return '';
+  // 代理簽核時系統會附加「(代理 某某 簽核)」，本身不算意見
+  s = s.replace(/\(代理\s*[^)]*簽核\)/g, '').trim();
+  if (!s || DEFAULT_APPROVAL_COMMENTS.has(s)) return '';
+  return s;
+}
+
+/**
+ * 簽核歷程表「意見」欄的顯示文字。
+ * 已完整列在上方「簽核意見」區塊的內容不再重複塞進窄欄，改為指向上方；
+ * 其餘（送出申請、加簽／轉簽、系統訊息、通知確認）仍照原樣顯示。
+ */
+function historyCommentCell(a) {
+  return approverWrittenComment(a) ? '詳見上方簽核意見' : a.comment || '—';
+}
+
+/** 篩出有填寫意見的簽核動作 */
+function actionsWithWrittenComments(actions) {
+  return (actions || [])
+    .map((action) => ({ action, text: approverWrittenComment(action) }))
+    .filter((x) => x.text);
+}
+
+/**
+ * 「簽核意見」區塊：把簽核人員填寫的意見完整列出，放在簽核歷程之上。
+ * 歷程表的「意見」欄寬度有限，長意見會被擠壓，這裡以整列寬度呈現全文。
+ * @param {object} s 版面介面（各版型自備）：需有 doc/useFont/C/leftX/contentW、
+ *   ensureSpace/fillRect/strokeRect/textAt/textMid，以及可讀寫的 y
+ * @param {Array} actions 簽核歷程
+ * @param {() => void} drawTitle 由呼叫端繪製標題（各版型標題樣式不同）
+ */
+function drawApproverComments(s, actions, drawTitle) {
+  const list = actionsWithWrittenComments(actions);
+  if (!list.length) return;
+  const { doc, useFont, C, leftX, contentW } = s;
+  const FS_TEXT = 10.5;
+  const HEAD_H = 17;
+  const PAD = 9;
+
+  s.ensureSpace(44);
+  drawTitle();
+
+  for (const { action: a, text } of list) {
+    const who = a.delegated_for_name
+      ? `${a.actor_name} (代 ${a.delegated_for_name})`
+      : a.actor_name || '—';
+    const time = String(a.created_at || '').replace('T', ' ').slice(0, 16);
+    useFont();
+    doc.fontSize(FS_TEXT);
+    const textW = contentW - PAD * 2;
+    const boxH = HEAD_H + doc.heightOfString(text, { width: textW }) + PAD + 2;
+    s.ensureSpace(boxH + 6);
+    const top = s.y;
+    s.fillRect(leftX, top, contentW, HEAD_H, C.altBg);
+    s.strokeRect(leftX, top, contentW, boxH, C.softLine, 0.5);
+    s.fillRect(leftX, top, 3, boxH, C.header);
+    s.textMid(`${formatStepCell(a)}　${who}`, leftX + PAD, top, contentW * 0.66, HEAD_H, {
+      size: 9.5,
+      color: C.softInk,
+    });
+    s.textMid(time, leftX + contentW * 0.66, top, contentW * 0.34 - PAD, HEAD_H, {
+      size: 9.5,
+      color: C.muted,
+      align: 'right',
+    });
+    s.textAt(text, leftX + PAD, top + HEAD_H + 5, textW, {
+      size: FS_TEXT,
+      color: C.ink,
+    });
+    s.y = top + boxH + 6;
+  }
+}
+
 /**
  * 簽核表格的「簽名」欄：有 base64 簽名圖就畫圖，
  * 沒有圖或圖片無法解碼則改印文字（drawText）。
@@ -2528,12 +2642,42 @@ function drawLeaveForm(ctx, request) {
   );
   y += 36;
 
-  // ========== 簽核歷程 ==========
+  // ========== 簽核意見 ／ 簽核歷程 ==========
   const actions = (request.actions || []).filter(
     (a) =>
       a.action !== 'comment' || (a.comment && !/Email 催辦/.test(a.comment || ''))
   );
   if (actions.length) {
+    // 簽核人員填寫的意見另外完整列在歷程之上
+    drawApproverComments(
+      {
+        doc,
+        useFont,
+        C,
+        leftX,
+        contentW,
+        ensureSpace,
+        fillRect,
+        strokeRect,
+        textAt,
+        textMid,
+        get y() {
+          return y;
+        },
+        set y(v) {
+          y = v;
+        },
+      },
+      request.actions,
+      () => {
+        fillRect(leftX, y, 4, 16, C.header);
+        textAt('簽核意見', leftX + 12, y, contentW - 16, {
+          size: 12,
+          color: C.headerDark,
+        });
+        y += 20;
+      }
+    );
     ensureSpace(40);
     fillRect(leftX, y, 4, 16, C.header);
     textAt('簽核歷程', leftX + 12, y, contentW - 16, {
@@ -2580,7 +2724,7 @@ function drawLeaveForm(ctx, request) {
         ACTION_LABEL[a.action] || a.action,
         actorLabel,
         String(a.created_at || '').replace('T', ' ').slice(0, 16),
-        a.comment || '—',
+        historyCommentCell(a),
       ];
       const widths = [
         colW.step,
