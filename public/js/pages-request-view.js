@@ -390,7 +390,24 @@ async function openOnlyOfficeEditor(attachmentId, requestId) {
         onDocumentStateChange: () => {},
         onError: (e) => {
           console.error('OnlyOffice error', e);
-          toast(e?.data || 'OnlyOffice 編輯器錯誤', 'error');
+          const code = e?.data?.errorCode ?? e?.data;
+          const map = {
+            '-1': '編輯器未知錯誤',
+            '-2': '連線逾時',
+            '-3': '文件轉換逾時',
+            '-4': '無法下載附件（請確認 OnlyOffice 能連回簽核系統）',
+            '-5': '文件識別錯誤，請關閉後重開',
+            '-6': '文件轉換失敗',
+            '-7': '檔案有密碼保護，無法線上開啟',
+            '-8': 'Document Server 資料庫錯誤',
+            '-9': '安全權杖錯誤（JWT 密鑰不一致）',
+          };
+          const msg =
+            map[String(code)] ||
+            e?.data?.errorDescription ||
+            (typeof e?.data === 'string' ? e.data : '') ||
+            'OnlyOffice 編輯器錯誤';
+          toast(msg, 'error');
         },
         onWarning: (e) => console.warn('OnlyOffice warning', e),
       },

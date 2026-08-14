@@ -86,21 +86,42 @@ if (CORS_ORIGINS.length) {
 
 /** 安全標頭（內網也套用；OnlyOffice 啟用時放行文件伺服器） */
 const OO_DOCS_URL = String(process.env.ONLYOFFICE_DOCS_URL || '').replace(/\/$/, '');
+function onlyOfficeCspExtras(docsUrl) {
+  const out = [];
+  const raw = String(docsUrl || '').replace(/\/$/, '');
+  if (!raw) return out;
+  out.push(raw);
+  try {
+    const u = new URL(raw);
+    out.push(`ws://${u.host}`, `wss://${u.host}`);
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  const extra = OO_DOCS_URL ? ` ${OO_DOCS_URL}` : '';
+  // Document Server 自己的 HTML／JS 不能套簽核 CSP（缺 unsafe-eval／wasm 會空白）
+  if (onlyoffice.isEnabled() && onlyoffice.isDocsProxyPath(req.url || req.path)) {
+    return next();
+  }
+  const extras = onlyOfficeCspExtras(OO_DOCS_URL);
+  const extra = extras.length ? ` ${extras.join(' ')}` : '';
+  const ooScript = onlyoffice.isEnabled()
+    ? " 'unsafe-eval' 'wasm-unsafe-eval' blob:"
+    : '';
   res.setHeader(
     'Content-Security-Policy',
     [
       "default-src 'self'",
-      `script-src 'self' 'unsafe-inline'${extra}`,
+      `script-src 'self' 'unsafe-inline'${ooScript}${extra}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
-      "font-src 'self' data:",
-      `connect-src 'self'${extra}`,
+      "font-src 'self' data: blob:",
+      `connect-src 'self' blob:${extra}`,
       `frame-src 'self' blob:${extra}`,
       `child-src 'self' blob:${extra}`,
       `worker-src 'self' blob:${extra}`,
@@ -175,7 +196,10 @@ app.use((req, res, next) => {
   if (
     req.path === '/api/health' ||
     req.path === '/api/system/branding' ||
-    req.path === '/api/system/logo'
+    req.path === '/api/system/logo' ||
+    // Document Server 用 token 抓檔／回存，來源是 docker 網段
+    req.path.startsWith('/api/onlyoffice/file/') ||
+    req.path === '/api/onlyoffice/callback'
   ) {
     return next();
   }

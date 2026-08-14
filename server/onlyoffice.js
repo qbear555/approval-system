@@ -182,10 +182,8 @@ function publicDocsBase(req) {
     }
   }
 
-  // HTTPS 簽核頁必須同源，否則混合內容會擋腳本
-  if (proto === 'https') return `${proto}://${host}`;
-  // HTTP 可直連 Document Server（略過代理）
-  return cfg.docsUrl;
+  // HTTP／HTTPS 都走同源代理：8088 常被防火牆擋，且跨主機會踩 CSP／混合內容
+  return `${proto}://${host}`;
 }
 
 function publicStatus(req) {
@@ -212,9 +210,13 @@ function isDocsProxyPath(urlPath) {
     p.startsWith('/web-apps') ||
     p.startsWith('/cache') ||
     p.startsWith('/sdkjs') ||
+    p.startsWith('/sdkjs-plugins') ||
     p.startsWith('/fonts') ||
+    p.startsWith('/dictionaries') ||
+    p.startsWith('/themes') ||
     p.startsWith('/common') ||
     p.startsWith('/downloadas') ||
+    p.startsWith('/printfile') ||
     p.startsWith('/coauthoring') ||
     p.startsWith('/docbuilder') ||
     p.startsWith('/welcome') ||
@@ -225,6 +227,7 @@ function isDocsProxyPath(urlPath) {
     p === '/doc' ||
     p.startsWith('/info') ||
     p.startsWith('/7.') ||
+    p.startsWith('/8.') ||
     p === '/healthcheck' ||
     p.startsWith('/healthcheck')
   );
@@ -278,6 +281,14 @@ function createDocsProxy() {
       // 不要把 upstream 的 connection 掛死
       delete out.connection;
       delete out['transfer-encoding'];
+      // 簽核 CSP 不可跟著代理出去，否則編輯器 iframe 被 unsafe-eval／wasm 擋下
+      try {
+        res.removeHeader('Content-Security-Policy');
+      } catch {
+        /* ignore */
+      }
+      delete out['content-security-policy'];
+      delete out['Content-Security-Policy'];
       // 改寫 Location: http://onlyoffice/... → https://catshome.tw:3848/...
       const locKey = out.location ? 'location' : out.Location ? 'Location' : null;
       if (locKey && out[locKey] && pubHost) {
