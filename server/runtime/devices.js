@@ -71,14 +71,49 @@ function listUserDevices(userId) {
     .all(userId);
 }
 
-/** 取得請求端 IP：未設 TRUST_PROXY 時不採信 X-Forwarded-For */
+function normalizeClientIp(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.startsWith('::ffff:')) s = s.slice(7);
+  if (s === '::1') return '127.0.0.1';
+  s = s.replace(/%[0-9a-zA-Z]+$/, '');
+  return s;
+}
 
+function isLoopbackIp(ip) {
+  const s = normalizeClientIp(ip);
+  return s === '127.0.0.1' || s === 'localhost' || s === '::1';
+}
+
+/** 從 X-Forwarded-For／X-Real-IP 取第一個看起來像 IP 的值 */
+function firstForwardedIp(headerVal) {
+  const parts = String(headerVal || '')
+    .split(',')
+    .map((s) => normalizeClientIp(s))
+    .filter(Boolean);
+  return parts[0] || '';
+}
+
+/**
+ * 取得請求端 IP。
+ * Synology Docker 埠對應會把來源變成 172.x.0.1，簽核服務需用 host 網路才能看到真實 IP。
+ * 僅在對端是本機（127.0.0.1）或明確 TRUST_PROXY 時才採信 X-Forwarded-For，
+ * 避免任意客戶端偽造稽核 IP。
+ */
 function getClientIp(req) {
   if (!req) return '127.0.0.1';
-  const raw = TRUST_PROXY
-    ? req.ip || req.socket?.remoteAddress
-    : req.socket?.remoteAddress || req.connection?.remoteAddress;
-  return String(raw || '127.0.0.1').replace(/^::ffff:/, '');
+  const socketIp = normalizeClientIp(
+    req.socket?.remoteAddress || req.connection?.remoteAddress || ''
+  );
+  const canTrustHop = TRUST_PROXY || isLoopbackIp(socketIp);
+  if (canTrustHop) {
+    const forwarded = firstForwardedIp(
+      req.headers['x-real-ip'] || req.headers['x-forwarded-for']
+    );
+    if (forwarded) return forwarded;
+    if (TRUST_PROXY && req.ip) return normalizeClientIp(req.ip) || '127.0.0.1';
+  }
+  return socketIp || '127.0.0.1';
 }
 
 /** 寫入系統進階稽核日誌 (P3-1) */

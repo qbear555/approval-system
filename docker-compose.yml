@@ -14,10 +14,10 @@ services:
     image: approval-system:1.1
     container_name: approval-system
     restart: unless-stopped
-    ports:
-      # 左邊 = 主機對外埠，可改；右邊固定容器內埠
-      - "3847:3847"   # HTTP
-      - "3848:3848"   # HTTPS（自簽／既有憑證，entrypoint 產生）
+    # host 網路：才能把真實客戶端 IP 寫進稽核日誌。
+    # Synology Docker 的 ports 對應會 SNAT 成 172.x.0.1，稽核會全記成閘道。
+    # 改 host 後 OnlyOffice 請用 127.0.0.1:8088／主機 LAN:3847（見下方預設）。
+    network_mode: host
     environment:
       - PORT=3847
       - HTTPS_PORT=3848
@@ -33,16 +33,14 @@ services:
       # OnlyOffice（預設關閉；啟用 profile 時請一併改 .env）
       - ONLYOFFICE_ENABLED=${ONLYOFFICE_ENABLED:-0}
       - ONLYOFFICE_DOCS_URL=${ONLYOFFICE_DOCS_URL:-http://127.0.0.1:8088}
-      - ONLYOFFICE_INTERNAL_URL=${ONLYOFFICE_INTERNAL_URL:-http://onlyoffice}
-      - ONLYOFFICE_APP_URL=${ONLYOFFICE_APP_URL:-http://approval-system:3847}
+      - ONLYOFFICE_INTERNAL_URL=${ONLYOFFICE_INTERNAL_URL:-http://127.0.0.1:8088}
+      - ONLYOFFICE_APP_URL=${ONLYOFFICE_APP_URL:-http://192.168.99.220:3847}
       - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-}
       - ONLYOFFICE_JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-1}
     volumes:
       # 持久化：資料庫、上傳附件、備份 PDF/ZIP、HTTPS 憑證
       # 更新時 NAS_SKIP_DB=1，禁止用種子庫覆寫此掛載
       - ./data:/app/data
-    networks:
-      - approval-net
     healthcheck:
       test:
         [
