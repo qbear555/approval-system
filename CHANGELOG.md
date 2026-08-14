@@ -28,6 +28,7 @@
 - HTTP 也改走同源代理（不再直連 `:8088`）。
 - `/api/onlyoffice/file`、`/callback` 略過內網 IP 檢查（容器用 token 抓檔）。
 - 編輯器錯誤改顯示可讀原因。
+- 父頁 HTML `Cache-Control: no-store`；若仍是舊 CSP 會自動重載一次（sdk-all 在父頁／Worker 裡 `new Function`）。
 
 ### 現況摘要
 

@@ -226,7 +226,16 @@ app.get(['/favicon.ico', '/favicon.png'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'img', 'argo-logo.png'));
 });
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use(
+  express.static(path.join(__dirname, '..', 'public'), {
+    setHeaders(res, filePath) {
+      if (/\.html?$/i.test(filePath)) {
+        // 避免快取舊 CSP，OnlyOffice 父頁／Worker 需要最新 script-src
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    },
+  })
+);
 
 // ---------- helpers ----------
 
@@ -266,6 +275,7 @@ app.get('*', (req, res) => {
   if (req.path.startsWith('/api')) {
     return res.status(404).json({ error: 'Not found' });
   }
+  res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 

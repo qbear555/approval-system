@@ -328,8 +328,29 @@ function closeOnlyOfficeEditor(reloadDetailId) {
   }
 }
 
+function onlyOfficeEvalAllowed() {
+  try {
+    return new Function('return 1')() === 1;
+  } catch {
+    return false;
+  }
+}
+
 async function openOnlyOfficeEditor(attachmentId, requestId) {
   try {
+    if (!onlyOfficeEvalAllowed()) {
+      try {
+        if (!sessionStorage.getItem('oo-csp-reload')) {
+          sessionStorage.setItem('oo-csp-reload', '1');
+          toast('瀏覽器安全政策已更新，正在重新載入頁面…', 'info');
+          setTimeout(() => location.reload(), 200);
+          return;
+        }
+      } catch {
+        /* sessionStorage 不可用 */
+      }
+      throw new Error('瀏覽器阻擋了線上編輯（CSP）。請按 Ctrl+F5 強制重新整理後再試');
+    }
     const data = await api(`/api/onlyoffice/editor/${attachmentId}`);
     if (!data?.config || !data.docsApiScript) {
       throw new Error(data?.error || '無法取得編輯器設定');
