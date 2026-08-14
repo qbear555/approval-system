@@ -18,6 +18,9 @@ const jwt = require('jsonwebtoken');
 const ROOT = path.join(__dirname, '..');
 const UPLOAD_DIR = path.join(ROOT, 'data', 'uploads');
 
+/** 同源代理掛載點；改此前綴可讓瀏覽器丟棄已快取、帶舊 CSP 的編輯器 HTML */
+const DOCS_MOUNT = '/__oo';
+
 const OFFICE_EXTS = new Set([
   'doc',
   'docx',
@@ -183,7 +186,8 @@ function publicDocsBase(req) {
   }
 
   // HTTP／HTTPS 都走同源代理：8088 常被防火牆擋，且跨主機會踩 CSP／混合內容
-  return `${proto}://${host}`;
+  // /__oo 前綴用來避開瀏覽器把舊 CSP 連 Document Server HTML 快取一年
+  return `${proto}://${host}${DOCS_MOUNT}`;
 }
 
 function publicStatus(req) {
@@ -198,10 +202,32 @@ function publicStatus(req) {
   };
 }
 
+function stripDocsMount(urlPath) {
+  const s = String(urlPath || '');
+  if (s === DOCS_MOUNT || s.startsWith(`${DOCS_MOUNT}/`) || s.startsWith(`${DOCS_MOUNT}?`)) {
+    return s.slice(DOCS_MOUNT.length) || '/';
+  }
+  return s;
+}
+
+function rewritePublicDocsPath(pathname) {
+  const p = String(pathname || '/');
+  if (p === DOCS_MOUNT || p.startsWith(`${DOCS_MOUNT}/`)) return p;
+  return `${DOCS_MOUNT}${p.startsWith('/') ? p : `/${p}`}`;
+}
+
 /** Document Server 靜態／即時通訊路徑（同源代理用） */
 function isDocsProxyPath(urlPath) {
+  const original = String(urlPath || '');
+  if (
+    original === DOCS_MOUNT ||
+    original.startsWith(`${DOCS_MOUNT}/`) ||
+    original.startsWith(`${DOCS_MOUNT}?`)
+  ) {
+    return true;
+  }
   // 去掉 querystring
-  const raw = String(urlPath || '').split('?')[0];
+  const raw = stripDocsMount(original).split('?')[0];
   // OnlyOffice 8.x 會在路徑前加版本碼，例如 /8.2.3-abc123/web-apps/...
   // 編輯器還會連 WebSocket：/8.2.3-xxx/doc/{key}/c/?EIO=4&transport=websocket
   const p = raw.replace(/^\/\d+\.\d+\.\d+-[a-f0-9]+(?=\/)/i, '');
@@ -271,7 +297,7 @@ function createDocsProxy() {
       protocol: target.protocol,
       hostname: target.hostname,
       port: target.port || (target.protocol === 'https:' ? 443 : 80),
-      path: req.url,
+      path: stripDocsMount(req.url) || '/',
       method: req.method,
       headers,
       timeout: 120000,
@@ -281,7 +307,7 @@ function createDocsProxy() {
       // 不要把 upstream 的 connection 掛死
       delete out.connection;
       delete out['transfer-encoding'];
-      // 簽核 CSP 不可跟著代理出去，否則編輯器 iframe 被 unsafe-eval／wasm 擋下
+      // 簽核 CSP 不可跟著代理出去；並禁止 DS 的一年快取把舊 CSP 鎖在瀏覽器
       try {
         res.removeHeader('Content-Security-Policy');
       } catch {
@@ -289,19 +315,27 @@ function createDocsProxy() {
       }
       delete out['content-security-policy'];
       delete out['Content-Security-Policy'];
-      // 改寫 Location: http://onlyoffice/... → https://catshome.tw:3848/...
+      delete out.etag;
+      delete out.ETag;
+      delete out.expires;
+      delete out.Expires;
+      out['cache-control'] = 'no-store';
+      out.pragma = 'no-cache';
+      // 改寫 Location: http://onlyoffice/web-apps → https://host/__oo/web-apps
       const locKey = out.location ? 'location' : out.Location ? 'Location' : null;
       if (locKey && out[locKey] && pubHost) {
         try {
-          const loc = new URL(String(out[locKey]), target);
+          const loc = new URL(String(out[locKey]), `${target.protocol}//${target.host}`);
+          const pubHostname = pubHost.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
           const internalHosts = new Set([
             target.hostname,
             'onlyoffice',
             'localhost',
             '127.0.0.1',
+            pubHostname,
           ]);
-          if (internalHosts.has(loc.hostname)) {
-            out[locKey] = `${pubProto}://${pubHost}${loc.pathname}${loc.search}${loc.hash}`;
+          if (internalHosts.has(loc.hostname) || isDocsProxyPath(loc.pathname)) {
+            out[locKey] = `${pubProto}://${pubHost}${rewritePublicDocsPath(loc.pathname)}${loc.search}${loc.hash}`;
           }
         } catch {
           /* keep original */
@@ -375,7 +409,7 @@ function attachDocsWsProxy(server) {
         protocol: target.protocol,
         hostname: target.hostname,
         port: target.port || (target.protocol === 'https:' ? 443 : 80),
-        path: req.url,
+        path: stripDocsMount(req.url) || '/',
         method: 'GET',
         headers,
         timeout: 120000,
@@ -641,11 +675,13 @@ function resolveAttachmentPath(att) {
 }
 
 module.exports = {
+  DOCS_MOUNT,
   getConfig,
   isEnabled,
   publicStatus,
   publicDocsBase,
   isDocsProxyPath,
+  stripDocsMount,
   createDocsProxy,
   attachDocsWsProxy,
   isOfficeAttachment,

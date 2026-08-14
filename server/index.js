@@ -110,9 +110,8 @@ app.use((req, res, next) => {
   }
   const extras = onlyOfficeCspExtras(OO_DOCS_URL);
   const extra = extras.length ? ` ${extras.join(' ')}` : '';
-  const ooScript = onlyoffice.isEnabled()
-    ? " 'unsafe-eval' 'wasm-unsafe-eval' blob:"
-    : '';
+  // OnlyOffice 編輯器（iframe／Worker）會 new Function；父頁同源時會套這條 CSP
+  const ooScript = " 'unsafe-eval' 'wasm-unsafe-eval' blob:";
   res.setHeader(
     'Content-Security-Policy',
     [

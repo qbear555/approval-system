@@ -29,6 +29,7 @@
 - `/api/onlyoffice/file`、`/callback` 略過內網 IP 檢查（容器用 token 抓檔）。
 - 編輯器錯誤改顯示可讀原因。
 - 父頁 HTML `Cache-Control: no-store`；若仍是舊 CSP 會自動重載一次（sdk-all 在父頁／Worker 裡 `new Function`）。
+- 編輯器改走 `/__oo/…` 並禁止 Document Server 一年快取；舊分頁會一直用帶舊 CSP 的 iframe HTML。
 
 ### 現況摘要
 

@@ -355,14 +355,20 @@ async function openOnlyOfficeEditor(attachmentId, requestId) {
     if (!data?.config || !data.docsApiScript) {
       throw new Error(data?.error || '無法取得編輯器設定');
     }
-    // HTTPS 頁面不可載入 http:// 腳本（混合內容）；改走同源 /web-apps
+    // HTTPS 不可載入 http://:8088（混合內容）；走同源 /__oo 以免命中舊 CSP 快取
     let scriptUrl = data.docsApiScript;
     if (
       typeof location !== 'undefined' &&
       location.protocol === 'https:' &&
       /^http:\/\//i.test(scriptUrl)
     ) {
-      scriptUrl = `${location.origin}/web-apps/apps/api/documents/api.js`;
+      scriptUrl = `${location.origin}/__oo/web-apps/apps/api/documents/api.js`;
+    } else if (
+      scriptUrl &&
+      scriptUrl.includes('/web-apps/') &&
+      !scriptUrl.includes('/__oo/')
+    ) {
+      scriptUrl = scriptUrl.replace('/web-apps/', '/__oo/web-apps/');
     }
     await loadOnlyOfficeScript(scriptUrl);
     if (!window.DocsAPI || !window.DocsAPI.DocEditor) {
