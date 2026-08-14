@@ -264,7 +264,7 @@ async function openAttachmentPreviewModal(attId, attName) {
       <button type="button" class="btn outline" data-close-modal>關閉</button>
     </div>
   `);
-  $('#modal-panel')?.classList.add('wide');
+  $('#modal-panel')?.classList.add('wide', 'modal-panel-att');
   const box = $('#att-preview-box');
   try {
     const meta = await api(`/api/attachments/${attId}?inline=1`, {
@@ -277,9 +277,9 @@ async function openAttachmentPreviewModal(attId, attName) {
     const isPdf = ct.includes('pdf') || /\.pdf$/i.test(name);
     if (box) {
       if (isPdf) {
-        box.innerHTML = `<iframe src="${url}" title="附件預覽" style="width:100%;height:min(70vh,560px);border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>`;
+        box.innerHTML = `<iframe class="att-preview-frame" src="${url}#view=FitH" title="附件預覽"></iframe>`;
       } else {
-        box.innerHTML = `<img src="${url}" alt="附件預覽" style="max-width:100%;max-height:min(70vh,560px);border-radius:8px;display:block;margin:0 auto" />`;
+        box.innerHTML = `<img class="att-preview-img" src="${url}" alt="附件預覽" />`;
       }
     }
     setTimeout(() => URL.revokeObjectURL(url), 120_000);

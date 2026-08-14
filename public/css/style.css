@@ -1101,6 +1101,31 @@ table.data tr.clickable { cursor: pointer; }
 }
 .modal-panel h3 { margin: 0 0 12px; }
 .modal-panel.wide { width: min(860px, 100%); }
+.modal-panel.modal-panel-att {
+  width: min(1240px, 96vw);
+  max-height: 96vh;
+  padding: 16px 18px 14px;
+}
+.att-preview-frame {
+  display: block;
+  width: 100%;
+  height: min(86vh, 960px);
+  min-height: 640px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+.att-preview-img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  max-height: min(86vh, 960px);
+  border-radius: 8px;
+}
+@media (max-width: 720px) {
+  .modal-panel.modal-panel-att { width: 100%; padding: 12px; }
+  .att-preview-frame { height: 78vh; min-height: 360px; }
+}
 .modal-panel.pending-notify {
   width: min(420px, 100%);
   text-align: center;
