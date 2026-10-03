@@ -428,13 +428,14 @@ const STATUTORY_LEAVE_RULES = [
 
 /**
  * 請假申請「天數／小時」最小計算單位（依假別）
- * - unit=hour, step=0.5：補休／公假／公傷／病假／事假（以小時為準）
+ * - unit=hour, step=0.5：補休／公假／公傷／病假（以小時為準）
+ * - 事假：天數與小時各自填寫，不依 7.5 小時自動換算
  * - unit=day,  step=0.5：特休
  * - unit=day,  step=1  ：產假／喪假／曠職
  * - 其餘假別：預設 0.5 日
  */
 const LEAVE_MIN_UNIT_BY_ID = {
-  personal: { unit: 'hour', step: 0.5 },
+  personal: { unit: 'hour', step: 0.5, noConvert: true },
   sick: { unit: 'hour', step: 0.5 },
   occupational: { unit: 'hour', step: 0.5 },
   official: { unit: 'hour', step: 0.5 },
@@ -489,6 +490,7 @@ function getLeaveMinUnit(typeNameOrId) {
     id: id || 'other',
     unit: base.unit,
     step: base.step,
+    noConvert: !!base.noConvert,
     label: leaveMinUnitLabel(base),
   };
 }
@@ -511,6 +513,31 @@ function normalizeLeaveDaysHours(leaveType, daysIn, hoursIn) {
   }
   if (days == null) days = 0;
   if (hours == null) hours = 0;
+
+  // 事假：天數與小時各自計算，不依 7.5 小時互轉
+  if (rule.noConvert || rule.id === 'personal') {
+    if (hours > 0) {
+      if (!isMultipleOfStep(hours, 0.5)) {
+        return {
+          ok: false,
+          error: '事假小時最小單位為 0.5 小時（例如 0、0.5、1、1.5、7.5）',
+          rule,
+        };
+      }
+      hours = snapToStep(hours, 0.5);
+    }
+    if (days > 0) {
+      if (!isMultipleOfStep(days, 0.5)) {
+        return {
+          ok: false,
+          error: '事假天數最小單位為 0.5 日（例如 0、0.5、1、1.5）',
+          rule,
+        };
+      }
+      days = snapToStep(days, 0.5);
+    }
+    return { ok: true, days, hours, rule };
+  }
 
   if (rule.unit === 'hour') {
     // 以小時為準（最小 0.5 小時）；若只填天數則換算
@@ -1038,6 +1065,7 @@ function sumUsedSpecialLeaveDays(userId, yearStart, yearEnd) {
     const ad = parseFormJson(r.approver_data_json);
     const leaveType = ad.hr_leave_type || fd.leave_type || fd.假別 || '';
     // 僅統計請假相關（有假別或標題含請假）
+    if (/作廢申請/.test(String(r.title || '')) || fd.void_target_id) continue;
     const looksLikeLeave =
       leaveType ||
       /請假/.test(String(r.title || '')) ||
@@ -1111,6 +1139,10 @@ function isTravelLikeRequest(requestRow, formData, leaveType) {
  */
 function isLeaveLikeRequest(requestRow, formData, leaveType) {
   if (isTravelLikeRequest(requestRow, formData, leaveType)) return false;
+  if (/作廢申請/.test(String(requestRow?.workflow_name || requestRow?.title || ''))) {
+    return false;
+  }
+  if (formData && formData.void_target_id) return false;
   const lt = String(leaveType || '').trim();
   if (lt) return true;
   if (/請假/.test(String(requestRow?.title || ''))) return true;
@@ -1147,6 +1179,7 @@ function sumUsedLeaveByType(userId, yearStart, yearEnd) {
     const leaveType = String(ad.hr_leave_type || fd.leave_type || fd.假別 || '').trim();
     // 流程名稱含出差也排除
     if (/出差|公差|旅費/i.test(String(r.workflow_name || ''))) continue;
+    if (/作廢申請/.test(String(r.workflow_name || ''))) continue;
     if (!isLeaveLikeRequest(r, fd, leaveType)) continue;
 
     const startStr =

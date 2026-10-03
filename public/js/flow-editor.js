@@ -475,7 +475,11 @@ function openFlowEditor(workflow, onSave) {
         '<option value="any" ' + (n.mode !== 'all' ? 'selected' : '') + '>任一人核准</option>' +
         '<option value="all" ' + (n.mode === 'all' ? 'selected' : '') + '>全部都要核准</option></select></div>' +
       (n.assignType === 'department'
-        ? '<div class="fe-row"><label>單位</label><input type="text" id="fe-n-dept" value="' + esc(n.department || '') + '" style="width:160px"/></div>' : '') +
+        ? '<div class="fe-row"><label>單位</label><select id="fe-n-dept" style="width:200px"><option value="">請選擇…</option>' +
+          (typeof collectWorkflowDeptNames === 'function' ? collectWorkflowDeptNames([n.department]) : [n.department].filter(Boolean))
+            .map((d) => '<option value="' + esc(d) + '" ' + (n.department === d ? 'selected' : '') + '>' + esc(d) + '</option>')
+            .join('') +
+          '</select></div>' : '') +
       (n.assignType === 'form_user'
         ? '<div class="fe-row"><label>表單欄位</label><input type="text" id="fe-n-field" value="' + esc(n.formFieldId || 'agent') + '" style="width:160px"/></div>' : '') +
       '<div class="fe-row"><label>駁回退回</label><select id="fe-n-rejectto">' +
@@ -488,7 +492,7 @@ function openFlowEditor(workflow, onSave) {
     document.getElementById('fe-n-assign').onchange = (ev) => { n.assignType = ev.target.value; render(); };
     document.getElementById('fe-n-mode').onchange = (ev) => { n.mode = ev.target.value; render(); };
     const dept = document.getElementById('fe-n-dept');
-    if (dept) dept.oninput = (ev) => { n.department = ev.target.value; };
+    if (dept) dept.onchange = (ev) => { n.department = ev.target.value; };
     const fld = document.getElementById('fe-n-field');
     if (fld) fld.oninput = (ev) => { n.formFieldId = ev.target.value; };
     document.getElementById('fe-n-rejectto').onchange = (ev) => { n.rejectTo = ev.target.value; };

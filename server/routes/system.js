@@ -662,7 +662,13 @@ app.get('/api/system/package/export', authMiddleware, builtinAdminOnly, (req, re
 /** 設定包上傳（multipart 檔案或 JSON body 皆可） */
 function uploadPackageMiddleware(req, res, next) {
   uploadPackage.single('package')(req, res, (err) => {
-    if (err) return res.status(400).json({ error: err.message || '上傳失敗' });
+    if (err) {
+      const msg =
+        err.code === 'LIMIT_FILE_SIZE'
+          ? '設定包檔案太大（上限 1GB）。請改匯出不含歷史的設定包，或向系統管理員確認檔案大小。'
+          : err.message || '上傳失敗';
+      return res.status(400).json({ error: msg });
+    }
     next();
   });
 }
@@ -670,6 +676,18 @@ function uploadPackageMiddleware(req, res, next) {
 /** 從上傳檔案／body 取出設定包 JSON；無法解析回傳 null */
 function readPackagePayload(req) {
   // 以記事本另存的 JSON 可能含 BOM，需先去除才能 parse
+  if (req.file?.path) {
+    try {
+      const text = fs.readFileSync(req.file.path, 'utf8').replace(/^\uFEFF/, '');
+      return JSON.parse(text);
+    } finally {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
   if (req.file?.buffer) {
     const text = req.file.buffer.toString('utf8').replace(/^\uFEFF/, '');
     return JSON.parse(text);

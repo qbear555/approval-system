@@ -1,124 +1,3 @@
-/**
- * 帳號設定／手寫簽名
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
-function openSignaturePadModal(opts = {}) {
-  const { title = '手寫電子簽名', initialImage = null, onSave } = opts;
-  const html = `
-    <div style="max-width:520px;width:100%;margin:0 auto">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3 style="margin:0">${esc(title)}</h3>
-        <button type="button" class="btn ghost sm" onclick="closeModal()">✕</button>
-      </div>
-      <p class="muted" style="margin:0 0 12px;font-size:0.88rem">
-        請在下方白板處以滑鼠或手指/觸控筆畫出您的簽名：
-      </p>
-      <div style="border:2px dashed #94a3b8;border-radius:12px;background:#fff;padding:6px;text-align:center;touch-action:none">
-        <canvas id="sig-pad-canvas" width="460" height="200" style="width:100%;max-width:460px;height:200px;display:block;margin:0 auto;cursor:crosshair;background:#ffffff;border-radius:8px;border:1px solid #e2e8f0"></canvas>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap">
-        <div>
-          <button type="button" class="btn outline sm" id="btn-sig-clear">🧹 清除重寫</button>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button type="button" class="btn ghost sm" onclick="closeModal()">取消</button>
-          <button type="button" class="btn primary sm" id="btn-sig-save">💾 確定儲存</button>
-        </div>
-      </div>
-    </div>
-  `;
-  openModal(html);
-
-  const canvas = $('#sig-pad-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 3;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#0f172a';
-
-  let isDrawing = false;
-  let hasDrawn = false;
-  let lastX = 0;
-  let lastY = 0;
-
-  if (initialImage) {
-    const img = new Image();
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      hasDrawn = true;
-    };
-    img.src = initialImage;
-  }
-
-  function getPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    if (e.touches && e.touches[0]) {
-      return {
-        x: (e.touches[0].clientX - rect.left) * scaleX,
-        y: (e.touches[0].clientY - rect.top) * scaleY,
-      };
-    }
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    };
-  }
-
-  function startDraw(e) {
-    e.preventDefault();
-    isDrawing = true;
-    const p = getPos(e);
-    lastX = p.x;
-    lastY = p.y;
-  }
-
-  function drawMove(e) {
-    if (!isDrawing) return;
-    e.preventDefault();
-    const p = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    lastX = p.x;
-    lastY = p.y;
-    hasDrawn = true;
-  }
-
-  function stopDraw(e) {
-    if (isDrawing) {
-      isDrawing = false;
-    }
-  }
-
-  canvas.addEventListener('mousedown', startDraw);
-  canvas.addEventListener('mousemove', drawMove);
-  canvas.addEventListener('mouseup', stopDraw);
-  canvas.addEventListener('mouseleave', stopDraw);
-
-  canvas.addEventListener('touchstart', startDraw, { passive: false });
-  canvas.addEventListener('touchmove', drawMove, { passive: false });
-  canvas.addEventListener('touchend', stopDraw);
-
-  $('#btn-sig-clear').onclick = () => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    hasDrawn = false;
-  };
-
-  $('#btn-sig-save').onclick = () => {
-    if (!hasDrawn && !initialImage) {
-      toast('請先在白板上手寫簽名', 'error');
-      return;
-    }
-    const dataUrl = canvas.toDataURL('image/png');
-    closeModal();
-    if (typeof onSave === 'function') onSave(dataUrl);
-  };
-}
-
 async function renderSettings(body) {
   const u = state.user || {};
   const depts =
@@ -133,67 +12,60 @@ async function renderSettings(body) {
     mailCfg = { enabled: false, ready: false };
   }
 
-  await loadUsers();
-  const allUsers = (state.users || []).filter((x) => x.active !== 0 && x.id !== u.id);
-
-  let delegationInfo = { activeDelegation: null, delegation: null, grantors: [] };
-  try {
-    delegationInfo = await api('/api/delegations/my');
-  } catch {
-    /* ignore */
-  }
-
   let userSig = u.signature_image || null;
   try {
     const sigRes = await api('/api/users/me/signature');
     userSig = sigRes.signature_image || userSig;
+    if (userSig) {
+      state.user = { ...(state.user || {}), signature_image: userSig, has_signature: true };
+    }
   } catch {
     /* ignore */
   }
 
-  const activeDel = delegationInfo.activeDelegation;
-  const rawDel = delegationInfo.delegation;
-  const grantors = delegationInfo.grantors || [];
-
-  const grantorText = grantors.length
-    ? grantors.map((g) => `<strong>${esc(g.grantor_name)}</strong>`).join('、')
-    : '';
-
-  let myDevices = [];
-  let accessCfg = {};
-  try {
-    const d = await api('/api/devices/my');
-    myDevices = d.devices || [];
-    accessCfg = d.access || {};
-  } catch {
-    /* ignore */
-  }
-
+  // 一般使用者不可改姓名／Email（僅系統管理員 role=admin 可改）
+  const canEditIdentity = isAdmin();
+  const roAttr = 'readonly disabled tabindex="-1"';
   body.innerHTML = `
     <div class="card" style="max-width:560px">
       <h3>我的資料</h3>
-      <p class="muted" style="margin-top:0">每位成員皆可自行修改姓名、Email、分機與電話。帳號與部門由管理員管理。</p>
+      <p class="muted" style="margin-top:0">${
+        canEditIdentity
+          ? '管理員可修改姓名、Email、分機與電話。帳號與部門請於「成員名單」管理。'
+          : '一般使用者<strong>無法修改姓名與 Email</strong>（由系統管理員設定）。您可更新分機、電話、通知偏好與密碼。'
+      }</p>
       <form id="profile-form" class="form-grid">
         <div class="field">
           <label>帳號</label>
-          <input type="text" value="${esc(u.username || '')}" disabled />
+          <input type="text" value="${esc(u.username || '')}" disabled class="input-readonly" />
         </div>
         <div class="field">
           <label>部門</label>
-          <input type="text" value="${esc(depts)}" disabled />
+          <input type="text" value="${esc(depts)}" disabled class="input-readonly" />
         </div>
         <div class="field">
           <label>角色</label>
-          <input type="text" value="${u.role === 'admin' ? '系統管理員' : '使用者'}" disabled />
+          <input type="text" value="${u.role === 'admin' ? '系統管理員' : '使用者'}" disabled class="input-readonly" />
         </div>
         <div class="field">
-          <label>姓名 *</label>
-          <input name="name" required maxlength="80" value="${esc(u.name || '')}" placeholder="顯示名稱" />
+          <label>姓名${canEditIdentity ? ' *' : ''}</label>
+          <input name="name" maxlength="80" value="${esc(u.name || '')}" placeholder="顯示名稱"
+            ${canEditIdentity ? 'required' : roAttr + ' class="input-readonly"'} />
+          ${
+            canEditIdentity
+              ? ''
+              : '<div class="muted" style="font-size:0.82rem;margin-top:4px">僅供檢視；如需更正請聯絡系統管理員</div>'
+          }
         </div>
         <div class="field">
           <label>Email</label>
-          <input name="email" type="email" maxlength="120" value="${esc(u.email || '')}" placeholder="選填，例：name@company.com" />
-          <div class="muted" style="font-size:0.82rem;margin-top:4px">用於接收簽核結果與待簽核提醒</div>
+          <input name="email" type="email" maxlength="120" value="${esc(u.email || '')}" placeholder="選填，例：name@company.com"
+            ${canEditIdentity ? '' : roAttr + ' class="input-readonly"'} />
+          <div class="muted" style="font-size:0.82rem;margin-top:4px">${
+            canEditIdentity
+              ? '用於接收簽核結果與待簽核提醒'
+              : '僅供檢視；用於通知。如需變更請聯絡系統管理員'
+          }</div>
         </div>
         <div class="field">
           <label>到職日</label>
@@ -231,12 +103,9 @@ async function renderSettings(body) {
         </div>
       </form>
     </div>
-
-    <!-- 客製化佈景主題 -->
     <div class="card" style="max-width:560px">
       <h3>🎨 客製化佈景主題</h3>
       <p class="muted" style="margin-top:0">點選下方主題即可即時預覽畫面效果，儲存後於此裝置自動持久化套用。</p>
-      
       <div id="theme-selector-grid" class="theme-grid">
         ${THEMES.map((t) => {
           const isSelected = t.id === (localStorage.getItem('approval_user_theme') || 'navy');
@@ -247,88 +116,31 @@ async function renderSettings(body) {
           <button type="button" class="btn ${isSelected ? 'primary active' : ''} theme-card" data-theme-id="${t.id}" style="${activeStyle}">
             <span class="theme-color-dot" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${isSelected ? '#ffffff' : t.vars['--primary']};box-shadow:0 0 0 1.5px rgba(255,255,255,0.6);"></span>
             <span>${t.name}</span>
-          </button>
-        `;
+          </button>`;
         }).join('')}
       </div>
-
       <div class="form-actions" style="margin-top:14px">
         <button type="button" class="btn primary" id="btn-save-theme">🎨 儲存並套用主題</button>
         <button type="button" class="btn outline" id="btn-reset-theme">還原預設藍調</button>
       </div>
     </div>
-
-    <!-- 簽核代理人設定 -->
-    <div class="card" style="max-width:560px">
-      <h3>🔄 簽核代理人機制</h3>
-      <p class="muted" style="margin-top:0">
-        出差或休假時，可設定代理同仁。代理期間到達後，原屬於您的待簽核單據將會自動出現在代理人的「待我簽核」清單中，並記錄代理簽核日誌。
+    <div class="card" style="max-width:560px" id="agent-settings-card">
+      <h3 style="margin-top:0">我的代理人</h3>
+      <p class="muted" style="margin-top:0;font-size:0.9rem">
+        此設定用於<strong>可代簽您的待辦</strong>。
+        <strong>代簽不含財務部發出的簽核</strong>（申請人或代申請人隸屬財務部者，代理人看不到、也不能代簽；仍須您本人處理）。
+        另：請假單表單「代理人」即<strong>職務代理人</strong>，於您請假起迄期間可代您簽核（同樣不含財務部發出的單）。
+        「代申請請假」無需此授權（任何人皆可於請假流程代同仁送出）。
+        不會更動已在簽核中的舊單據。
       </p>
-      ${
-        grantorText
-          ? `<div class="card" style="background:#eff6ff;border-color:#93c5fd;margin-bottom:14px;padding:12px">
-              <strong style="color:#1d4ed8">⚡ 代理授權通知</strong>
-              <div style="font-size:0.88rem;color:#1e40af;margin-top:4px">
-                下列同仁目前已將您設為簽核代理人：${grantorText}。<br/>
-                當對方有待簽核單據時，您可進入該單進行代理簽核。
-              </div>
-            </div>`
-          : ''
-      }
-      <form id="delegation-form" class="form-grid">
-        <div class="field">
-          <label>指定代理同仁 *</label>
-          <select name="delegate_user_id" required>
-            <option value="">請選擇代理同仁…</option>
-            ${allUsers
-              .map(
-                (usr) =>
-                  `<option value="${usr.id}" ${
-                    rawDel && rawDel.delegate_user_id === usr.id ? 'selected' : ''
-                  }>${esc(usr.name)}（${esc(usr.department || '未設部門')}）</option>`
-              )
-              .join('')}
-          </select>
-        </div>
-        <div class="field">
-          <label>代理開始時間（選填，留白即刻生效）</label>
-          <input type="datetime-local" name="start_time" value="${esc(
-            rawDel?.start_time ? String(rawDel.start_time).replace(' ', 'T') : ''
-          )}" />
-        </div>
-        <div class="field">
-          <label>代理結束時間（選填，留白永久生效）</label>
-          <input type="datetime-local" name="end_time" value="${esc(
-            rawDel?.end_time ? String(rawDel.end_time).replace(' ', 'T') : ''
-          )}" />
-        </div>
-        <div class="field" style="border:1px solid var(--border);border-radius:10px;padding:12px;background:#f8fafc">
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
-            <input type="checkbox" name="active" value="1" ${
-              !rawDel || rawDel.active ? 'checked' : ''
-            } />
-            <span>
-              <strong>啟用代理簽核功能</strong>
-              <div class="muted" style="font-size:0.85rem;margin-top:2px">取消勾選可暫停代理授權</div>
-            </span>
-          </label>
-        </div>
-        <div class="form-actions" style="display:flex;gap:10px">
-          <button type="submit" class="btn primary">儲存代理設定</button>
-          ${
-            rawDel && rawDel.active
-              ? `<button type="button" class="btn danger outline" id="btn-cancel-delegation">取消代理設定</button>`
-              : ''
-          }
-        </div>
-      </form>
+      <div id="agent-settings-body" class="muted">載入中…</div>
     </div>
-
-    <!-- 個人電子簽名檔 -->
-    <div class="card" style="max-width:560px">
+    ${
+      SIGNATURE_SETTINGS_ENABLED
+        ? `<div class="card" style="max-width:560px">
       <h3>✍️ 個人電子簽名檔</h3>
       <p class="muted" style="margin-top:0">
-        您可以先預設個人手寫電子簽名，簽核時系統將自動套用至簽核單與 exported PDF 檔案中；亦可選擇現場手寫。
+        可先設定個人手寫簽名。核准時預設套用此簽名；亦可選擇現場手寫。簽名會出現在簽核歷程與 PDF。
       </p>
       <div style="border:1px dashed #cbd5e1;border-radius:10px;padding:16px;background:#f8fafc;text-align:center;margin-bottom:14px">
         <div id="sig-preview-box">
@@ -349,7 +161,9 @@ async function renderSettings(body) {
             : ''
         }
       </div>
-    </div>
+    </div>`
+        : ''
+    }
     <div class="card" style="max-width:560px">
       <h3>變更密碼</h3>
       <form id="pw-form" class="form-grid">
@@ -367,7 +181,12 @@ async function renderSettings(body) {
         ${mailCfg.enabled && !mailCfg.ready ? '（管理員尚未完成 SMTP）' : ''}
       </p>
       <p class="muted" style="margin:8px 0 0;font-size:0.9rem;line-height:1.5">
-        請在上方填寫 Email 並勾選通知偏好。申請送出後，可在簽核詳情點「Email 催辦簽核人」。
+        ${
+          canEditIdentity
+            ? '請在上方填寫 Email 並勾選通知偏好。'
+            : 'Email 由管理員設定；請確認上方信箱正確並勾選通知偏好。'
+        }
+        申請送出後，可在簽核詳情點「Email 催辦簽核人」。
         ${
           isBuiltinAdmin()
             ? 'SMTP 與公司品牌請至<strong>系統設定</strong>管理（僅內建 Admin）。'
@@ -447,38 +266,29 @@ async function renderSettings(body) {
     </div>`;
 
   let selectedThemeId = localStorage.getItem('approval_user_theme') || 'navy';
-
-  // 點擊主題卡片即時切換與預覽（動態套用該主題專屬底色與白字）
   document.querySelectorAll('.theme-card').forEach((card) => {
     card.addEventListener('click', () => {
       selectedThemeId = card.dataset.themeId;
       document.querySelectorAll('.theme-card').forEach((c) => {
         c.classList.remove('active', 'primary');
         c.removeAttribute('style');
-        const themeId = c.dataset.themeId;
-        const themeObj = THEMES.find((t) => t.id === themeId);
+        const themeObj = THEMES.find((t) => t.id === c.dataset.themeId);
         const dot = c.querySelector('.theme-color-dot');
         if (dot && themeObj) dot.style.background = themeObj.vars['--primary'];
       });
-
       card.classList.add('active', 'primary');
       const curThemeObj = THEMES.find((t) => t.id === selectedThemeId) || THEMES[0];
       card.style.cssText = `background: linear-gradient(135deg, ${curThemeObj.vars['--primary']} 0%, ${curThemeObj.vars['--primary-hover']} 100%) !important; color: #ffffff !important; border-color: ${curThemeObj.vars['--primary-hover']} !important; box-shadow: 0 4px 14px ${curThemeObj.vars['--primary']}55 !important;`;
       const activeDot = card.querySelector('.theme-color-dot');
       if (activeDot) activeDot.style.background = '#ffffff';
-
       applyUserTheme(selectedThemeId, false);
     });
   });
-
-  // 儲存主題
   $('#btn-save-theme')?.addEventListener('click', () => {
     applyUserTheme(selectedThemeId, true);
     const themeObj = THEMES.find((t) => t.id === selectedThemeId) || THEMES[0];
     toast(`已成功套用「${themeObj.name}」客製化主題！`, 'success');
   });
-
-  // 還原預設主題
   $('#btn-reset-theme')?.addEventListener('click', () => {
     selectedThemeId = 'navy';
     applyUserTheme('navy', true);
@@ -488,103 +298,6 @@ async function renderSettings(body) {
     toast('已還原為預設經典藍調主題！', 'success');
   });
 
-  if (accessCfg.deviceBindEnabled) {
-    const box = document.createElement('div');
-    box.className = 'card';
-    box.style.maxWidth = '560px';
-    box.style.marginTop = '16px';
-    box.innerHTML = `
-      <h3>已綁定的電腦</h3>
-      <p class="muted" style="margin-top:0">此帳號最多 ${esc(String(accessCfg.deviceBindMax || 3))} 台。解除後需在該電腦重新登入才會再綁定。</p>
-      ${
-        myDevices.length
-          ? `<ul class="muted" style="padding-left:18px">${myDevices
-              .map(
-                (d) =>
-                  `<li style="margin:8px 0">${esc(d.label || '瀏覽器')} · ${esc(d.ip_address || '')} · 上次 ${esc(
-                    String(d.last_seen_at || '').replace('T', ' ')
-                  )} <button type="button" class="btn ghost sm" data-unbind="${d.id}">解除</button></li>`
-              )
-              .join('')}</ul>`
-          : '<p class="muted">尚無綁定紀錄（下次登入會登記此電腦）</p>'
-      }`;
-    body.appendChild(box);
-    box.querySelectorAll('[data-unbind]').forEach((btn) => {
-      btn.onclick = async () => {
-        if (!confirm('解除此電腦綁定？')) return;
-        try {
-          await api(`/api/devices/my/${btn.dataset.unbind}`, { method: 'DELETE' });
-          toast('已解除', 'success');
-          navigate('settings');
-        } catch (err) {
-          toast(err.message, 'error');
-        }
-      };
-    });
-  }
-
-  $('#profile-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    try {
-      const data = await api('/api/auth/profile', {
-        method: 'PUT',
-        body: {
-          name: fd.get('name'),
-          email: fd.get('email') || '',
-          extension: fd.get('extension') || '',
-          phone: fd.get('phone') || '',
-          email_notify: e.target.querySelector('#email-notify-pref')?.checked ? 1 : 0,
-        },
-      });
-      if (data.user) {
-        state.user = { ...state.user, ...data.user };
-        $('#user-name').textContent = data.user.name;
-        $('#user-avatar').textContent = (data.user.name || 'U').slice(0, 1);
-      }
-      toast('個人資料已更新', 'success');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  };
-
-  // 簽核代理人表單
-  $('#delegation-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const delegateId = Number(fd.get('delegate_user_id'));
-    if (!delegateId) {
-      toast('請選擇代理同仁', 'error');
-      return;
-    }
-    const startTime = fd.get('start_time') ? String(fd.get('start_time')).replace('T', ' ') : null;
-    const endTime = fd.get('end_time') ? String(fd.get('end_time')).replace('T', ' ') : null;
-    const active = !!e.target.querySelector('input[name=active]')?.checked;
-
-    try {
-      const res = await api('/api/delegations/my', {
-        method: 'POST',
-        body: { delegate_user_id: delegateId, start_time: startTime, end_time: endTime, active },
-      });
-      toast(res.message || '代理設定已儲存', 'success');
-      navigate('settings');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-
-  $('#btn-cancel-delegation')?.addEventListener('click', async () => {
-    if (!confirm('確定取消簽核代理設定？')) return;
-    try {
-      const res = await api('/api/delegations/my', { method: 'DELETE' });
-      toast(res.message || '已取消簽核代理設定', 'success');
-      navigate('settings');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-
-  // 電子簽名檔
   $('#btn-draw-signature')?.addEventListener('click', () => {
     openSignaturePadModal({
       title: '手寫個人電子簽名檔',
@@ -595,7 +308,7 @@ async function renderSettings(body) {
             method: 'POST',
             body: { signature_image: dataUrl },
           });
-          state.user = { ...state.user, signature_image: dataUrl };
+          state.user = { ...state.user, signature_image: dataUrl, has_signature: true };
           toast(res.message || '手寫電子簽名已儲存', 'success');
           navigate('settings');
         } catch (err) {
@@ -604,11 +317,9 @@ async function renderSettings(body) {
       },
     });
   });
-
   $('#btn-upload-sig-file')?.addEventListener('click', () => {
     $('#sig-file-input')?.click();
   });
-
   $('#sig-file-input')?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -624,7 +335,7 @@ async function renderSettings(body) {
           method: 'POST',
           body: { signature_image: dataUrl },
         });
-        state.user = { ...state.user, signature_image: dataUrl };
+        state.user = { ...state.user, signature_image: dataUrl, has_signature: true };
         toast(res.message || '簽名圖檔上傳成功', 'success');
         navigate('settings');
       } catch (err) {
@@ -633,18 +344,194 @@ async function renderSettings(body) {
     };
     reader.readAsDataURL(file);
   });
-
   $('#btn-clear-signature')?.addEventListener('click', async () => {
     if (!confirm('確定清除預設電子簽名檔？')) return;
     try {
       const res = await api('/api/users/me/signature', { method: 'DELETE' });
-      state.user = { ...state.user, signature_image: null };
+      state.user = { ...state.user, signature_image: null, has_signature: false };
       toast(res.message || '簽名檔已清除', 'success');
       navigate('settings');
     } catch (err) {
       toast(err.message, 'error');
     }
   });
+
+  $('#profile-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      extension: fd.get('extension') || '',
+      phone: fd.get('phone') || '',
+      email_notify: e.target.querySelector('#email-notify-pref')?.checked ? 1 : 0,
+    };
+    if (canEditIdentity) {
+      payload.name = fd.get('name');
+      payload.email = fd.get('email') || '';
+    } else {
+      payload.name = u.name || '';
+      payload.email = u.email || '';
+    }
+    try {
+      const data = await api('/api/auth/profile', {
+        method: 'PUT',
+        body: payload,
+      });
+      if (data.user) {
+        state.user = { ...state.user, ...data.user };
+        $('#user-name').textContent = data.user.name;
+        $('#user-avatar').textContent = (data.user.name || 'U').slice(0, 1);
+      }
+      toast('個人資料已更新', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
+  // 我的代理人
+  (async () => {
+    const box = $('#agent-settings-body');
+    if (!box) return;
+    try {
+      await loadUsers();
+      const data = await api('/api/agents/me');
+      const cur = data.myAgent;
+      const asFor = data.asAgentFor || [];
+      const users = (state.users || []).filter(
+        (x) => x.active !== 0 && x.id !== state.user?.id
+      );
+      const curId = cur?.agent_id || '';
+      box.innerHTML = `
+        <form id="agent-form" class="form-grid">
+          <div class="field">
+            <label>代理人</label>
+            <select name="agent_id" id="agent-select">
+              <option value="">（不設定）</option>
+              ${users
+                .map(
+                  (x) =>
+                    `<option value="${x.id}" ${
+                      Number(curId) === Number(x.id) ? 'selected' : ''
+                    }>${esc(x.name)}${
+                      x.department ? `（${esc(x.department)}）` : ''
+                    }</option>`
+                )
+                .join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>生效起（選填）</label>
+            <input type="datetime-local" name="start_at" value="${
+              cur?.start_at
+                ? esc(String(cur.start_at).replace(' ', 'T').slice(0, 16))
+                : ''
+            }" />
+          </div>
+          <div class="field">
+            <label>生效迄（選填）</label>
+            <input type="datetime-local" name="end_at" value="${
+              cur?.end_at
+                ? esc(String(cur.end_at).replace(' ', 'T').slice(0, 16))
+                : ''
+            }" />
+          </div>
+          <div class="field">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" name="can_approve" ${
+                !cur || cur.can_approve ? 'checked' : ''
+              } />
+              可代簽（處理我的待簽核；不含財務部發出的簽核）
+            </label>
+          </div>
+          <div class="field hidden">
+            <!-- 代申請請假已全面開放，不再依此勾選限制；保留欄位相容後端 -->
+            <input type="checkbox" name="can_submit_leave" checked />
+          </div>
+          <div class="field">
+            <label>備註</label>
+            <input name="note" maxlength="200" value="${esc(cur?.note || '')}" placeholder="選填" />
+          </div>
+          <div class="form-actions" style="gap:8px">
+            <button type="submit" class="btn primary">儲存代理人</button>
+            <button type="button" class="btn outline" id="btn-clear-agent">清除</button>
+          </div>
+        </form>
+        ${
+          asFor.length
+            ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+                <strong style="font-size:0.92rem">我目前可代理</strong>
+                <ul style="margin:8px 0 0;padding-left:18px">
+                  ${asFor
+                    .map(
+                      (a) =>
+                        `<li style="margin:4px 0">${esc(
+                          a.principal?.name || '#' + a.principal_id
+                        )}
+                        <span class="muted" style="font-size:0.82rem">
+                          ${
+                            a.source === 'leave_duty'
+                              ? '·請假職務代理'
+                              : `${a.can_approve ? '·代簽' : ''}${
+                                  a.can_submit_leave ? '·代請假' : ''
+                                }`
+                          }
+                          ${
+                            a.start_at || a.end_at
+                              ? `（${esc(
+                                  [a.start_at, a.end_at]
+                                    .filter(Boolean)
+                                    .map((x) => String(x).slice(0, 16))
+                                    .join('～')
+                                )}）`
+                              : ''
+                          }
+                        </span></li>`
+                    )
+                    .join('')}
+                </ul>
+              </div>`
+            : ''
+        }`;
+      $('#agent-form').onsubmit = async (ev) => {
+        ev.preventDefault();
+        const f = new FormData(ev.target);
+        const agentId = f.get('agent_id');
+        if (!agentId) {
+          toast('請選擇代理人，或按「清除」', 'error');
+          return;
+        }
+        try {
+          await api('/api/agents/me', {
+            method: 'PUT',
+            body: {
+              agent_id: Number(agentId),
+              start_at: f.get('start_at') || null,
+              end_at: f.get('end_at') || null,
+              can_approve: !!ev.target.querySelector('[name=can_approve]')?.checked,
+              can_submit_leave: !!ev.target.querySelector('[name=can_submit_leave]')
+                ?.checked,
+              note: f.get('note') || '',
+            },
+          });
+          toast('代理人已儲存', 'success');
+          navigate('settings');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      };
+      $('#btn-clear-agent').onclick = async () => {
+        if (!confirm('確定清除代理人設定？')) return;
+        try {
+          await api('/api/agents/me', { method: 'DELETE' });
+          toast('已清除代理人', 'success');
+          navigate('settings');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      };
+    } catch (err) {
+      box.innerHTML = `<div class="error-msg">${esc(err.message || '載入失敗')}</div>`;
+    }
+  })();
 
   // 桌面通知設定
   $('#desktop-notify-form')?.addEventListener('submit', (e) => {

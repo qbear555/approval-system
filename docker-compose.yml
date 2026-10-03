@@ -30,6 +30,12 @@ services:
       # 自簽憑證 CN / SAN（可依 NAS IP／網域調整）
       - SSL_CN=${SSL_CN:-192.168.99.220}
       - SSL_SAN=${SSL_SAN:-DNS:localhost,DNS:approval-system,DNS:catshome.tw,IP:127.0.0.1,IP:192.168.99.220}
+      - DB_CLIENT=${DB_CLIENT:-mysql}
+      - MYSQL_HOST=${MYSQL_HOST:-127.0.0.1}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-approval}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-Ww837*5630}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-approval}
       # OnlyOffice（預設關閉；啟用 profile 時請一併改 .env）
       - ONLYOFFICE_ENABLED=${ONLYOFFICE_ENABLED:-0}
       - ONLYOFFICE_DOCS_URL=${ONLYOFFICE_DOCS_URL:-http://127.0.0.1:8088}

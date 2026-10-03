@@ -1,0 +1,94 @@
+{
+  "format": "approval-system-workflow",
+  "version": 2,
+  "name": "福利金明細月報表",
+  "description": "製表人 → 財務部 → 副總經理 → 總經理",
+  "pdfLayout": {
+    "type": "welfare",
+    "label": "福利金明細月報表版面"
+  },
+  "formFields": [
+    {
+      "id": "opening_summary",
+      "label": "結轉摘要",
+      "type": "text",
+      "required": false,
+      "placeholder": "空白則自動帶入上月結轉"
+    },
+    {
+      "id": "period_month",
+      "label": "月份",
+      "type": "select",
+      "required": true,
+      "placeholder": "請選擇月份",
+      "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+    },
+    {
+      "id": "report_date",
+      "label": "製表日期",
+      "type": "date",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "opening_balance",
+      "label": "上月結轉餘額（元）",
+      "type": "number",
+      "required": true,
+      "placeholder": "請輸入上月結轉餘額"
+    },
+    {
+      "id": "welfare_items",
+      "label": "收支明細",
+      "type": "table",
+      "required": false,
+      "placeholder": ""
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "財務部",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "財務部",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "副總經理",
+      "assignType": "users_pick",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "",
+      "approverIds": [],
+      "approvers": [
+        { "username": "Luis", "name": "陳政宏" },
+        { "username": "luis", "name": "陳政宏" },
+        { "username": "Danny", "name": "陳牧晨" },
+        { "username": "danny", "name": "陳牧晨" }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "總經理",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "",
+      "approverIds": [],
+      "approvers": [
+        { "username": "Martin", "name": "陳明耀" },
+        { "username": "martin", "name": "陳明耀" }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ]
+}

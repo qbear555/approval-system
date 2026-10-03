@@ -3,7 +3,6 @@
  * 包含：部門、成員（含密碼雜湊與權限）、簽核流程、Email 設定
  * 可選：歷史申請單、簽核歷程、附件實體檔
  */
-const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
@@ -14,6 +13,26 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const FORMAT = 'approval-system-config-package';
 const VERSION = 1;
+const ALLOWED_REQUEST_STATUS = new Set([
+  'draft',
+  'pending',
+  'approved',
+  'rejected',
+  'cancelled',
+  'voided',
+]);
+const ALLOWED_ACTION = new Set([
+  'submit',
+  'approve',
+  'reject',
+  'cancel',
+  'return',
+  'comment',
+  'system',
+  'cosign',
+  'forward',
+  'void',
+]);
 
 function safeJsonParse(s, fallback) {
   try {
@@ -33,7 +52,7 @@ function getUserDepartments(userId) {
 }
 
 /** 建置匯出內容 */
-function buildPackage({ includeHistory = false, includeMailSecrets = false } = {}) {
+function buildPackage({ includeHistory = false, includeMailSecrets = true } = {}) {
   const departments = db
     .prepare(
       `SELECT id, name, sort_order, active FROM departments WHERE active = 1 ORDER BY sort_order, id`
@@ -233,7 +252,7 @@ function buildPackage({ includeHistory = false, includeMailSecrets = false } = {
   return {
     format: FORMAT,
     version: VERSION,
-    exportedAt: tz.nowIso(),
+    exportedAt: new Date().toISOString(),
     includeHistory: Boolean(includeHistory),
     includeMailSecrets: Boolean(includeMailSecrets && mailConfig && mailConfig.pass),
     summary: {
@@ -426,9 +445,9 @@ function importPackage(pack, options = {}) {
       result.users.updated++;
     } else {
       if (!hash) {
-        // 無雜湊時給一次性隨機密碼（匯入後須由管理員重設）
-        const { hashPassword, generateBootstrapPassword } = require('./auth');
-        const tempHash = hashPassword(generateBootstrapPassword());
+        // 無雜湊時給臨時密碼 pass1234
+        const bcrypt = require('bcryptjs');
+        const tempHash = bcrypt.hashSync('pass1234', 10);
         const info = db
           .prepare(
             `INSERT INTO users
@@ -638,7 +657,9 @@ function importPackage(pack, options = {}) {
           snapshot,
           r.approver_data_json || '{}',
           requesterId,
-          r.status || 'pending',
+          ALLOWED_REQUEST_STATUS.has(String(r.status || ''))
+            ? r.status
+            : 'pending',
           r.current_step || 1,
           r.notify_email === 0 ? 0 : 1,
           r.last_remind_at || null,
@@ -666,7 +687,7 @@ function importPackage(pack, options = {}) {
         a.step_order,
         a.step_name || '',
         actorId,
-        a.action,
+        ALLOWED_ACTION.has(String(a.action || '')) ? a.action : 'comment',
         a.comment || '',
         a.form_data || '{}',
         a.created_at || null

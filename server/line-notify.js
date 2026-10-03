@@ -2,23 +2,11 @@
  * LINE 通知（呼叫獨立服務 D:\Line 專案 /api/push）
  * 設定檔：data/line-config.json（執行期，不進一鍵安裝包）
  */
-const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const CONFIG_PATH = path.join(DATA_DIR, 'line-config.json');
-
-/**
- * LINE 通知僅內建 Admin 使用（設定頁＋推播對象）。
- * 開發階段（2026-08）：其他人即使已綁定也不推播。
- * 之後要開放全員：改成 false。
- */
-const LINE_NOTIFY_BUILTIN_ADMIN_ONLY = true;
-
-function isLineNotifyAllowedUsername(username) {
-  return String(username || '').trim().toLowerCase() === 'admin';
-}
 
 /** configAccess: builtin_admin | any_admin | permission */
 const DEFAULTS = {
@@ -45,7 +33,7 @@ function loadConfig() {
   ensureDir();
   try {
     if (!fs.existsSync(CONFIG_PATH)) return { ...DEFAULTS, events: { ...DEFAULTS.events } };
-    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     const events = { ...DEFAULTS.events, ...(raw.events || {}) };
     let access = String(raw.configAccess || DEFAULTS.configAccess);
     if (!['builtin_admin', 'any_admin', 'permission'].includes(access)) {
@@ -55,7 +43,7 @@ function loadConfig() {
       enabled: !!raw.enabled,
       serviceUrl: String(raw.serviceUrl || DEFAULTS.serviceUrl).replace(/\/$/, ''),
       apiKey: raw.apiKey != null ? String(raw.apiKey) : '',
-      configAccess: LINE_NOTIFY_BUILTIN_ADMIN_ONLY ? 'builtin_admin' : access,
+      configAccess: access,
       events,
       updatedAt: raw.updatedAt || null,
     };
@@ -83,9 +71,9 @@ function saveConfig(partial = {}) {
   if (!['builtin_admin', 'any_admin', 'permission'].includes(access)) {
     access = DEFAULTS.configAccess;
   }
-  next.configAccess = LINE_NOTIFY_BUILTIN_ADMIN_ONLY ? 'builtin_admin' : access;
+  next.configAccess = access;
   next.enabled = !!next.enabled;
-  next.updatedAt = tz.nowIso();
+  next.updatedAt = new Date().toISOString();
   ensureDir();
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
   return next;
@@ -96,10 +84,7 @@ function publicConfig(cfg = loadConfig()) {
     enabled: !!cfg.enabled,
     serviceUrl: cfg.serviceUrl || DEFAULTS.serviceUrl,
     hasApiKey: Boolean(cfg.apiKey),
-    configAccess: LINE_NOTIFY_BUILTIN_ADMIN_ONLY
-      ? 'builtin_admin'
-      : cfg.configAccess || DEFAULTS.configAccess,
-    adminOnly: LINE_NOTIFY_BUILTIN_ADMIN_ONLY,
+    configAccess: cfg.configAccess || DEFAULTS.configAccess,
     events: { ...DEFAULTS.events, ...(cfg.events || {}) },
     ready: isReady(cfg),
     updatedAt: cfg.updatedAt || null,
@@ -133,17 +118,6 @@ async function push(opts = {}) {
   const cfg = loadConfig();
   if (!isReady(cfg)) {
     return { ok: false, skipped: true, error: 'LINE 通知未啟用或設定不完整' };
-  }
-  if (
-    LINE_NOTIFY_BUILTIN_ADMIN_ONLY &&
-    opts.username &&
-    !isLineNotifyAllowedUsername(opts.username)
-  ) {
-    return {
-      ok: false,
-      skipped: true,
-      error: 'LINE 通知目前僅內建 Admin 使用',
-    };
   }
   const url = `${cfg.serviceUrl}/api/push`;
   const body = {};
@@ -284,27 +258,6 @@ async function testPush({ username, lineUserId, text }) {
   });
 }
 
-async function unbindUsername(username) {
-  const cfg = loadConfig();
-  if (!cfg.serviceUrl || !cfg.apiKey) {
-    return { ok: false, error: '尚未設定 LINE 服務' };
-  }
-  const u = String(username || '').trim();
-  if (!u) return { ok: false, error: '請指定簽核帳號' };
-  try {
-    const res = await fetch(`${cfg.serviceUrl}/api/bind/${encodeURIComponent(u)}`, {
-      method: 'DELETE',
-      headers: { 'X-Api-Key': cfg.apiKey },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 404) return { ok: false, error: '此帳號尚未綁定 LINE' };
-    if (!res.ok) return { ok: false, error: data.error || `HTTP ${res.status}` };
-    return { ok: true, binding: data.binding || null };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
 async function fetchBindings() {
   const cfg = loadConfig();
   if (!cfg.serviceUrl || !cfg.apiKey) {
@@ -336,8 +289,6 @@ async function healthCheck() {
 
 module.exports = {
   DEFAULTS,
-  LINE_NOTIFY_BUILTIN_ADMIN_ONLY,
-  isLineNotifyAllowedUsername,
   loadConfig,
   saveConfig,
   publicConfig,
@@ -350,6 +301,5 @@ module.exports = {
   notifyApproversLine,
   testPush,
   fetchBindings,
-  unbindUsername,
   healthCheck,
 };

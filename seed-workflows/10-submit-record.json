@@ -1,0 +1,54 @@
+{
+  "format": "approval-system-workflow",
+  "version": 2,
+  "name": "呈交紀錄表",
+  "description": "申請人 → 副總經理 → 總經理",
+  "pdfLayout": {
+    "type": "auto",
+    "label": "依流程名稱自動判斷"
+  },
+  "formFields": [
+    {
+      "id": "submit_year",
+      "label": "年份",
+      "type": "select",
+      "required": true,
+      "placeholder": "請選擇年份",
+      "options": ["2024", "2025", "2026", "2027", "2028"]
+    },
+    {
+      "id": "submit_month",
+      "label": "呈交月份",
+      "type": "select",
+      "required": true,
+      "placeholder": "請選擇月份",
+      "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "副總經理",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "副總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "總經理",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ]
+}

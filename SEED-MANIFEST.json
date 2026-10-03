@@ -1,0 +1,330 @@
+{
+  "format": "approval-system-seed",
+  "version": 3,
+  "createdAt": "2026-07-18T09:31:08.435Z",
+  "description": "乾淨種子：成員名單（含權限／到職／特休已休）、部門、申請表單與簽核流程；不含任何簽核紀錄、附件與備份",
+  "counts": {
+    "users": 26,
+    "workflows": 7,
+    "departments": 10,
+    "requests": 0,
+    "attachments": 0,
+    "actions": 0,
+    "uploadFiles": 0,
+    "backupFiles": 0
+  },
+  "workflows": [
+    {
+      "id": 4,
+      "name": "請假申請"
+    },
+    {
+      "id": 5,
+      "name": "請購申請"
+    },
+    {
+      "id": 6,
+      "name": "一般簽呈"
+    },
+    {
+      "id": 7,
+      "name": "費用報支"
+    },
+    {
+      "id": 8,
+      "name": "出差申請"
+    },
+    {
+      "id": 9,
+      "name": "延長工時申請"
+    },
+    {
+      "id": 10,
+      "name": "電腦異常報修申請"
+    }
+  ],
+  "departments": [
+    {
+      "id": 1,
+      "name": "管理部"
+    },
+    {
+      "id": 2,
+      "name": "工程部"
+    },
+    {
+      "id": 3,
+      "name": "採購部"
+    },
+    {
+      "id": 4,
+      "name": "業務部"
+    },
+    {
+      "id": 5,
+      "name": "財務部"
+    },
+    {
+      "id": 18,
+      "name": "倉管部"
+    },
+    {
+      "id": 43,
+      "name": "副總經理"
+    },
+    {
+      "id": 45,
+      "name": "總經理室"
+    },
+    {
+      "id": 46,
+      "name": "外銷部"
+    },
+    {
+      "id": 251,
+      "name": "人事單位"
+    }
+  ],
+  "users": [
+    {
+      "id": 1,
+      "username": "admin",
+      "name": "系統管理員",
+      "department": "管理部",
+      "role": "admin",
+      "email": "admin@test.local",
+      "hire_date": null
+    },
+    {
+      "id": 2,
+      "username": "alice",
+      "name": "???",
+      "department": "???",
+      "role": "user",
+      "email": "",
+      "hire_date": null
+    },
+    {
+      "id": 3,
+      "username": "steven",
+      "name": "張祖銘",
+      "department": "管理部",
+      "role": "admin",
+      "email": "tsuming@catshome.tw",
+      "hire_date": "2011-01-02"
+    },
+    {
+      "id": 4,
+      "username": "allen",
+      "name": "陳子安",
+      "department": "工程部",
+      "role": "user",
+      "email": "chenza@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 5,
+      "username": "judy",
+      "name": "林麗淑",
+      "department": "採購部",
+      "role": "user",
+      "email": "linls@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 6,
+      "username": "claire",
+      "name": "林秀美",
+      "department": "倉管部",
+      "role": "user",
+      "email": "linxm@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 7,
+      "username": "luis",
+      "name": "陳政宏",
+      "department": "副總經理",
+      "role": "user",
+      "email": "tsuming@catshome.tw",
+      "hire_date": null
+    },
+    {
+      "id": 8,
+      "username": "gigi",
+      "name": "張美雯",
+      "department": "財務部",
+      "role": "user",
+      "email": "gigi@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 9,
+      "username": "danny",
+      "name": "陳牧晨",
+      "department": "副總經理",
+      "role": "user",
+      "email": "tsuming@catshome.tw",
+      "hire_date": null
+    },
+    {
+      "id": 10,
+      "username": "martin",
+      "name": "陳明耀",
+      "department": "總經理室",
+      "role": "user",
+      "email": "tsuming@catshome.tw",
+      "hire_date": null
+    },
+    {
+      "id": 11,
+      "username": "betty",
+      "name": "陳怡靜",
+      "department": "倉管部",
+      "role": "user",
+      "email": "Betty@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 12,
+      "username": "vivian",
+      "name": "闋淑燕",
+      "department": "業務部",
+      "role": "user",
+      "email": "Vivian@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 13,
+      "username": "vikky",
+      "name": "沈正儀",
+      "department": "外銷部",
+      "role": "user",
+      "email": "Vikky@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 14,
+      "username": "lydia",
+      "name": "蘇玲子",
+      "department": "業務部",
+      "role": "user",
+      "email": "Lydia@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 15,
+      "username": "joan",
+      "name": "詹慈敏",
+      "department": "財務部",
+      "role": "user",
+      "email": "Joan@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 16,
+      "username": "sam",
+      "name": "潘柏成",
+      "department": "業務部",
+      "role": "user",
+      "email": "Sam@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 17,
+      "username": "mars",
+      "name": "連煒巨",
+      "department": "業務部",
+      "role": "user",
+      "email": "Mars@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 18,
+      "username": "linda",
+      "name": "林若妤",
+      "department": "業務部",
+      "role": "user",
+      "email": "Linda@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 19,
+      "username": "robin",
+      "name": "邱文昭",
+      "department": "業務部",
+      "role": "user",
+      "email": "Robin@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 20,
+      "username": "ray",
+      "name": "楊宗憲",
+      "department": "業務部",
+      "role": "user",
+      "email": "Ray@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 21,
+      "username": "debby",
+      "name": "蘇佑真",
+      "department": "採購部",
+      "role": "user",
+      "email": "Debby@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 22,
+      "username": "syo",
+      "name": "舒秉翔",
+      "department": "工程部",
+      "role": "user",
+      "email": "Syo@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 23,
+      "username": "vic",
+      "name": "林士楷",
+      "department": "業務部",
+      "role": "user",
+      "email": "Vic@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 24,
+      "username": "sindy",
+      "name": "褚亞欣",
+      "department": "外銷部",
+      "role": "user",
+      "email": "Sindy@example.local",
+      "hire_date": null
+    },
+    {
+      "id": 25,
+      "username": "ping",
+      "name": "吳蕙萍",
+      "department": "業務部",
+      "role": "user",
+      "email": "Ping@example.local",
+      "hire_date": "2014-06-19"
+    },
+    {
+      "id": 26,
+      "username": "doris",
+      "name": "賴香蓮",
+      "department": "業務部",
+      "role": "user",
+      "email": "Doris@example.local",
+      "hire_date": null
+    }
+  ],
+  "loginHints": {
+    "admin": "admin / admin123",
+    "others": "多數帳號預設密碼 pass1234（若曾修改以實際為準）",
+    "windowsUrl": "http://127.0.0.1:8080/",
+    "dockerUrl": "http://127.0.0.1:3847/"
+  }
+}

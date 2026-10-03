@@ -1,0 +1,32 @@
+{
+  "format": "approval-system-workflow",
+  "version": 1,
+  "name": "作廢申請",
+  "description": "選定一筆已核准申請，由該單實際簽核人依序再簽；全部通過後，原單自動改為已作廢。",
+  "formFields": [
+    {
+      "id": "void_target_id",
+      "label": "欲作廢之已核准申請單",
+      "type": "text",
+      "required": true,
+      "placeholder": "請選擇已核准申請單"
+    },
+    {
+      "id": "reason",
+      "label": "作廢原因",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "請說明作廢原因"
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "原單簽核人",
+      "assignType": "users",
+      "approverIds": [],
+      "mode": "any",
+      "skipIfNoApprover": true
+    }
+  ]
+}

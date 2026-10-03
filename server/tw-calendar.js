@@ -10,7 +10,6 @@
  * 每年 6–8 月官方公告次年後，遠端資料集通常會更新；
  * 本模組啟動時與每日檢查，自動拉取「前年～次年」（7 月後含後年）。
  */
-const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 
@@ -337,7 +336,7 @@ async function refresh(opts = {}) {
       makeup: [...allMakeup].sort(),
       years: okYears,
       items: allItems,
-      updatedAt: tz.nowIso(),
+      updatedAt: new Date().toISOString(),
       source: sources[0] || 'remote',
       sources,
       errors,

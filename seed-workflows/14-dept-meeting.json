@@ -1,0 +1,99 @@
+{
+  "format": "approval-system-workflow",
+  "version": 2,
+  "name": "會議記錄",
+  "description": "申請人 → 與會人員 → 副總經理 → 總經理",
+  "pdfLayout": {
+    "type": "dept_meeting",
+    "label": "會議記錄版面"
+  },
+  "formFields": [
+    {
+      "id": "meeting_subject",
+      "label": "會議主題",
+      "type": "text",
+      "required": true,
+      "placeholder": "例如：業務部 115年8月部門月會"
+    },
+    {
+      "id": "chair",
+      "label": "主席",
+      "type": "text",
+      "required": true,
+      "placeholder": "請填寫主席"
+    },
+    {
+      "id": "meeting_date",
+      "label": "會議時間",
+      "type": "date",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "meeting_place",
+      "label": "會議地點",
+      "type": "text",
+      "required": true,
+      "placeholder": "例如：會議室"
+    },
+    {
+      "id": "attendee_ids",
+      "label": "與會人員",
+      "type": "text",
+      "required": false,
+      "placeholder": "勾選與會人員（申請人除外，列入出席並須簽核）"
+    },
+    {
+      "id": "minutes",
+      "label": "會議討論內容摘要及決議",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "請填寫討論摘要與決議，可插入表格"
+    },
+    {
+      "id": "followup_items",
+      "label": "後續交辦事項",
+      "type": "table",
+      "required": false,
+      "placeholder": ""
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "與會人員",
+      "assignType": "users_pick",
+      "mode": "all",
+      "formFieldId": "attendee_ids",
+      "department": "",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": true
+    },
+    {
+      "order": 2,
+      "name": "副總經理",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "副總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "總經理",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ]
+}

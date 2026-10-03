@@ -1,205 +1,3 @@
-/**
- * 部門
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
-async function refreshDeptLists() {
-  try {
-    await loadDepartmentOptions();
-  } catch {
-    /* ignore */
-  }
-}
-
-function openAddDeptModal() {
-  openModal(`
-    <h3>新增部門</h3>
-    <form id="add-dept-form" class="form-grid">
-      <div class="field">
-        <label>部門名稱 *</label>
-        <input name="name" required maxlength="40" placeholder="例如：人資部、品保部" />
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="btn primary">建立</button>
-        <button type="button" class="btn outline" data-close-modal>取消</button>
-      </div>
-    </form>
-  `);
-  $('#add-dept-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    try {
-      await api('/api/departments', { method: 'POST', body: { name: fd.get('name') } });
-      closeModal();
-      toast('部門已新增', 'success');
-      await refreshDeptLists();
-      navigate('departments');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  };
-}
-
-function openRenameDeptModal(dept) {
-  openModal(`
-    <h3>修改部門名稱</h3>
-    <p class="muted" style="margin-top:0">原名稱：${esc(dept.name)}</p>
-    <form id="rename-dept-form" class="form-grid">
-      <div class="field">
-        <label>新部門名稱 *</label>
-        <input name="name" required maxlength="40" value="${esc(dept.name)}" />
-      </div>
-      <p class="muted" style="font-size:0.85rem;margin:0">修改後，此部門下所有成員的「所屬部門」會一併更新。</p>
-      <div class="form-actions">
-        <button type="submit" class="btn primary">儲存</button>
-        <button type="button" class="btn outline" data-close-modal>取消</button>
-      </div>
-    </form>
-  `);
-  $('#rename-dept-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    try {
-      await api(`/api/departments/${dept.id}`, {
-        method: 'PUT',
-        body: { name: fd.get('name') },
-      });
-      closeModal();
-      toast('部門名稱已更新', 'success');
-      await refreshDeptLists();
-      navigate('departments');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  };
-}
-
-/**
- * 從「已註冊成員名單」勾選後加入部門
- * 同一人可同時隸屬多個部門（可重複加入不同部門）
- */
-function openAddUserToDeptModal(dept, allUsers) {
-  const deptName = dept.name;
-  const deptId = dept.id;
-  const inDept = (u) => {
-    const list = Array.isArray(u.departments) ? u.departments : [];
-    return list.includes(deptName) || u.department === deptName;
-  };
-  // 可選：尚未在此部門的已註冊成員（即使已在其他部門也可選）
-  const candidates = (allUsers || [])
-    .filter((u) => u.active !== 0 && !inDept(u))
-    .slice()
-    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
-
-  if (!candidates.length) {
-    toast('沒有可加入的已註冊成員（可能都已在此部門，或請先到「成員名單」新增帳號）', 'error');
-    return;
-  }
-
-  openModal(`
-    <h3>從成員名單加入「${esc(deptName)}」</h3>
-    <p class="muted" style="margin-top:0">
-      勾選<strong>已註冊成員</strong>加入此部門（不新建帳號）。<br/>
-      <strong>同一人可同時隸屬多個部門</strong>；已在其他部門的人也可再加入這裡。
-    </p>
-    <form id="add-user-form" class="form-grid">
-      <div class="field">
-        <label>搜尋成員</label>
-        <input type="search" id="member-search" placeholder="輸入姓名或帳號篩選…" autocomplete="off" />
-      </div>
-      <div class="field">
-        <label>成員名單 *（可多選）</label>
-        <div style="display:flex;gap:8px;margin:6px 0 8px">
-          <button type="button" class="btn sm outline" id="sel-all-members">全選</button>
-          <button type="button" class="btn sm outline" id="sel-none-members">取消全選</button>
-        </div>
-        <div class="approver-list" id="member-pick-list" style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">
-          ${candidates
-            .map((u) => {
-              const depts = Array.isArray(u.departments) ? u.departments : [];
-              const deptText =
-                depts.length > 0
-                  ? depts.join('、')
-                  : u.department
-                    ? u.department
-                    : '尚未分部門';
-              return `
-            <label class="member-pick-row" data-search="${esc((u.name + ' ' + u.username).toLowerCase())}">
-              <input type="checkbox" name="user_ids" value="${u.id}" />
-              <span>
-                <strong>${esc(u.name)}</strong>
-                <span class="muted">（${esc(u.username)}）</span>
-                <span class="muted"> · 目前隸屬：${esc(deptText)}</span>
-              </span>
-            </label>`;
-            })
-            .join('')}
-        </div>
-        <div class="muted" style="font-size:0.82rem;margin-top:6px">共 ${candidates.length} 位可選</div>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="btn primary">確認加入部門</button>
-        <button type="button" class="btn outline" data-close-modal>取消</button>
-      </div>
-    </form>
-  `);
-  $('#modal-panel').classList.add('wide');
-
-  const filterList = () => {
-    const q = ($('#member-search')?.value || '').trim().toLowerCase();
-    $$('#member-pick-list .member-pick-row').forEach((row) => {
-      const hay = row.dataset.search || '';
-      row.style.display = !q || hay.includes(q) ? '' : 'none';
-    });
-  };
-  const search = $('#member-search');
-  if (search) search.oninput = filterList;
-
-  const selAll = $('#sel-all-members');
-  const selNone = $('#sel-none-members');
-  if (selAll) {
-    selAll.onclick = () => {
-      $$('#member-pick-list .member-pick-row').forEach((row) => {
-        if (row.style.display === 'none') return;
-        const cb = row.querySelector('input[type=checkbox]');
-        if (cb) cb.checked = true;
-      });
-    };
-  }
-  if (selNone) {
-    selNone.onclick = () => {
-      $$('#member-pick-list input[name=user_ids]').forEach((cb) => {
-        cb.checked = false;
-      });
-    };
-  }
-
-  $('#add-user-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const ids = [...document.querySelectorAll('#member-pick-list input[name=user_ids]:checked')].map(
-      (c) => Number(c.value)
-    );
-    if (!ids.length) {
-      toast('請從成員名單至少勾選一位', 'error');
-      return;
-    }
-    try {
-      const result = await api(`/api/departments/${deptId}/members`, {
-        method: 'POST',
-        body: { user_ids: ids },
-      });
-      closeModal();
-      toast(
-        `已加入 ${result.added_count || ids.length} 人到「${deptName}」` +
-          (result.skipped_count ? `（略過 ${result.skipped_count} 位已在部門內）` : ''),
-        'success'
-      );
-      navigate('departments');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  };
-}
-
 async function renderDepartments(body) {
   if (!isAdmin()) {
     body.innerHTML = emptyState({
@@ -279,14 +77,11 @@ async function renderDepartments(body) {
           ${
             members.length
               ? `<div class="table-wrap">
-                  <table class="data" style="width:100%;min-width:600px;table-layout:fixed">
+                  <table class="data">
                     <thead>
                       <tr>
-                        <th style="width:120px;white-space:nowrap">姓名</th>
-                        <th style="width:140px;white-space:nowrap">帳號</th>
-                        <th style="width:120px;white-space:nowrap">角色</th>
-                        <th style="min-width:160px">隸屬部門</th>
-                        ${canManage ? '<th style="width:140px;text-align:center;white-space:nowrap">操作</th>' : ''}
+                        <th>姓名</th><th>帳號</th><th>角色</th><th>隸屬部門</th>
+                        ${canManage ? '<th>操作</th>' : ''}
                       </tr>
                     </thead>
                     <tbody>
@@ -402,4 +197,227 @@ async function renderDepartments(body) {
       }
     };
   });
+}
+
+function openCosignModal(request, onDone) {
+  const me = state.user?.id;
+  const users = (state.users || []).filter((u) => u.active !== 0 && u.id !== me);
+  openModal(`
+    <h3>➕ 簽核加簽請託</h3>
+    <p class="muted" style="margin-top:0">
+      臨時邀請其他同仁加簽。只會改這一張單的簽核路徑，其他進行中單據不受影響。
+    </p>
+    <form id="cosign-form" class="form-grid">
+      <div class="field">
+        <label>加簽對象 *</label>
+        <select name="target_user_id" required>
+          <option value="">請選擇加簽同仁…</option>
+          ${users.map((u) => `<option value="${u.id}">${esc(u.name)}（${esc(u.department || '未設部門')}）</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>加簽順序</label>
+        <select name="position">
+          <option value="current" selected>先經加簽同仁簽核（再回到原步驟）</option>
+          <option value="after">於本關核准後，插入下一步驟</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>加簽說明 / 請託意見</label>
+        <textarea name="comment" rows="3" placeholder="請填寫加簽說明或請同仁協助的項目…"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">送出加簽</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+  $('#cosign-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const target_user_id = Number(fd.get('target_user_id'));
+    if (!target_user_id) {
+      toast('請選擇加簽同仁', 'error');
+      return;
+    }
+    try {
+      const res = await api(`/api/requests/${request.id}/cosign`, {
+        method: 'POST',
+        body: {
+          target_user_id,
+          position: fd.get('position') || 'current',
+          comment: String(fd.get('comment') || '').trim(),
+        },
+      });
+      closeModal();
+      toast(res.message || '已成功送出加簽請託', 'success');
+      if (typeof onDone === 'function') onDone();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+}
+
+function openForwardModal(request, onDone) {
+  const me = state.user?.id;
+  const users = (state.users || []).filter((u) => u.active !== 0 && u.id !== me);
+  openModal(`
+    <h3>↗️ 簽核關卡轉簽改派</h3>
+    <p class="muted" style="margin-top:0">
+      將目前步驟的簽核權限轉交給指定同仁（您將不再為此步驟簽核人）。只改這一張單。
+    </p>
+    <form id="forward-form" class="form-grid">
+      <div class="field">
+        <label>轉簽改派對象 *</label>
+        <select name="target_user_id" required>
+          <option value="">請選擇轉簽對象…</option>
+          ${users.map((u) => `<option value="${u.id}">${esc(u.name)}（${esc(u.department || '未設部門')}）</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>轉簽說明 / 理由</label>
+        <textarea name="comment" rows="3" placeholder="請填寫轉簽改派原因或注意事項…"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">確認轉簽</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+  $('#forward-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const target_user_id = Number(fd.get('target_user_id'));
+    if (!target_user_id) {
+      toast('請選擇轉簽對象', 'error');
+      return;
+    }
+    try {
+      const res = await api(`/api/requests/${request.id}/forward`, {
+        method: 'POST',
+        body: {
+          target_user_id,
+          comment: String(fd.get('comment') || '').trim(),
+        },
+      });
+      closeModal();
+      toast(res.message || '已成功轉簽改派', 'success');
+      if (typeof onDone === 'function') onDone();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+}
+
+function openSignaturePadModal(opts = {}) {
+  const { title = '手寫電子簽名', initialImage = null, onSave } = opts;
+  const html = `
+    <div style="max-width:520px;width:100%;margin:0 auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0">${esc(title)}</h3>
+        <button type="button" class="btn ghost sm" data-close-modal>✕</button>
+      </div>
+      <p class="muted" style="margin:0 0 12px;font-size:0.88rem">
+        請在下方白板處以滑鼠或手指／觸控筆畫出您的簽名：
+      </p>
+      <div style="border:2px dashed #94a3b8;border-radius:12px;background:#fff;padding:6px;text-align:center;touch-action:none">
+        <canvas id="sig-pad-canvas" width="460" height="200" style="width:100%;max-width:460px;height:200px;display:block;margin:0 auto;cursor:crosshair;background:#ffffff;border-radius:8px;border:1px solid #e2e8f0"></canvas>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap">
+        <div>
+          <button type="button" class="btn outline sm" id="btn-sig-clear">🧹 清除重寫</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn ghost sm" data-close-modal>取消</button>
+          <button type="button" class="btn primary sm" id="btn-sig-save">💾 確定儲存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  openModal(html);
+
+  const canvas = $('#sig-pad-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#0f172a';
+
+  let isDrawing = false;
+  let hasDrawn = false;
+  let lastX = 0;
+  let lastY = 0;
+
+  if (initialImage) {
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      hasDrawn = true;
+    };
+    img.src = initialImage;
+  }
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    if (e.touches && e.touches[0]) {
+      return {
+        x: (e.touches[0].clientX - rect.left) * scaleX,
+        y: (e.touches[0].clientY - rect.top) * scaleY,
+      };
+    }
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }
+
+  function startDraw(e) {
+    e.preventDefault();
+    isDrawing = true;
+    const p = getPos(e);
+    lastX = p.x;
+    lastY = p.y;
+  }
+
+  function drawMove(e) {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const p = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    lastX = p.x;
+    lastY = p.y;
+    hasDrawn = true;
+  }
+
+  function stopDraw() {
+    isDrawing = false;
+  }
+
+  canvas.addEventListener('mousedown', startDraw);
+  canvas.addEventListener('mousemove', drawMove);
+  canvas.addEventListener('mouseup', stopDraw);
+  canvas.addEventListener('mouseleave', stopDraw);
+  canvas.addEventListener('touchstart', startDraw, { passive: false });
+  canvas.addEventListener('touchmove', drawMove, { passive: false });
+  canvas.addEventListener('touchend', stopDraw);
+
+  $('#btn-sig-clear').onclick = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    hasDrawn = false;
+  };
+  $('#btn-sig-save').onclick = () => {
+    if (!hasDrawn && !initialImage) {
+      toast('請先在白板上手寫簽名', 'error');
+      return;
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    closeModal();
+    if (typeof onSave === 'function') onSave(dataUrl);
+  };
 }

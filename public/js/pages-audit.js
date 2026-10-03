@@ -1,10 +1,3 @@
-/**
- * 系統稽核日誌
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
-/**
- * 系統進階稽核日誌 (P3-1)
- */
 async function renderAuditLogs(body) {
   const query = state.auditListQuery || {};
   const page = Number(query.page) || 1;
@@ -33,8 +26,6 @@ async function renderAuditLogs(body) {
     workflow: '⚙️ 簽核流程範本',
     system: '🛠️ 系統維運與設定',
   };
-
-  const exportUrl = `/api/system/audit-logs/export?${params.toString()}`;
 
   body.innerHTML = `
     <div class="card">
@@ -68,12 +59,9 @@ async function renderAuditLogs(body) {
             <button type="button" class="btn outline sm" id="btn-audit-clear">清除條件</button>
             <span class="muted" style="font-size:0.85rem">共 <strong>${data.totalCount || 0}</strong> 筆日誌</span>
           </div>
-          <a href="${exportUrl}" download class="btn outline sm" style="display:inline-flex;align-items:center;gap:4px">
-            📥 匯出 CSV 報告
-          </a>
+          <button type="button" class="btn outline sm" id="btn-audit-export">📥 匯出 CSV 報告</button>
         </div>
       </form>
-
       ${
         !data.logs || !data.logs.length
           ? emptyState({ title: '尚無稽核日誌', desc: '目前沒有符合篩選條件的系統稽核紀錄。' })
@@ -96,21 +84,20 @@ async function renderAuditLogs(body) {
                     <tr style="vertical-align:top">
                       <td class="muted" style="white-space:nowrap">${esc(l.created_at)}</td>
                       <td style="white-space:nowrap">
-                        <span class="tag draft" style="font-size:0.75rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle" title="${esc(categoryLabels[l.category] || l.category || '一般')}">${esc(categoryLabels[l.category] || l.category || '一般')}</span>
+                        <span class="tag draft" style="font-size:0.75rem">${esc(categoryLabels[l.category] || l.category || '一般')}</span>
                       </td>
-                      <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(l.user_name || '系統/訪客')}${l.user_username ? ` (@${esc(l.user_username)})` : ''}">
+                      <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                         <strong>${esc(l.user_name || '系統/訪客')}</strong>
                         ${l.user_username ? `<span class="muted" style="font-size:0.78rem">(@${esc(l.user_username)})</span>` : ''}
                       </td>
-                      <td style="white-space:nowrap"><code style="display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle" title="${esc(l.ip_address || '127.0.0.1')}">${esc(l.ip_address || '127.0.0.1')}</code></td>
-                      <td style="white-space:normal;word-break:break-word;line-height:1.5;color:#334155">${esc(l.description)}</td>
+                      <td style="white-space:nowrap"><code>${esc(l.ip_address || '—')}</code></td>
+                      <td style="white-space:normal;word-break:break-word;line-height:1.5;color:#334155">${esc(htmlToPlainText(l.description))}</td>
                     </tr>`
                     )
                     .join('')}
                 </tbody>
               </table>
             </div>
-            
             ${
               data.totalPages > 1
                 ? `<div class="pagination">
@@ -137,24 +124,36 @@ async function renderAuditLogs(body) {
     };
     renderAuditLogs(body);
   });
-
   $('#btn-audit-clear')?.addEventListener('click', (e) => {
     e.preventDefault();
     state.auditListQuery = {};
     renderAuditLogs(body);
   });
-
   $('#btn-audit-prev')?.addEventListener('click', () => {
     if (page > 1) {
       state.auditListQuery = { ...state.auditListQuery, page: page - 1 };
       renderAuditLogs(body);
     }
   });
-
   $('#btn-audit-next')?.addEventListener('click', () => {
     if (page < data.totalPages) {
       state.auditListQuery = { ...state.auditListQuery, page: page + 1 };
       renderAuditLogs(body);
+    }
+  });
+  $('#btn-audit-export')?.addEventListener('click', async () => {
+    try {
+      const blob = await api(`/api/system/audit-logs/export?${params.toString()}`, {
+        expectBlob: true,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast(err.message, 'error');
     }
   });
 }

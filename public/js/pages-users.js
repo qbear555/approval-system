@@ -1,7 +1,3 @@
-/**
- * 成員名單
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
 async function renderUsers(body) {
   const canFull = isAdmin();
   const canLabor = hasPerm('users_leave');
@@ -106,16 +102,14 @@ async function renderUsers(body) {
           : ''
       }
       <div class="table-wrap">
-        <table class="data" style="width:100%;min-width:880px;table-layout:fixed">
+        <table class="data">
           <thead>
             <tr>
-              ${canFull ? '<th style="width:36px;text-align:center"></th>' : ''}
-              <th style="width:110px;white-space:nowrap">姓名</th>
-              <th style="width:120px;white-space:nowrap">帳號</th>
-              <th style="width:130px">部門</th>
-              ${canLabor ? '<th style="min-width:180px">休假（可休／已休／剩餘）</th>' : ''}
-              <th style="min-width:160px">角色／權限</th>
-              <th style="width:160px;text-align:center;white-space:nowrap">操作</th>
+              ${canFull ? '<th style="width:40px"></th>' : ''}
+              <th>姓名</th><th>帳號</th><th>部門</th>
+              ${canLabor ? '<th>休假（可休／已休／剩餘）</th>' : ''}
+              <th>角色／權限</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -147,8 +141,8 @@ async function renderUsers(body) {
                       : ''
                   }
                 </td>
-                ${canLabor ? `<td style="white-space:normal;word-break:break-word">${laborCell(u)}</td>` : ''}
-                <td style="white-space:normal;word-break:break-word">
+                ${canLabor ? `<td>${laborCell(u)}</td>` : ''}
+                <td>
                   ${
                     u.role === 'admin'
                       ? '<span class="tag draft">最高權限 · 系統管理員</span>'
@@ -242,7 +236,7 @@ async function renderUsers(body) {
   $('#btn-export-all-user')?.addEventListener('click', async () => {
     try {
       const reset = confirm(
-        '是否在匯出時重設密碼並寫入 Excel？\n\n「確定」＝為每位成員產生隨機密碼並寫入密碼欄\n「取消」＝僅匯出名單，密碼欄空白（保留原密碼）'
+        '是否在匯出時重設密碼並寫入 Excel？\n\n「確定」＝重設（admin→admin123，其餘→pass1234）並寫入密碼欄\n「取消」＝僅匯出名單，密碼欄空白（保留原密碼）'
       );
       await downloadUsersExcel([], { resetPasswords: reset });
       toast('已匯出全部成員', 'success');
@@ -273,7 +267,7 @@ async function renderUsers(body) {
     }
     if (
       !confirm(
-        `確定重設並匯出 ${ids.length} 人的密碼？\n（每人一組隨機密碼，將寫入 Excel）`
+        `確定重設並匯出 ${ids.length} 人的密碼？\n（admin 為 admin123，其餘為 pass1234）`
       )
     ) {
       return;
@@ -398,14 +392,6 @@ async function renderUsers(body) {
       }
     };
   });
-}
-
-/**
- * 畫面動態防偽浮水印（依需求：僅套用到 PDF，畫面網頁不顯示）
- */
-function updateAppWatermark() {
-  const overlay = document.getElementById('app-watermark-overlay');
-  if (overlay) overlay.remove();
 }
 
 /** 休假明細（可休／已休皆手動） */
@@ -1033,6 +1019,204 @@ function openUserPermissionEditor(user, defs) {
         'success'
       );
       navigate('users');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+}
+
+async function refreshDeptLists() {
+  try {
+    await loadDepartmentOptions();
+  } catch {
+    /* ignore */
+  }
+}
+
+function openAddDeptModal() {
+  openModal(`
+    <h3>新增部門</h3>
+    <form id="add-dept-form" class="form-grid">
+      <div class="field">
+        <label>部門名稱 *</label>
+        <input name="name" required maxlength="40" placeholder="例如：人資部、品保部" />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">建立</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+  $('#add-dept-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/api/departments', { method: 'POST', body: { name: fd.get('name') } });
+      closeModal();
+      toast('部門已新增', 'success');
+      await refreshDeptLists();
+      navigate('departments');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+}
+
+function openRenameDeptModal(dept) {
+  openModal(`
+    <h3>修改部門名稱</h3>
+    <p class="muted" style="margin-top:0">原名稱：${esc(dept.name)}</p>
+    <form id="rename-dept-form" class="form-grid">
+      <div class="field">
+        <label>新部門名稱 *</label>
+        <input name="name" required maxlength="40" value="${esc(dept.name)}" />
+      </div>
+      <p class="muted" style="font-size:0.85rem;margin:0">修改後，此部門下所有成員的「所屬部門」會一併更新。</p>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">儲存</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+  $('#rename-dept-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api(`/api/departments/${dept.id}`, {
+        method: 'PUT',
+        body: { name: fd.get('name') },
+      });
+      closeModal();
+      toast('部門名稱已更新', 'success');
+      await refreshDeptLists();
+      navigate('departments');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+}
+
+/**
+ * 從「已註冊成員名單」勾選後加入部門
+ * 同一人可同時隸屬多個部門（可重複加入不同部門）
+ */
+function openAddUserToDeptModal(dept, allUsers) {
+  const deptName = dept.name;
+  const deptId = dept.id;
+  const inDept = (u) => {
+    const list = Array.isArray(u.departments) ? u.departments : [];
+    return list.includes(deptName) || u.department === deptName;
+  };
+  // 可選：尚未在此部門的已註冊成員（即使已在其他部門也可選）
+  const candidates = (allUsers || [])
+    .filter((u) => u.active !== 0 && !inDept(u))
+    .slice()
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
+
+  if (!candidates.length) {
+    toast('沒有可加入的已註冊成員（可能都已在此部門，或請先到「成員名單」新增帳號）', 'error');
+    return;
+  }
+
+  openModal(`
+    <h3>從成員名單加入「${esc(deptName)}」</h3>
+    <p class="muted" style="margin-top:0">
+      勾選<strong>已註冊成員</strong>加入此部門（不新建帳號）。<br/>
+      <strong>同一人可同時隸屬多個部門</strong>；已在其他部門的人也可再加入這裡。
+    </p>
+    <form id="add-user-form" class="form-grid">
+      <div class="field">
+        <label>搜尋成員</label>
+        <input type="search" id="member-search" placeholder="輸入姓名或帳號篩選…" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>成員名單 *（可多選）</label>
+        <div style="display:flex;gap:8px;margin:6px 0 8px">
+          <button type="button" class="btn sm outline" id="sel-all-members">全選</button>
+          <button type="button" class="btn sm outline" id="sel-none-members">取消全選</button>
+        </div>
+        <div class="approver-list" id="member-pick-list" style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">
+          ${candidates
+            .map((u) => {
+              const depts = Array.isArray(u.departments) ? u.departments : [];
+              const deptText =
+                depts.length > 0
+                  ? depts.join('、')
+                  : u.department
+                    ? u.department
+                    : '尚未分部門';
+              return `
+            <label class="member-pick-row" data-search="${esc((u.name + ' ' + u.username).toLowerCase())}">
+              <input type="checkbox" name="user_ids" value="${u.id}" />
+              <span>
+                <strong>${esc(u.name)}</strong>
+                <span class="muted">（${esc(u.username)}）</span>
+                <span class="muted"> · 目前隸屬：${esc(deptText)}</span>
+              </span>
+            </label>`;
+            })
+            .join('')}
+        </div>
+        <div class="muted" style="font-size:0.82rem;margin-top:6px">共 ${candidates.length} 位可選</div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">確認加入部門</button>
+        <button type="button" class="btn outline" data-close-modal>取消</button>
+      </div>
+    </form>
+  `);
+  $('#modal-panel').classList.add('wide');
+
+  const filterList = () => {
+    const q = ($('#member-search')?.value || '').trim().toLowerCase();
+    $$('#member-pick-list .member-pick-row').forEach((row) => {
+      const hay = row.dataset.search || '';
+      row.style.display = !q || hay.includes(q) ? '' : 'none';
+    });
+  };
+  const search = $('#member-search');
+  if (search) search.oninput = filterList;
+
+  const selAll = $('#sel-all-members');
+  const selNone = $('#sel-none-members');
+  if (selAll) {
+    selAll.onclick = () => {
+      $$('#member-pick-list .member-pick-row').forEach((row) => {
+        if (row.style.display === 'none') return;
+        const cb = row.querySelector('input[type=checkbox]');
+        if (cb) cb.checked = true;
+      });
+    };
+  }
+  if (selNone) {
+    selNone.onclick = () => {
+      $$('#member-pick-list input[name=user_ids]').forEach((cb) => {
+        cb.checked = false;
+      });
+    };
+  }
+
+  $('#add-user-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const ids = [...document.querySelectorAll('#member-pick-list input[name=user_ids]:checked')].map(
+      (c) => Number(c.value)
+    );
+    if (!ids.length) {
+      toast('請從成員名單至少勾選一位', 'error');
+      return;
+    }
+    try {
+      const result = await api(`/api/departments/${deptId}/members`, {
+        method: 'POST',
+        body: { user_ids: ids },
+      });
+      closeModal();
+      toast(
+        `已加入 ${result.added_count || ids.length} 人到「${deptName}」` +
+          (result.skipped_count ? `（略過 ${result.skipped_count} 位已在部門內）` : ''),
+        'success'
+      );
+      navigate('departments');
     } catch (err) {
       toast(err.message, 'error');
     }

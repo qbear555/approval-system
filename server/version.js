@@ -4,7 +4,6 @@
  * - 自動建置戳：掃描 server/、public/ 等原始檔的內容指紋
  *   任一檔案修改後重啟服務，版本字串會自動變更
  */
-const tz = require('./tz');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -129,7 +128,7 @@ function buildFileSnapshots(files) {
     hash: digest,
     short,
     stamp,
-    builtAt: tz.nowIso(d),
+    builtAt: d.toISOString(),
     fileCount: Object.keys(map).length,
   };
 }
@@ -158,9 +157,10 @@ function load() {
   const fp = buildFileSnapshots(fileList);
   cachedFiles = fp.files;
 
-  const fullVersion = `${pkg.version}+${fp.stamp}.${fp.short}`;
-  const label = `v${pkg.version}+${fp.short}`;
-  const labelFull = `v${fullVersion}`;
+  // 介面只顯示主版號；指紋保留供部署紀錄內部比對
+  const fullVersion = pkg.version;
+  const label = `v${pkg.version}`;
+  const labelFull = `v${pkg.version}`;
   const banner = `線上簽核系統 ${label}`;
 
   cached = {

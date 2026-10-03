@@ -1,10 +1,9 @@
-const tz = require('./tz');
 /**
  * 簽核流程模組（流程步驟 + 申請表單欄位 + PDF 排版 + 最終核准通知）
  * 匯出／匯入一體；不包含系統設定、Email 帳密、使用者帳號本體、歷史單據。
  *
  * pdfLayout.type 對應 server/pdf.js 版面：
- *   leave | credit_limit | purchase | expense | travel | it_repair | overtime | general | auto
+ *   leave | credit_limit | welfare | dept_meeting | purchase | expense | travel | it_repair | overtime | general | auto
  *
  * finalNotify：最終一步（如總經理）核定通過、單據變「已核准」後，
  * 可選擇通知的額外人員（**系統內通知**，非 Email；需點「確認收到通知」）。
@@ -13,24 +12,30 @@ const tz = require('./tz');
 const PDF_LAYOUT_TYPES = [
   'leave',
   'credit_limit',
+  'welfare',
   'purchase',
   'expense',
   'travel',
   'it_repair',
   'overtime',
+  'dept_meeting',
   'general',
+  'pdf_template',
   'auto',
 ];
 
 const TYPE_META = {
   leave: { label: '請假單版面', match: /請假|休假|leave/i },
   credit_limit: { label: '信用額度申請表版面', match: /信用額度|授信額度|額度申請/i },
-  purchase: { label: '請購申請版面', match: /請購|採購|訂購|purchase|payment/i },
+  welfare: { label: '福利金明細月報表版面', match: /福利金/i },
+  purchase: { label: '請購申請版面', match: /請購|採購|訂購|支付|付款|purchase|payment/i },
   expense: { label: '費用報支版面', match: /費用|報支|報銷|請款|expense/i },
   travel: { label: '出差申請版面', match: /出差|公出|差旅|travel|business.?trip/i },
   it_repair: { label: '電腦異常報修版面', match: /電腦|報修|資訊設備/i },
   overtime: { label: '延長工時版面', match: /加班|延長工時|超時|overtime/i },
+  dept_meeting: { label: '會議記錄版面', match: /部門月會|會議記錄/ },
   general: { label: '一般簽呈版面', match: /簽呈/i },
+  pdf_template: { label: '紙本底圖套印版面', match: null },
   auto: { label: '依流程名稱自動判斷', match: null },
 };
 
@@ -42,11 +47,13 @@ function detectPdfLayoutType(workflowName) {
   const order = [
     'leave',
     'credit_limit',
+    'welfare',
     'purchase',
     'expense',
     'travel',
     'it_repair',
     'overtime',
+    'dept_meeting',
     'general',
   ];
   for (const t of order) {
@@ -58,7 +65,7 @@ function detectPdfLayoutType(workflowName) {
 
 /**
  * 正規化 pdfLayout 物件
- * @returns {{ type: string, label?: string, options?: object }}
+ * @returns {{ type: string, label?: string, options?: object, templateFile?: string, templateMeta?: object, fields?: Array }}
  */
 function normalizePdfLayout(raw, workflowName) {
   let obj = raw;
@@ -73,12 +80,19 @@ function normalizePdfLayout(raw, workflowName) {
   let type = String(obj.type || obj.layoutType || 'auto').trim() || 'auto';
   if (!PDF_LAYOUT_TYPES.includes(type)) type = 'auto';
   const resolved = type === 'auto' ? detectPdfLayoutType(workflowName) : type;
-  return {
+  const res = {
     type,
     resolvedType: resolved,
     label: obj.label || TYPE_META[resolved]?.label || TYPE_META[type]?.label || type,
     options: obj.options && typeof obj.options === 'object' ? obj.options : {},
   };
+  if (type === 'pdf_template' || obj.templateFile) {
+    res.templateFile = obj.templateFile || '';
+    res.templateMeta = obj.templateMeta && typeof obj.templateMeta === 'object' ? obj.templateMeta : {};
+    res.fields = Array.isArray(obj.fields) ? obj.fields : [];
+    res.formMode = obj.formMode || 'paper'; // 'paper' (電子紙) or 'split' (對照)
+  }
+  return res;
 }
 
 function parsePdfLayoutJson(json, workflowName) {
@@ -95,11 +109,18 @@ function parsePdfLayoutJson(json, workflowName) {
 
 function pdfLayoutToJson(layout, workflowName) {
   const n = normalizePdfLayout(layout || { type: 'auto' }, workflowName);
-  return JSON.stringify({
+  const out = {
     type: n.type,
     label: n.label,
     options: n.options || {},
-  });
+  };
+  if (n.type === 'pdf_template' || n.templateFile) {
+    out.templateFile = n.templateFile;
+    out.templateMeta = n.templateMeta;
+    out.fields = n.fields;
+    out.formMode = n.formMode;
+  }
+  return JSON.stringify(out);
 }
 
 /**
@@ -268,6 +289,7 @@ function finalNotifyToJson(raw) {
 function buildExportModule({
   id,
   name,
+  category,
   description,
   formFields,
   steps,
@@ -283,6 +305,7 @@ function buildExportModule({
     module: 'workflow+form+pdfLayout+finalNotify',
     sourceId: id != null ? id : undefined,
     name: name || '',
+    category: category || '一般簽呈',
     description: description || '',
     formFields: Array.isArray(formFields) ? formFields : [],
     steps: Array.isArray(steps) ? steps : [],
@@ -301,7 +324,7 @@ function buildExportModule({
       applicants: notify.applicants || [],
       label: notify.label,
     },
-    exportedAt: exportedAt || tz.nowIso(),
+    exportedAt: exportedAt || new Date().toISOString(),
   };
 }
 

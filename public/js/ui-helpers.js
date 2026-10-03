@@ -25,8 +25,9 @@
       .map((a) => {
         const cls = a.primary ? 'btn primary' : a.outline !== false ? 'btn outline' : 'btn';
         const go = a.go ? ` data-go="${_esc(a.go)}"` : '';
+        const status = a.status ? ` data-status="${_esc(a.status)}"` : '';
         const id = a.id ? ` id="${_esc(a.id)}"` : '';
-        return `<button type="button" class="${cls}"${go}${id}>${_esc(a.label)}</button>`;
+        return `<button type="button" class="${cls}"${go}${status}${id}>${_esc(a.label)}</button>`;
       })
       .join('');
     return `
@@ -40,7 +41,8 @@
 
   /**
    * 總覽統計卡（可點）
-   * @param {{ label: string, value: string|number, go?: string, hint?: string, disabled?: boolean }} opts
+   * @param {{ label: string, value: string|number, go?: string, status?: string, hint?: string, disabled?: boolean, tone?: string }} opts
+   * tone: amber | blue | green | teal | purple | indigo | slate | rose
    */
   function statCardHtml(opts) {
     const o = opts || {};
@@ -48,15 +50,12 @@
     const tag = clickable ? 'button' : 'div';
     const type = clickable ? ' type="button"' : '';
     const go = clickable ? ` data-go="${_esc(o.go)}"` : '';
-    const label = String(o.label || '');
-
-    let colorCls = ' total';
-    if (label.includes('待我') || label.includes('待辦') || label.includes('待簽')) colorCls = ' pending';
-    else if (label.includes('完成') || label.includes('核准')) colorCls = ' approved';
-    else if (label.includes('駁回') || label.includes('失敗')) colorCls = ' rejected';
-    else if (label.includes('進行') || label.includes('審核')) colorCls = ' pending';
-
-    const cls = `stat-card${colorCls}${clickable ? ' stat-card-clickable' : ''}${o.disabled ? ' stat-card-disabled' : ''}`;
+    const status = clickable && o.status ? ` data-status="${_esc(o.status)}"` : '';
+    const tone = String(o.tone || '')
+      .toLowerCase()
+      .replace(/[^a-z]/g, '');
+    const toneCls = tone ? ` stat-card-${tone}` : '';
+    const cls = `stat-card${toneCls}${clickable ? ' stat-card-clickable' : ''}${o.disabled ? ' stat-card-disabled' : ''}`;
     const hint =
       o.hint != null
         ? o.hint
@@ -64,7 +63,7 @@
           ? '點擊查看'
           : '';
     return `
-      <${tag} class="${cls}"${type}${go}${clickable ? ` title="${_esc(hint || o.label)}"` : ''}>
+      <${tag} class="${cls}"${type}${go}${status}${clickable ? ` title="${_esc(hint || o.label)}"` : ''}>
         <div class="label">${_esc(o.label)}</div>
         <div class="value">${_esc(String(o.value ?? '—'))}</div>
         ${hint ? `<div class="stat-hint">${_esc(hint)}</div>` : ''}
@@ -79,7 +78,10 @@
         e.preventDefault();
         e.stopPropagation();
         if (typeof global.navigate === 'function') {
-          global.navigate(btn.dataset.go);
+          const params = {};
+          if (btn.dataset.status) params.status = btn.dataset.status;
+          if (btn.dataset.id) params.id = Number(btn.dataset.id);
+          global.navigate(btn.dataset.go, params);
         }
       };
     });

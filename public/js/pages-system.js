@@ -1,60 +1,3 @@
-/**
- * 系統設定完整包／品牌／公告
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
-/** 側欄「LINE 通知」完整設定頁 */
-async function renderLineSettings(body) {
-  if (!canConfigureLine()) {
-    body.innerHTML = `<div class="error-msg">您沒有 LINE 通知設定權限</div>`;
-    return;
-  }
-  let cfg = {
-    enabled: false,
-    ready: false,
-    serviceUrl: 'http://192.168.99.220:3850',
-    hasApiKey: false,
-    configAccess: 'builtin_admin',
-    events: {},
-  };
-  try {
-    const data = await api('/api/line/config');
-    if (!data.canConfigure) {
-      body.innerHTML = `<div class="error-msg">您沒有 LINE 通知設定權限</div>`;
-      return;
-    }
-    cfg = { ...cfg, ...data };
-    state.lineCanConfigure = true;
-    state.lineConfigAccess = cfg.configAccess;
-    state.lineReady = !!cfg.ready;
-    state.lineEnabled = !!cfg.enabled;
-  } catch (e) {
-    body.innerHTML = `<div class="error-msg">${esc(e.message || '無法載入 LINE 設定')}</div>`;
-    return;
-  }
-
-  body.innerHTML = `
-    <div class="system-settings-page">
-      <div class="card">
-        <h3>💬 LINE 通知設定</h3>
-        ${lineSettingsFormHtml(cfg, { formId: 'line-form', showAccess: true })}
-      </div>
-      <div class="card">
-        <h3>使用說明</h3>
-        <ol style="margin:0;padding-left:1.2rem;line-height:1.7;color:#334155">
-          <li>確認 LINE 服務在 NAS 執行：<code>http://192.168.99.220:3850/health</code></li>
-          <li>API 金鑰須與 <code>D:\\Line 專案</code>（或 NAS line-notify）的 <code>INTERNAL_API_KEY</code> 相同</li>
-          <li>Webhook 需公網 HTTPS 才能綁定（Messaging API）</li>
-          <li>成員私訊官方帳號：<code>綁定 帳號</code> 後才收得到推播</li>
-        </ol>
-      </div>
-    </div>`;
-
-  bindLineSettingsForm({
-    formId: 'line-form',
-    onSaved: () => navigate('line-settings'),
-  });
-}
-
 /** 系統設定（僅內建 Admin 帳號） */
 async function renderSystemSettings(body) {
   if (!isBuiltinAdmin()) {
@@ -80,8 +23,8 @@ async function renderSystemSettings(body) {
     hasPass: false,
     ready: false,
   };
-  let backupDir = '';
-  let announcement = {
+  const emptyAnn = () => ({
+    slot: 0,
     enabled: false,
     active: false,
     title: '',
@@ -93,22 +36,24 @@ async function renderSystemSettings(body) {
     withinPeriod: true,
     scheduleStatus: 'open',
     updatedAt: null,
-  };
-  let accessCfgAdmin = {
-    intranetOnly: true,
-    loginCidrs: '192.168.99.0/24,172.16.0.0/12,127.0.0.1,::1',
-    deviceBindEnabled: true,
-    deviceBindMax: 3,
-  };
+  });
+  let announcementsAdmin = [emptyAnn(), { ...emptyAnn(), slot: 1 }];
   try {
     const adminCfg = await api('/api/system/settings/admin');
     brand = adminCfg;
     state.systemSettings = adminCfg;
     pdfSign = { ...pdfSign, ...(adminCfg.pdfSign || {}) };
     backupEncrypt = { ...backupEncrypt, ...(adminCfg.backupEncrypt || {}) };
-    backupDir = adminCfg.backupDir || '';
-    announcement = { ...announcement, ...(adminCfg.announcement || {}) };
-    accessCfgAdmin = { ...accessCfgAdmin, ...(adminCfg.access || {}) };
+    if (Array.isArray(adminCfg.announcements) && adminCfg.announcements.length) {
+      announcementsAdmin = [0, 1].map((i) => ({
+        ...emptyAnn(),
+        slot: i,
+        ...(adminCfg.announcements[i] || {}),
+        slot: i,
+      }));
+    } else if (adminCfg.announcement) {
+      announcementsAdmin[0] = { ...emptyAnn(), ...adminCfg.announcement, slot: 0 };
+    }
   } catch {
     try {
       brand = await api('/api/system/settings');
@@ -123,27 +68,6 @@ async function renderSystemSettings(body) {
     mailCfg = await api('/api/mail/config');
   } catch {
     mailCfg = { enabled: false, ready: false };
-  }
-
-  let lineCfg = {
-    enabled: false,
-    ready: false,
-    serviceUrl: 'http://192.168.99.220:3850',
-    hasApiKey: false,
-    configAccess: 'any_admin',
-    events: {},
-    canConfigure: true,
-  };
-  try {
-    const lc = await api('/api/line/config');
-    lineCfg = { ...lineCfg, ...lc };
-    state.lineCanConfigure = !!lc.canConfigure;
-    state.lineConfigAccess = lc.configAccess || state.lineConfigAccess;
-    state.lineAdminOnly = !!lc.adminOnly;
-    state.lineReady = !!lc.ready;
-    state.lineEnabled = !!lc.enabled;
-  } catch {
-    /* keep defaults */
   }
 
   const logoUrl = brand.logoUrl || '/img/argo-logo.png';
@@ -169,7 +93,7 @@ async function renderSystemSettings(body) {
     (brand.fullVersion ? `v${brand.fullVersion}` : verLabel);
   const verBanner = brand.versionBanner || `線上簽核系統 ${verLabel}`;
   const builtAt = brand.versionBuiltAt
-    ? String(brand.versionBuiltAt).replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
+    ? formatTaiwanDateTime(brand.versionBuiltAt)
     : '—';
 
   let deployLogHtml = `<p class="muted" style="margin:0">載入自動部署紀錄中…</p>`;
@@ -182,17 +106,14 @@ async function renderSystemSettings(body) {
       deployLogHtml = `
         <p class="muted" style="margin:0 0 10px;font-size:0.85rem;line-height:1.45">
           伺服器每次啟動會比對程式指紋；有變更時寫入
-          <code>data/deploy-history.json</code>（執行期）。產品變更說明見倉庫 <code>CHANGELOG.md</code>。
+          <code>data/修改紀錄-自動.md</code> 與 <code>data/deploy-history.json</code>。
           純重啟（檔案未改）不重複記一筆。
         </p>
         <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:10px">
-          <table class="data" style="margin:0;font-size:0.85rem;width:100%;table-layout:fixed">
+          <table class="data" style="margin:0;font-size:0.85rem">
             <thead>
               <tr>
-                <th style="width:150px;white-space:nowrap">時間</th>
-                <th style="width:160px;white-space:nowrap">版本</th>
-                <th style="width:110px;white-space:nowrap">類型</th>
-                <th style="min-width:180px">變更檔</th>
+                <th>時間</th><th>版本</th><th>類型</th><th>變更檔</th>
               </tr>
             </thead>
             <tbody>
@@ -232,7 +153,7 @@ async function renderSystemSettings(body) {
   body.innerHTML = `
     <div class="system-settings-page">
     <div class="card" style="background:#eff6ff;border-color:#bfdbfe">
-      <h3 style="margin-top:0">系統版本（自動）</h3>
+      <h3>系統版本（自動）</h3>
       <p style="margin:0;font-size:1.35rem;font-weight:700;color:#1d4ed8;letter-spacing:0.04em">${esc(verLabel)}</p>
       <p class="muted" style="margin:8px 0 0;line-height:1.55;font-size:0.9rem">
         完整版號：<strong style="color:#1e3a5f">${esc(verFull)}</strong><br/>
@@ -245,12 +166,12 @@ async function renderSystemSettings(body) {
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0">自動部署修改紀錄</h3>
+      <h3>自動部署修改紀錄</h3>
       ${deployLogHtml}
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0">公司品牌</h3>
+      <h3>公司品牌</h3>
       <p class="muted" style="margin-top:0">設定後將顯示於登入頁、側欄與 PDF 抬頭。僅系統管理員可修改。</p>
       <form id="brand-form" class="form-grid">
         <div class="field">
@@ -284,124 +205,87 @@ async function renderSystemSettings(body) {
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0">內網與電腦綁定</h3>
+      <h3>總覽公告（最多兩則）</h3>
       <p class="muted" style="margin-top:0;line-height:1.55">
-        限制只能從公司網段登入；並把帳號綁在常用電腦。本機 <code>127.0.0.1</code> 永遠允許，以免管理端鎖死。
-      </p>
-      ${
-        accessCfgAdmin.deviceBindPaused
-          ? `<p class="muted" style="margin:0 0 12px;padding:8px 10px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;color:#9a3412">
-              <strong>電腦綁定：開發階段已停用</strong>（程式註記 <code>DEVICE_BIND_FEATURE_ENABLED=false</code>）。
-              登入不檢查、不新增綁定。上線時改回 true 即可恢復。
-            </p>`
-          : ''
-      }
-      <form id="access-form" class="form-grid">
-        <div class="field check-row-box" style="grid-column:1/-1">
-          <label class="check-row">
-            <input type="checkbox" name="intranetOnly" ${accessCfgAdmin.intranetOnly !== false ? 'checked' : ''} />
-            <span><strong>僅限內網存取</strong></span>
-          </label>
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>允許網段（CIDR，逗號分隔）</label>
-          <input name="loginCidrs" value="${esc(accessCfgAdmin.loginCidrs || '192.168.99.0/24,172.16.0.0/12,127.0.0.1,::1')}" />
-        </div>
-        <div class="field check-row-box">
-          <label class="check-row">
-            <input type="checkbox" name="deviceBindEnabled" ${accessCfgAdmin.deviceBindEnabled ? 'checked' : ''} ${accessCfgAdmin.deviceBindPaused ? 'disabled' : ''} />
-            <span><strong>綁定登入電腦</strong>${accessCfgAdmin.deviceBindPaused ? '（開發中停用）' : ''}</span>
-          </label>
-        </div>
-        <div class="field">
-          <label>每帳號最多幾台</label>
-          <input name="deviceBindMax" type="number" min="1" max="10" value="${esc(String(accessCfgAdmin.deviceBindMax || 3))}" ${accessCfgAdmin.deviceBindPaused ? 'disabled' : ''} />
-        </div>
-        <div class="form-actions" style="grid-column:1/-1">
-          <button type="submit" class="btn primary">儲存存取限制</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0">總覽公告</h3>
-      <p class="muted" style="margin-top:0;line-height:1.55">
-        於<strong>總覽</strong>顯示一則公司公告卡。可上傳附件；同仁點「查看」可讀全文並開啟／下載附件。
-        可設定<strong>公布期間</strong>，超過結束時間自動下架（總覽不再顯示）。
+        可同時設定<strong>兩則</strong>公司公告，啟用且在公布期間內者會一併顯示於總覽（第一則琥珀底、第二則藍底）。
+        可各別上傳附件；同仁點「查看」可讀全文並開啟附件。
         部署不覆蓋 <code>data/</code> 內公告內容與附件。
       </p>
-      <p class="muted" style="margin:0 0 12px;font-size:0.9rem">
-        狀態：
-        <strong style="color:${
-          announcement.active
-            ? '#15803d'
-            : announcement.enabled
-              ? '#b45309'
-              : 'inherit'
-        }">
-          ${esc(formatAnnouncementStatus(announcement))}
-        </strong>
-        ${
-          announcement.updatedAt
-            ? ` · 更新 ${esc(String(announcement.updatedAt).replace('T', ' ').replace(/\.\d+Z$/, ''))}`
-            : ''
-        }
-      </p>
-      <form id="announcement-form" class="form-grid two">
-        <div class="field check-row-box" style="grid-column:1/-1">
-          <label class="check-row">
-            <input type="checkbox" name="enabled" id="announcement-enabled"
-              ${announcement.enabled ? 'checked' : ''} />
-            <span><strong>啟用公告</strong>（須同時在公布期間內才會顯示於總覽）</span>
-          </label>
-        </div>
-        <div class="field">
-          <label>公布開始時間</label>
-          <input type="datetime-local" name="startAt"
-            value="${esc(toDatetimeLocalValue(announcement.startAt))}" />
-          <span class="muted" style="font-size:0.78rem;display:block;margin-top:4px">留空＝立即（不限制開始）</span>
-        </div>
-        <div class="field">
-          <label>公布結束時間</label>
-          <input type="datetime-local" name="endAt"
-            value="${esc(toDatetimeLocalValue(announcement.endAt))}" />
-          <span class="muted" style="font-size:0.78rem;display:block;margin-top:4px">留空＝不自動下架；有填則到期後總覽不顯示</span>
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>公告標題</label>
-          <input name="title" maxlength="120"
-            value="${esc(announcement.title || '')}"
-            placeholder="例如：系統維護通知" />
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>公告內容</label>
-          <textarea name="body" rows="6" maxlength="8000"
-            placeholder="支援多行文字…">${esc(announcement.body || '')}</textarea>
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>附件（選填，總覽不顯示檔名，僅「查看」時可下載）</label>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px">
-            <label class="btn outline sm" style="cursor:pointer;margin:0;display:inline-flex">
-              上傳附件
-              <input type="file" id="announcement-file" class="hidden"
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.zip,.7z" />
+      ${announcementsAdmin
+        .map((announcement, slot) => {
+          const a = { ...emptyAnn(), ...announcement, slot };
+          return `
+      <div style="border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:${slot === 0 ? '16px' : '0'};background:${slot === 0 ? '#fffbeb' : '#eff6ff'}">
+        <h4 style="margin:0 0 8px;color:${slot === 0 ? '#b45309' : '#1d4ed8'}">公告 ${slot + 1}</h4>
+        <p class="muted" style="margin:0 0 12px;font-size:0.9rem">
+          狀態：
+          <strong style="color:${
+            a.active ? '#15803d' : a.enabled ? '#b45309' : 'inherit'
+          }">${esc(formatAnnouncementStatus(a))}</strong>
+          ${
+            a.updatedAt
+              ? ` · 更新 ${esc(formatTaiwanDateTime(a.updatedAt))}`
+              : ''
+          }
+        </p>
+        <form class="form-grid two announcement-form" data-ann-slot="${slot}">
+          <div class="field check-row-box" style="grid-column:1/-1">
+            <label class="check-row">
+              <input type="checkbox" name="enabled" class="announcement-enabled"
+                ${a.enabled ? 'checked' : ''} />
+              <span><strong>啟用此則公告</strong>（須同時在公布期間內才會顯示於總覽）</span>
             </label>
-            <button type="button" class="btn sm outline" id="btn-announcement-file-clear"
-              ${announcement.hasFile ? '' : 'disabled'}>移除附件</button>
-            <button type="button" class="btn sm outline" id="btn-announcement-preview">預覽查看</button>
           </div>
-          <span class="muted" style="font-size:0.78rem;display:block;margin-top:6px">
-            ${
-              announcement.hasFile
-                ? `目前附件：${esc(announcement.originalName || '')}`
-                : '尚未上傳。允許 PDF／Office／圖片／TXT／CSV／ZIP，最大 15MB。'
-            }
-          </span>
-        </div>
-        <div class="form-actions" style="grid-column:1/-1">
-          <button type="submit" class="btn primary">儲存公告</button>
-        </div>
-      </form>
+          <div class="field">
+            <label>公布開始時間</label>
+            <input type="datetime-local" name="startAt"
+              value="${esc(toDatetimeLocalValue(a.startAt))}" />
+            <span class="muted" style="font-size:0.78rem;display:block;margin-top:4px">留空＝立即（不限制開始）</span>
+          </div>
+          <div class="field">
+            <label>公布結束時間</label>
+            <input type="datetime-local" name="endAt"
+              value="${esc(toDatetimeLocalValue(a.endAt))}" />
+            <span class="muted" style="font-size:0.78rem;display:block;margin-top:4px">留空＝不自動下架</span>
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label>公告標題</label>
+            <input name="title" maxlength="120"
+              value="${esc(a.title || '')}"
+              placeholder="例如：系統維護通知" />
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label>公告內容</label>
+            <textarea name="body" rows="5" maxlength="8000"
+              placeholder="支援多行文字…">${esc(a.body || '')}</textarea>
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label>附件（選填）</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px">
+              <label class="btn outline sm" style="cursor:pointer;margin:0;display:inline-flex">
+                上傳附件
+                <input type="file" class="announcement-file hidden"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.zip,.7z" />
+              </label>
+              <button type="button" class="btn sm outline btn-announcement-file-clear"
+                ${a.hasFile ? '' : 'disabled'}>移除附件</button>
+              <button type="button" class="btn sm outline btn-announcement-preview">預覽查看</button>
+            </div>
+            <span class="muted" style="font-size:0.78rem;display:block;margin-top:6px">
+              ${
+                a.hasFile
+                  ? `目前附件：${esc(a.originalName || '')}`
+                  : '尚未上傳。允許 PDF／Office／圖片／TXT／CSV／ZIP，最大 15MB。'
+              }
+            </span>
+          </div>
+          <div class="form-actions" style="grid-column:1/-1">
+            <button type="submit" class="btn primary">儲存公告 ${slot + 1}</button>
+          </div>
+        </form>
+      </div>`;
+        })
+        .join('')}
     </div>
 
     <div class="card">
@@ -612,41 +496,6 @@ async function renderSystemSettings(body) {
     </div>
 
     <div class="card">
-      <h3>備份儲存目錄</h3>
-      <p class="muted" style="margin-top:0;line-height:1.55">
-        設定備份檔案的儲存根目錄。留空則使用預設路徑（<code>data/backups</code>）。
-        Docker 環境請填寫容器內絕對路徑（如 <code>/mnt/nas-share/backups</code>）。
-      </p>
-      <form id="backup-dir-form" class="form-grid">
-        <div class="field">
-          <label for="backup-dir-input">備份目錄路徑</label>
-          <input id="backup-dir-input" name="backupDir" type="text"
-            value="${esc(backupDir)}"
-            placeholder="留空使用預設：data/backups" style="font-family:monospace" />
-          <span class="field-hint" style="color:#6b7280;font-size:0.82rem">
-            目前：<code>${esc(backupDir || '（預設）data/backups')}</code>
-          </span>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="btn primary" id="btn-backup-dir-save">儲存備份目錄</button>
-          <button type="button" class="btn outline" id="btn-backup-dir-reset">恢復預設</button>
-        </div>
-      </form>
-      <p class="muted" style="font-size:0.8rem;margin:12px 0 0;line-height:1.5">
-        ⚠️ 變更目錄後，<strong>已備份的歷史紀錄仍指向舊路徑</strong>，新備份才會寫入新目錄。<br/>
-        確認目錄存在且伺服器程序有寫入權限。不可使用 <code>..</code> 路徑穿越。
-      </p>
-    </div>
-
-    <div class="card">
-      <h3>💬 LINE 通知設定</h3>
-      ${lineSettingsFormHtml(lineCfg, { formId: 'sys-line-form', showAccess: true })}
-      <p class="muted" style="margin:12px 0 0;font-size:0.85rem">
-        亦可從側欄「LINE 通知」進入同一套設定。
-      </p>
-    </div>
-
-    <div class="card">
       <h3>Email 設定（SMTP）</h3>
       <p class="muted" style="margin-top:0">設定 SMTP 後，申請人可收到進度通知，並可對簽核人寄送催辦信。</p>
       <form id="mail-form" class="form-grid">
@@ -697,7 +546,7 @@ async function renderSystemSettings(body) {
         <div class="field"><label>寄件者名稱</label>
           <input name="fromName" value="${esc(mailCfg.fromName || brand.companyName || '線上簽核系統')}" /></div>
         <div class="field"><label>系統網址（信內連結）</label>
-          <input name="baseUrl" value="${esc(mailCfg.baseUrl || 'http://127.0.0.1:3847')}" placeholder="http://公司IP:端口" /></div>
+          <input name="baseUrl" value="${esc(mailCfg.baseUrl || 'http://127.0.0.1:8080')}" placeholder="http://公司IP:端口" /></div>
         <div class="form-actions" style="display:flex;gap:8px;flex-wrap:wrap">
           <button type="submit" class="btn primary">儲存 Email 設定</button>
           <button type="button" class="btn outline" id="btn-mail-test">寄送測試信</button>
@@ -717,8 +566,8 @@ async function renderSystemSettings(body) {
           <span>包含歷史申請單、簽核歷程與附件</span>
         </label>
         <label class="check-row">
-          <input type="checkbox" id="pkg-export-mail-pass" />
-          <span>包含 SMTP 密碼（明文寫入 JSON，預設不匯出）</span>
+          <input type="checkbox" id="pkg-export-mail-pass" checked />
+          <span>包含 SMTP 密碼</span>
         </label>
         <button type="button" class="btn primary" id="btn-pkg-export" style="margin-top:4px">下載設定完整包（JSON）</button>
       </div>
@@ -740,30 +589,6 @@ async function renderSystemSettings(body) {
     </div>`;
 
   // 公司名稱
-  $('#access-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    try {
-      await api('/api/system/settings', {
-        method: 'PUT',
-        body: {
-          intranetOnly: fd.get('intranetOnly') === 'on',
-          loginCidrs: fd.get('loginCidrs'),
-          ...(accessCfgAdmin.deviceBindPaused
-            ? {}
-            : {
-                deviceBindEnabled: fd.get('deviceBindEnabled') === 'on',
-                deviceBindMax: Number(fd.get('deviceBindMax') || 3),
-              }),
-        },
-      });
-      toast('存取限制已儲存', 'success');
-      navigate('system-settings');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-
   $('#brand-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -815,75 +640,82 @@ async function renderSystemSettings(body) {
     }
   });
 
-  // 總覽公告
-  $('#announcement-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const startRaw = String(fd.get('startAt') || '').trim();
-    const endRaw = String(fd.get('endAt') || '').trim();
-    if (startRaw && endRaw && new Date(startRaw) > new Date(endRaw)) {
-      toast('公布開始時間不可晚於結束時間', 'error');
-      return;
-    }
-    try {
-      const data = await api('/api/system/announcement', {
-        method: 'PUT',
-        body: {
-          enabled: !!e.target.querySelector('#announcement-enabled')?.checked,
-          title: String(fd.get('title') || '').trim(),
-          body: String(fd.get('body') || ''),
-          // 空字串＝清除該端限制
-          startAt: startRaw || null,
-          endAt: endRaw || null,
-        },
-      });
-      state.systemSettings = data.settings || state.systemSettings;
-      toast('公告已儲存', 'success');
-      navigate('system-settings');
-    } catch (err) {
-      toast(err.message || '儲存失敗', 'error');
-    }
-  });
+  // 總覽公告（兩則）
+  body.querySelectorAll('form.announcement-form').forEach((formEl) => {
+    const slot = Number(formEl.getAttribute('data-ann-slot')) || 0;
+    const annSnap = announcementsAdmin[slot] || emptyAnn();
 
-  $('#announcement-file')?.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('file', file);
-    try {
-      await api('/api/system/announcement/file', { method: 'POST', body: fd });
-      toast('附件已上傳', 'success');
-      navigate('system-settings');
-    } catch (err) {
-      toast(err.message || '上傳失敗', 'error');
-    }
-  });
+    formEl.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(formEl);
+      const startRaw = String(fd.get('startAt') || '').trim();
+      const endRaw = String(fd.get('endAt') || '').trim();
+      if (startRaw && endRaw && new Date(startRaw) > new Date(endRaw)) {
+        toast('公布開始時間不可晚於結束時間', 'error');
+        return;
+      }
+      try {
+        const data = await api('/api/system/announcement', {
+          method: 'PUT',
+          body: {
+            slot,
+            enabled: !!formEl.querySelector('.announcement-enabled')?.checked,
+            title: String(fd.get('title') || '').trim(),
+            body: String(fd.get('body') || ''),
+            startAt: startRaw || null,
+            endAt: endRaw || null,
+          },
+        });
+        state.systemSettings = data.settings || state.systemSettings;
+        toast(`公告 ${slot + 1} 已儲存`, 'success');
+        navigate('system-settings');
+      } catch (err) {
+        toast(err.message || '儲存失敗', 'error');
+      }
+    });
 
-  $('#btn-announcement-file-clear')?.addEventListener('click', async () => {
-    if (!confirm('確定移除公告附件？')) return;
-    try {
-      await api('/api/system/announcement/file', { method: 'DELETE' });
-      toast('已移除附件', 'success');
-      navigate('system-settings');
-    } catch (err) {
-      toast(err.message || '移除失敗', 'error');
-    }
-  });
+    formEl.querySelector('.announcement-file')?.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('slot', String(slot));
+      try {
+        await api('/api/system/announcement/file', { method: 'POST', body: fd });
+        toast(`公告 ${slot + 1} 附件已上傳`, 'success');
+        navigate('system-settings');
+      } catch (err) {
+        toast(err.message || '上傳失敗', 'error');
+      }
+    });
 
-  $('#btn-announcement-preview')?.addEventListener('click', () => {
-    const a = {
-      ...announcement,
-      active: true,
-      _forcePreview: true,
-      title: String($('#announcement-form [name="title"]')?.value || announcement.title || ''),
-      body: String($('#announcement-form [name="body"]')?.value || announcement.body || ''),
-    };
-    if (!a.title && !a.body && !a.hasFile) {
-      toast('請先填寫公告或上傳附件', 'error');
-      return;
-    }
-    openAnnouncementModal(a);
+    formEl.querySelector('.btn-announcement-file-clear')?.addEventListener('click', async () => {
+      if (!confirm(`確定移除公告 ${slot + 1} 的附件？`)) return;
+      try {
+        await api(`/api/system/announcement/file?slot=${slot}`, { method: 'DELETE' });
+        toast('已移除附件', 'success');
+        navigate('system-settings');
+      } catch (err) {
+        toast(err.message || '移除失敗', 'error');
+      }
+    });
+
+    formEl.querySelector('.btn-announcement-preview')?.addEventListener('click', () => {
+      const a = {
+        ...annSnap,
+        slot,
+        active: true,
+        _forcePreview: true,
+        title: String(formEl.querySelector('[name="title"]')?.value || annSnap.title || ''),
+        body: String(formEl.querySelector('[name="body"]')?.value || annSnap.body || ''),
+      };
+      if (!a.title && !a.body && !a.hasFile) {
+        toast('請先填寫公告或上傳附件', 'error');
+        return;
+      }
+      openAnnouncementModal(a);
+    });
   });
 
   // PDF 數位簽章 — 製作自簽憑證
@@ -1097,46 +929,6 @@ async function renderSystemSettings(body) {
     }
   });
 
-  // 備份目錄
-  $('#backup-dir-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const dir = String(fd.get('backupDir') || '').trim();
-    if (dir && dir.includes('..')) {
-      toast('備份目錄不可包含「..」路徑穿越', 'error');
-      return;
-    }
-    try {
-      await api('/api/system/settings', {
-        method: 'PUT',
-        body: { backupDir: dir },
-      });
-      toast('備份目錄已儲存' + (dir ? `：${dir}` : '（已恢復預設）'), 'success');
-      navigate('system-settings');
-    } catch (err) {
-      toast(err.message || '儲存失敗', 'error');
-    }
-  });
-
-  $('#btn-backup-dir-reset')?.addEventListener('click', async () => {
-    try {
-      await api('/api/system/settings', {
-        method: 'PUT',
-        body: { backupDir: '' },
-      });
-      toast('備份目錄已恢復為預設（data/backups）', 'success');
-      navigate('system-settings');
-    } catch (err) {
-      toast(err.message || '清除失敗', 'error');
-    }
-  });
-
-  // LINE（系統設定內嵌）
-  bindLineSettingsForm({
-    formId: 'sys-line-form',
-    onSaved: () => navigate('system-settings'),
-  });
-
   // Mail
   const mailForm = $('#mail-form');
   if (mailForm) {
@@ -1157,7 +949,7 @@ async function renderSystemSettings(body) {
             pass: fd.get('pass') || '',
             from: fd.get('from') || '',
             fromName: fd.get('fromName') || brand.companyName || '線上簽核系統',
-            baseUrl: fd.get('baseUrl') || 'http://127.0.0.1:3847',
+            baseUrl: fd.get('baseUrl') || 'http://127.0.0.1:8080',
           },
         });
         toast('Email 設定已儲存', 'success');
@@ -1199,22 +991,17 @@ async function renderSystemSettings(body) {
   $('#btn-pkg-export')?.addEventListener('click', async () => {
     const history = $('#pkg-export-history')?.checked ? '1' : '0';
     const mailSecrets = $('#pkg-export-mail-pass')?.checked ? '1' : '0';
-    if (mailSecrets === '1') {
-      const ok = confirm(
-        '將把 SMTP 密碼以明文寫入 JSON 設定包。\n檔案請勿放入一鍵安裝包或 Git。\n確定仍要匯出密碼？'
-      );
-      if (!ok) return;
-    }
     try {
-      const confirmMail = mailSecrets === '1' ? '1' : '0';
       const blob = await api(
-        `/api/system/package/export?includeHistory=${history}&includeMailSecrets=${mailSecrets}&confirmMailSecrets=${confirmMail}`,
+        `/api/system/package/export?includeHistory=${history}&includeMailSecrets=${mailSecrets}`,
         { expectBlob: true }
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `簽核系統_${history === '1' ? '完整含歷史' : '設定'}包_${twToday()}.json`;
+      a.download = `簽核系統_${history === '1' ? '完整含歷史' : '設定'}包_${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast('設定完整包已下載', 'success');
@@ -1262,8 +1049,4 @@ async function renderSystemSettings(body) {
       if (resultEl) resultEl.textContent = err.message || '匯入失敗';
     }
   });
-}
-
-if (typeof boot === 'function') {
-  boot();
 }

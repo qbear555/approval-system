@@ -1,12 +1,14 @@
 {
   "name": "approval-system",
   "version": "1.1.0",
-  "description": "企業線上簽核：內網、自訂流程、PDF、Email／LINE／桌面通知。本機 http://127.0.0.1:3847",
+  "description": "線上簽核系統 - 自訂流程、紀錄留存、PDF 匯出",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "init-admin": "node server/seed.js",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev:frontend": "npm --prefix frontend run dev",
     "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
     "build:ubuntu": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ubuntu-installer.ps1"
   },
@@ -14,6 +16,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "@signpdf/placeholder-plain": "^3.2.4",
     "@signpdf/signer-p12": "^3.2.4",
     "@signpdf/signpdf": "^3.2.4",
@@ -24,13 +27,13 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.2.0",
+    "mysql2": "^3.24.5",
     "node-forge": "^1.3.1",
     "nodemailer": "^6.10.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174",
     "pdfkit": "^0.15.2",
     "ssh2": "^1.17.0",
     "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "pptxgenjs": "^4.0.1"
   }
 }

@@ -1,34 +1,92 @@
-/**
- * 申請詳情／簽核／轉簽
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
-async function renderDetail(body, id) {
+async function fetchRequestDetailData(id) {
   await loadUsers();
+  const data = await api(`/api/requests/${id}`);
+  let onlyOfficeEnabled = false;
+  try {
+    const oo = await api('/api/onlyoffice/status');
+    onlyOfficeEnabled = !!oo.enabled;
+  } catch {
+    onlyOfficeEnabled = false;
+  }
+  data.onlyOfficeEnabled = onlyOfficeEnabled;
+  return data;
+}
+
+function buildRequestDetailActionsHtml(detailData) {
   const {
     request,
     canApprove,
+    canReturn: canReturnApi,
+    previousStep: previousStepApi,
     currentStep,
     canAttach,
     isFinalStep,
     canCancel,
     canDelete,
-    canRestore,
+    canVoid,
+    canVoidApply,
+    pendingVoidRequest,
+    voidOfRequest,
+    voidPreviewSteps,
     approverSigned,
     coApprovers,
     applicantLabor,
-  } = await api(`/api/requests/${id}`);
-  $('#page-title').textContent = `簽核詳情 #${request.id}`;
+    actingAsProxy,
+  } = detailData;
+
+  // 前端備援：依流程步驟推算「上一關」（避免 API 欄位被舊快取／代理省略）
+  const reqSteps = Array.isArray(request?.steps) ? request.steps : [];
+  const curStepIdx = reqSteps.findIndex(
+    (s) => Number(s.order) === Number(request?.current_step)
+  );
+  const previousStepClient =
+    curStepIdx > 0
+      ? {
+          order: reqSteps[curStepIdx - 1].order,
+          name: reqSteps[curStepIdx - 1].name || `步驟 ${reqSteps[curStepIdx - 1].order}`,
+        }
+      : null;
+  const previousStep = previousStepApi || previousStepClient;
+  const canReturn =
+    !!canApprove &&
+    request?.status === 'pending' &&
+    !!(canReturnApi || previousStep);
+
   const actionsHtml = [];
-  if (canApprove) {
+  const isOwnDraft =
+    request.status === 'draft' &&
+    (Number(request.requester_id) === Number(state.user?.id) ||
+      Number(request.submitted_by) === Number(state.user?.id) ||
+      isAdmin());
+  if (isOwnDraft) {
     actionsHtml.push(`
-      <button type="button" class="btn success" id="btn-approve">核准</button>
-      <button type="button" class="btn danger" id="btn-reject">駁回</button>
-      <button type="button" class="btn outline" id="btn-cosign" title="臨時邀請其他同仁會簽">➕ 加簽</button>
-      <button type="button" class="btn outline" id="btn-forward" title="將目前簽核關卡轉交給其他主管">↗️ 轉簽</button>
+      <button type="button" class="btn primary" id="btn-edit-draft">繼續編輯草稿</button>
+      <button type="button" class="btn success" id="btn-submit-draft">送出申請</button>
     `);
   }
+  if (canApprove) {
+    const proxyHint = actingAsProxy?.principal?.name
+      ? `（代理 ${actingAsProxy.principal.name}）`
+      : '';
+    actionsHtml.push(`
+      <button type="button" class="btn success" id="btn-approve">核准${proxyHint}</button>
+      <button type="button" class="btn danger" id="btn-reject">駁回</button>
+      <button type="button" class="btn outline" id="btn-cosign" title="臨時邀請其他同仁加簽">➕ 加簽</button>
+      <button type="button" class="btn outline" id="btn-forward" title="將目前簽核關卡轉交給其他人">↗️ 轉簽</button>
+    `);
+    if (canReturn && previousStep) {
+      actionsHtml.push(`
+      <button type="button" class="btn warning" id="btn-return"
+        title="退回「${esc(previousStep.name || '上一關')}」重新簽核">
+        ↩ 退回上一位
+      </button>
+    `);
+    }
+  }
   if (
-    (request.requester_id === state.user.id || state.user.role === 'admin') &&
+    (Number(request.requester_id) === Number(state.user.id) ||
+      Number(request.submitted_by) === Number(state.user.id) ||
+      state.user.role === 'admin') &&
     request.status === 'pending'
   ) {
     actionsHtml.push(
@@ -41,6 +99,16 @@ async function renderDetail(body, id) {
       `<button type="button" class="btn outline" id="btn-cancel">取消申請</button>`
     );
   }
+  if (canVoidApply) {
+    actionsHtml.push(
+      `<button type="button" class="btn warning" id="btn-void-apply" title="提出作廢申請，由原單簽核人再簽，全部通過後原單自動作廢">申請作廢</button>`
+    );
+  }
+  if (canVoid) {
+    actionsHtml.push(
+      `<button type="button" class="btn outline" id="btn-void" title="略過作廢流程，立即將此單改為已作廢並通知相關人員">直接作廢</button>`
+    );
+  }
   // 簽核中／已結案皆可下載 PDF；已核准且有附件時打包 ZIP
   if (request.status !== 'draft' || request.requester_id === state.user.id || isAdmin()) {
     const attCount = (request.attachments || []).length;
@@ -51,40 +119,121 @@ async function renderDetail(body, id) {
       }">${zipDl ? `下載 PDF＋附件（${attCount}）` : '下載 PDF'}</button>`
     );
   }
-  // 伺服器判定：已有簽署人簽核則不可刪除
-  if (canRestore) {
+  // 複製為新申請：任何有權限查看此單者（非草稿）皆可基於此單複製新申請
+  if (request.status !== 'draft') {
     actionsHtml.push(
-      `<button type="button" class="btn outline" id="btn-restore-request" title="還原此申請">還原申請</button>`
+      `<button type="button" class="btn outline" id="btn-clone-request" title="以此單內容建立新申請單">📑 複製為新申請</button>`
     );
   }
+  // 伺服器判定：已有簽署人簽核則不可刪除
   if (canDelete) {
     actionsHtml.push(
       `<button type="button" class="btn danger" id="btn-del-request" title="刪除此申請">刪除申請</button>`
     );
   }
-  $('#page-actions').innerHTML = actionsHtml.join(' ');
+  return actionsHtml.join(' ');
+}
+
+function buildRequestDetailMainHtml(detailData) {
+  const {
+    request,
+    canApprove,
+    canReturn: canReturnApi,
+    previousStep: previousStepApi,
+    currentStep,
+    canAttach,
+    isFinalStep,
+    canCancel,
+    canDelete,
+    canVoid,
+    canVoidApply,
+    pendingVoidRequest,
+    voidOfRequest,
+    voidPreviewSteps,
+    approverSigned,
+    coApprovers,
+    applicantLabor,
+    actingAsProxy,
+    onlyOfficeEnabled,
+  } = detailData;
+
+  const reqSteps = Array.isArray(request?.steps) ? request.steps : [];
+  const curStepIdx = reqSteps.findIndex(
+    (s) => Number(s.order) === Number(request?.current_step)
+  );
+  const previousStepClient =
+    curStepIdx > 0
+      ? {
+          order: reqSteps[curStepIdx - 1].order,
+          name: reqSteps[curStepIdx - 1].name || `步驟 ${reqSteps[curStepIdx - 1].order}`,
+        }
+      : null;
+  const previousStep = previousStepApi || previousStepClient;
+  const canReturn =
+    !!canApprove &&
+    request?.status === 'pending' &&
+    !!(canReturnApi || previousStep);
 
   const steps = request.steps || [];
   const userName = (id) => {
     const u = (state.users || []).find((x) => x.id === Number(id));
     return u ? u.name : `#${id}`;
   };
-  // 簽核流程圖（含實際進度：已完成／簽核中／已略過／駁回）
   const progress = flowChartHtml(steps, {
     request,
     userName,
     showLegend: true,
+    flow: request.flow || null,
   });
 
-  const deletedBanner = request.deleted_at
-    ? `<div class="card" style="background:#fef2f2;border-color:#fecaca;margin-bottom:12px">
-          <strong style="color:#b91c1c">此申請已刪除</strong>
+  const voidAction = [...(request.actions || [])]
+    .reverse()
+    .find((a) => a.action === 'void');
+  const voidedBanner =
+    request.status === 'voided'
+      ? `<div class="card" style="background:#faf5ff;border-color:#d8b4fe;margin-bottom:12px">
+          <strong style="color:#6b21a8">此申請已作廢</strong>
           <div class="muted" style="margin-top:6px;font-size:0.9rem">
-            已從一般列表隱藏；單據、附件與備份仍保留。管理員可按上方「還原申請」。
+            ${
+              voidAction?.comment
+                ? `原因：${esc(htmlToPlainText(voidAction.comment))}<br/>`
+                : ''
+            }
+            ${voidAction?.actor_name ? `操作人：${esc(voidAction.actor_name)}` : ''}
+            ${
+              voidAction?.created_at
+                ? `　時間：${esc(String(voidAction.created_at).slice(0, 16))}`
+                : ''
+            }
+            <br/>歷程與附件仍保留；請假已休不再計入。
           </div>
         </div>`
-    : '';
-
+      : '';
+  const pendingVoidBanner =
+    pendingVoidRequest && request.status === 'approved'
+      ? `<div class="card" style="background:#fff7ed;border-color:#fdba74;margin-bottom:12px">
+          <strong>作廢申請進行中</strong>
+          <div class="muted" style="margin-top:6px;font-size:0.9rem">
+            已送出作廢申請 <a href="#detail/${pendingVoidRequest.id}">#${pendingVoidRequest.id}</a>
+            「${esc(pendingVoidRequest.title || '')}」。原單簽核人全部通過後，此單會自動改為已作廢。
+          </div>
+        </div>`
+      : '';
+  const voidOfBanner =
+    voidOfRequest
+      ? `<div class="card" style="background:#faf5ff;border-color:#d8b4fe;margin-bottom:12px">
+          <strong style="color:#6b21a8">此為作廢申請</strong>
+          <div class="muted" style="margin-top:6px;font-size:0.9rem">
+            通過後將自動作廢原單
+            <a href="#detail/${voidOfRequest.id}">#${voidOfRequest.id}</a>
+            「${esc(voidOfRequest.title || '')}」（目前：${esc(
+              STATUS[voidOfRequest.status]?.label || voidOfRequest.status || ''
+            )}）。
+            <br/>簽核人為原單實際核准過的人員。
+          </div>
+        </div>`
+      : '';
+  const voidBanner = `${voidedBanner}${pendingVoidBanner}${voidOfBanner}`;
   const coApproverBanner =
     coApprovers &&
     coApprovers.mode === 'all' &&
@@ -207,18 +356,19 @@ async function renderDetail(body, id) {
   let financeConfirmBanner = '';
   if (isCreditLimitReq && request.status === 'approved') {
     if (finConfirmedAction) {
+      const fdObj = (() => {
+        const raw = finConfirmedAction.form_data;
+        if (raw && typeof raw === 'object') return raw;
+        try {
+          return JSON.parse(raw || '{}') || {};
+        } catch {
+          return {};
+        }
+      })();
       const fdNote =
-        finConfirmedAction.form_data?.finance_establishment_note ||
-        (typeof finConfirmedAction.form_data === 'string'
-          ? (() => {
-              try {
-                return JSON.parse(finConfirmedAction.form_data || '{}')
-                  .finance_establishment_note;
-              } catch {
-                return '';
-              }
-            })()
-          : '');
+        String(fdObj.finance_establishment_extra_note || '').trim() ||
+        String(finConfirmedAction.comment || '').trim() ||
+        String(fdObj.finance_establishment_note || '').trim();
       if (!applicantAckAction && (isApplicantSelf || isAdmin())) {
         financeConfirmBanner = `
           <div class="card" style="background:#f0fdf4;border-color:#86efac;margin-bottom:14px;padding:16px">
@@ -263,7 +413,7 @@ async function renderDetail(body, id) {
             <div>
               <strong style="color:#065f46;font-size:1.05rem">📊 財務部授信額度建檔確認</strong>
               <p style="margin:4px 0 0;font-size:0.88rem;color:#047857">
-                總經理已核定通過。請於 ERP 完成授信額度建檔後，點擊下方按鈕完成登記並通知申請人。
+                總經理已核定通過。請於 ERP 完成授信額度設定後，點擊下方按鈕完成登記（備註自動帶入「已於ERP系統完成授信額度設定」）並通知申請人。
               </p>
             </div>
             <button type="button" class="btn success" id="btn-finance-confirm" style="white-space:nowrap;padding:8px 18px;font-weight:600">✅ 確認完成額度建檔</button>
@@ -286,21 +436,69 @@ async function renderDetail(body, id) {
     }
   }
 
+  // 信用額度簽核步驟：預填額度（一律「元」）
+  const creditStepPrefill = (() => {
+    if (!canApprove || !currentStep) return {};
+    const ad = request.approver_data || {};
+    const name = String(currentStep.name || '');
+    const pre = {};
+    if (/業務/.test(name)) {
+      if (ad.requested_credit_limit != null && ad.requested_credit_limit !== '') {
+        pre.requested_credit_limit = ad.requested_credit_limit;
+      }
+    } else if (/副總/.test(name)) {
+      pre.vp_suggested_limit =
+        ad.vp_suggested_limit != null && ad.vp_suggested_limit !== ''
+          ? ad.vp_suggested_limit
+          : ad.requested_credit_limit != null && ad.requested_credit_limit !== ''
+            ? ad.requested_credit_limit
+            : '';
+    } else if (/總經理/.test(name)) {
+      pre.gm_approved_limit =
+        ad.gm_approved_limit != null && ad.gm_approved_limit !== ''
+          ? ad.gm_approved_limit
+          : ad.vp_suggested_limit != null && ad.vp_suggested_limit !== ''
+            ? ad.vp_suggested_limit
+            : ad.requested_credit_limit != null && ad.requested_credit_limit !== ''
+              ? ad.requested_credit_limit
+              : '';
+    }
+    return pre;
+  })();
+
   // 簽核中：申請單以 PDF 呈現（其餘狀態維持表單區塊，仍可下載 PDF）
-  const usePdfFormView = request.status === 'pending';
+  // 若為紙本套印版面（pdf_template），一律以原樣 PDF 呈現
+  const isPdfTemplateReq = request.pdfLayout?.type === 'pdf_template';
+  const usePdfFormView = request.status === 'pending' || isPdfTemplateReq;
 
-  // OnlyOffice 狀態（可選）
-  let onlyOfficeEnabled = false;
-  try {
-    const oo = await api('/api/onlyoffice/status');
-    onlyOfficeEnabled = !!oo.enabled;
-  } catch {
-    onlyOfficeEnabled = false;
-  }
+  const proxyApproveBanner =
+    canApprove && actingAsProxy?.principal
+      ? `<div class="card" style="background:#eef2ff;border-color:#a5b4fc;margin-bottom:12px">
+          <strong style="color:#3730a3">代簽模式</strong>
+          <div class="muted" style="margin-top:6px;font-size:0.9rem">
+            您正以代理人身份，代 <strong>${esc(
+              actingAsProxy.principal.name || '#' + actingAsProxy.principal_id
+            )}</strong> 處理此關簽核。
+            核准／駁回／退回後，歷程會註記「代理 …」。
+            <br/><span style="font-size:0.85rem">（既有簽核步驟快照不變；僅依目前有效代理人設定判斷）</span>
+          </div>
+        </div>`
+      : '';
 
-  body.innerHTML = `
-    <div class="detail-main">
-      ${deletedBanner}
+  const isProxySubmit =
+    request.submitted_by &&
+    Number(request.submitted_by) !== Number(request.requester_id);
+  const submittedByLabel =
+    request.submitted_by_name ||
+    (request.submitted_by
+      ? (state.users || []).find((u) => Number(u.id) === Number(request.submitted_by))
+          ?.name
+      : '') ||
+    (request.submitted_by ? `#${request.submitted_by}` : '');
+
+  return `
+      ${proxyApproveBanner}
+      ${voidBanner}
       ${coApproverBanner}
       ${finalNotifyBanner}
       ${financeConfirmBanner}
@@ -309,12 +507,28 @@ async function renderDetail(body, id) {
           <div>
             <h3 style="margin:0 0 8px">${esc(request.title)}</h3>
             ${statusTag(request.status)}
+            ${
+              isProxySubmit
+                ? `<span class="tag" style="background:#e0e7ff;color:#3730a3;margin-left:6px">代申請</span>`
+                : ''
+            }
+            ${
+              canApprove && actingAsProxy
+                ? `<span class="tag" style="background:#fef3c7;color:#92400e;margin-left:6px">代簽</span>`
+                : ''
+            }
           </div>
         </div>
-        ${progress}
+        <div class="flow-chart-wrap" style="margin-top:14px">${progress}</div>
         <dl class="kv" style="margin-top:16px">
           <dt>流程</dt><dd>${esc(request.workflow_name)}</dd>
-          <dt>申請人</dt><dd>${esc(request.requester_name)}${request.requester_dept ? `（${esc(request.requester_dept)}）` : ''}</dd>
+          <dt>申請人</dt><dd>${esc(request.requester_name)}${request.requester_dept ? `（${esc(request.requester_dept)}）` : ''}${
+            isProxySubmit
+              ? ` <span class="muted" style="font-size:0.85rem">· 由 ${esc(
+                  submittedByLabel
+                )} 代申請</span>`
+              : ''
+          }</dd>
           <dt>建立時間</dt><dd>${esc(request.created_at)}</dd>
           ${request.completed_at ? `<dt>完成時間</dt><dd>${esc(request.completed_at)}</dd>` : ''}
           ${currentStep ? `<dt>目前步驟</dt><dd>${esc(currentStep.name)}</dd>` : ''}
@@ -346,24 +560,25 @@ async function renderDetail(body, id) {
         </dl>
         ${
           usePdfFormView
-            ? `<div class="pdf-form-view" style="margin-top:16px">
+            ? `<div class="pdf-form-view">
                 <div class="pdf-form-toolbar">
                   <strong>申請單（PDF）</strong>
-                  <span class="muted" style="font-size:0.82rem">簽核中以正式 PDF 版面檢視</span>
+                  <span class="muted" style="font-size:0.82rem">簽核中以正式 PDF 版面檢視 · 可捲動縮放</span>
                   <button type="button" class="btn outline sm" id="btn-pdf-reload" style="margin-left:auto">重新載入</button>
+                  <button type="button" class="btn outline sm" id="btn-pdf-newtab" title="在新分頁全螢幕開啟">新分頁開啟</button>
                 </div>
                 <div id="pdf-preview-wrap" class="pdf-preview-wrap">
                   <div class="muted" style="padding:24px;text-align:center">正在產生 PDF 預覽…</div>
                 </div>
-                <details class="pdf-form-fallback" style="margin-top:12px">
+                <details class="pdf-form-fallback">
                   <summary class="muted" style="cursor:pointer;font-size:0.9rem">顯示網頁表單內容（備援）</summary>
-                  <div style="margin-top:10px">
-                    ${renderFormDataBlock(request.formFields, request.form_data)}
+                  <div style="margin-top:10px;padding:0 12px 12px">
+                    ${renderFormDataBlock(request.formFields, request.form_data, request.steps, request.templateSteps)}
                     ${renderApproverDataBlock(request.approver_data)}
                   </div>
                 </details>
               </div>`
-            : `${renderFormDataBlock(request.formFields, request.form_data)}
+            : `${renderFormDataBlock(request.formFields, request.form_data, request.steps, request.templateSteps)}
                ${renderApproverDataBlock(request.approver_data)}`
         }
         ${renderAttachmentsBlock(request.attachments || [], {
@@ -374,7 +589,13 @@ async function renderDetail(body, id) {
       ${
         canApprove
           ? `<div class="card">
-              <h3>簽核處理 — ${esc(currentStep?.name || '')}</h3>
+              <h3>簽核處理 — ${esc(currentStep?.name || '')}${
+                actingAsProxy?.principal?.name
+                  ? ` <span class="muted" style="font-weight:500;font-size:0.9rem">（代理 ${esc(
+                      actingAsProxy.principal.name
+                    )}）</span>`
+                  : ''
+              }</h3>
               ${
                 // 僅人事步驟顯示申請人特休（代理人不顯示）
                 applicantLabor &&
@@ -386,14 +607,31 @@ async function renderDetail(body, id) {
               ${
                 stripSpecialLeaveHoursFields(currentStep?.approverFields || [])
                   .length
-                  ? `<div id="step-form-fields" class="form-grid form-fields-multi" style="margin-bottom:12px">
+                  ? `<div id="step-form-fields" class="form-grid form-fields-multi${
+                      /實際工時|actual_|ot_|comp_leave|延長工時/.test(
+                        (currentStep.approverFields || [])
+                          .map((x) => `${x.id || ''} ${x.label || ''}`)
+                          .join(' ')
+                      )
+                        ? ' form-fields-ot'
+                        : ''
+                    }" style="margin-bottom:12px">
                       ${stripSpecialLeaveHoursFields(
                         currentStep.approverFields || []
                       )
                         .map((f) =>
                           renderDynamicFieldHtml(
                             f,
-                            applicantLabor?.fieldPrefill || {}
+                            {
+                              ...(applicantLabor?.fieldPrefill || {}),
+                              ...(creditStepPrefill || {}),
+                            },
+                            {
+                              compactHints: /actual_|ot_|comp_leave|實際|時數|小時/.test(
+                                String(f.id || '') + String(f.label || '')
+                              ),
+                              compactTextarea: true,
+                            }
                           )
                         )
                         .join('')}
@@ -407,35 +645,28 @@ async function renderDetail(body, id) {
                             ? '人事單位：請選擇假別；特休請確認剩餘日數（不換算小時），其他假別可留白。'
                             : /管理部/.test(String(currentStep?.name || ''))
                               ? '管理部：請依檢核標準填寫上方欄位。'
-                              : `${esc(currentStep?.name || '簽核單位')}：請填寫上方欄位。`
+                              : /財務/.test(String(currentStep?.name || ''))
+                                ? '財務人員：請填寫銷貨收入、銷貨成本、銷貨毛利；毛利差異說明、備註說明可選填。毛利會依「收入−成本」自動帶入，可再調整。'
+                              : /業務/.test(String(currentStep?.name || ''))
+                                ? '業務人員：請填寫「申請信用額度（元）」（例：25 萬請填 <strong>250000</strong>）；「業務員要求條件」可選填。（「增加額度原由」由申請人填寫）'
+                                : /副總/.test(String(currentStep?.name || ''))
+                                  ? '副總經理：請填寫「建議額度（元）」（例：25 萬＝250000；已預填業務申請額）。核決：≤1,000,000 元結案，超過須總經理。「要求條件」可選填。'
+                                  : /總經理/.test(String(currentStep?.name || ''))
+                                    ? '總經理：額度超過副總權限（1,000,000 元）。請填「核定額度（元）」（例：250000）；「要求條件」可選填。'
+                                    : `${esc(currentStep?.name || '簽核單位')}：請填寫上方欄位。`
                       }
                     </p>`
                   : ''
               }
               ${
-                canAttach
-                  ? `<div class="field" style="margin-bottom:12px">
-                      <label>補充附件（選填，可多檔上傳）</label>
-                      <input type="file" id="step-attachments" multiple
-                        accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.txt,image/*" />
-                      <div class="muted" style="font-size:0.82rem;margin-top:4px">
-                        中間簽核步驟可一次多選新增附件（Ctrl／Shift 多選，最多 20 個）；亦可先按「僅上傳附件」再核准。最終審核者不可上傳。
-                      </div>
-                      <div class="form-actions" style="margin-top:8px">
-                        <button type="button" class="btn outline sm" id="btn-upload-step-att">僅上傳附件</button>
-                      </div>
-                    </div>`
-                  : isFinalStep
-                    ? `<p class="muted" style="font-size:0.85rem;margin:0 0 12px">此為最終審核步驟，不可新增附件。</p>`
-                    : ''
-              }
-              <div class="field" style="margin-bottom:12px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:#f8fafc">
+                canApprove && SIGNATURE_SETTINGS_ENABLED
+                  ? `<div class="field" style="margin-bottom:12px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:#f8fafc">
                 <label style="font-weight:600;margin-bottom:6px;display:block">✍️ 電子簽名檔選擇</label>
                 <p class="muted" style="margin:0 0 8px;font-size:0.85rem">預設使用「個人預設簽名」；核准時若未另選現場手寫，將自動套用帳號設定中的簽名。</p>
                 <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
                   <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
                     <input type="radio" name="sig_mode" value="default" checked />
-                    <span>使用預設個人簽名 ${state.user?.signature_image ? '✅' : '（尚未設定，請至帳號設定）'}</span>
+                    <span>使用預設個人簽名 ${state.user?.has_signature || state.user?.signature_image ? '✅' : '（尚未設定，請至帳號設定）'}</span>
                   </label>
                   <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
                     <input type="radio" name="sig_mode" value="draw" />
@@ -446,22 +677,110 @@ async function renderDetail(body, id) {
                   ${
                     state.user?.signature_image
                       ? `<img src="${state.user.signature_image}" alt="預設簽名" style="max-height:70px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:2px" />`
-                      : `<span class="muted" style="font-size:0.85rem">尚未設定個人簽名，可至「帳號設定」建立，或改選現場手寫。</span>`
+                      : `<span class="muted" style="font-size:0.85rem">尚未載入預設簽名；可至「帳號設定」建立，或改選現場手寫。</span>`
                   }
                 </div>
                 <div id="draw-sig-wrap" style="margin-top:10px;display:none">
                   <button type="button" class="btn outline sm" id="btn-open-spot-sig">✏️ 點此開始手寫簽名</button>
                   <div id="spot-sig-preview" style="margin-top:8px"></div>
                 </div>
+              </div>`
+                  : ''
+              }
+              ${
+                canAttach
+                  ? `<div class="field" style="margin-bottom:12px">
+                      <label>補充附件（選填，可多檔上傳或附加已核准申請單）</label>
+                      <input type="file" id="step-attachments" multiple
+                        accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.txt,image/*" />
+                      <div class="muted" style="font-size:0.82rem;margin-top:4px">
+                        中間簽核步驟可一次多選新增附件（Ctrl／Shift 多選，最多 20 個），或附加已簽核完成的申請單 PDF。亦可先按「僅上傳附件」再核准。最終審核者不可上傳。
+                      </div>
+                      <div class="form-actions" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px">
+                        <button type="button" class="btn outline sm" id="btn-upload-step-att">僅上傳附件</button>
+                        <button type="button" class="btn outline sm" id="btn-pick-approved-step">附加已核准申請單</button>
+                      </div>
+                    </div>`
+                  : isFinalStep
+                    ? `<p class="muted" style="font-size:0.85rem;margin:0 0 12px">此為最終審核步驟，不可新增附件。</p>`
+                    : ''
+              }
+              <div class="field"><label>簽核意見</label><textarea id="action-comment" placeholder="選填意見（駁回／退回上一位時建議填寫）…"></textarea></div>
+              <div class="approval-action-bar">
+                <button type="button" class="btn success" id="btn-approve-card">核准</button>
+                <button type="button" class="btn danger" id="btn-reject-card">駁回</button>
+                <button type="button" class="btn outline" id="btn-cosign-card" title="臨時邀請其他同仁加簽">➕ 加簽</button>
+                <button type="button" class="btn outline" id="btn-forward-card" title="將目前簽核關卡轉交給其他人">↗️ 轉簽</button>
+                ${
+                  canReturn && previousStep
+                    ? `<button type="button" class="btn warning" id="btn-return-card"
+                        title="退回「${esc(previousStep.name || '上一關')}」">
+                        ↩ 退回上一位（${esc(previousStep.name || '上一關')}）
+                      </button>`
+                    : canApprove
+                      ? `<span class="muted" style="font-size:0.85rem">此為第一關，無法退回上一位（需退件請用「駁回」）</span>`
+                      : ''
+                }
               </div>
-              <div class="field"><label>簽核意見</label><textarea id="action-comment" placeholder="選填意見…"></textarea></div>
+              ${
+                canReturn && previousStep
+                  ? `<p class="muted" style="font-size:0.85rem;margin:10px 0 0;line-height:1.45">
+                      「退回上一位」會將單據退至 <strong>${esc(previousStep.name || '上一關')}</strong>，
+                      該關簽署人需<strong>重新簽核</strong>；歷程會留下退回紀錄。
+                    </p>`
+                  : ''
+              }
             </div>`
           : ''
       }
-    </div>`;
+    `;
+}
+
+function bindRequestDetailEvents(body, detailData, onRefresh) {
+  const {
+    request,
+    canApprove,
+    canReturn: canReturnApi,
+    previousStep: previousStepApi,
+    currentStep,
+    canAttach,
+    isFinalStep,
+    canCancel,
+    canDelete,
+    canVoid,
+    canVoidApply,
+    pendingVoidRequest,
+    voidOfRequest,
+    voidPreviewSteps,
+    approverSigned,
+    coApprovers,
+    applicantLabor,
+    actingAsProxy,
+    onlyOfficeEnabled,
+  } = detailData;
+
+  const id = request.id;
+  const reqSteps = Array.isArray(request?.steps) ? request.steps : [];
+  const curStepIdx = reqSteps.findIndex(
+    (s) => Number(s.order) === Number(request?.current_step)
+  );
+  const previousStepClient =
+    curStepIdx > 0
+      ? {
+          order: reqSteps[curStepIdx - 1].order,
+          name: reqSteps[curStepIdx - 1].name || `步驟 ${reqSteps[curStepIdx - 1].order}`,
+        }
+      : null;
+  const previousStep = previousStepApi || previousStepClient;
+  const canReturn =
+    !!canApprove &&
+    request?.status === 'pending' &&
+    !!(canReturnApi || previousStep);
+
+  const isPdfTemplateReq = request.pdfLayout?.type === 'pdf_template';
+  const usePdfFormView = request.status === 'pending' || isPdfTemplateReq;
 
   let spotSignatureImage = null;
-
   if (canApprove) {
     const sigRadios = body.querySelectorAll('input[name=sig_mode]');
     const drawWrap = $('#draw-sig-wrap');
@@ -472,16 +791,17 @@ async function renderDetail(body, id) {
       if (drawWrap) drawWrap.style.display = mode === 'draw' ? '' : 'none';
       if (defaultPrev) defaultPrev.style.display = mode === 'default' ? '' : 'none';
     };
-    sigRadios.forEach((r) => {
-      r.addEventListener('change', syncSigModeUi);
-    });
+    sigRadios.forEach((r) => r.addEventListener('change', syncSigModeUi));
     syncSigModeUi();
-    // 進詳情時確保個人預設簽名是最新（登入 token 不含簽名圖）
     (async () => {
       try {
         const sigRes = await api('/api/users/me/signature');
         if (sigRes?.signature_image) {
-          state.user = { ...(state.user || {}), signature_image: sigRes.signature_image };
+          state.user = {
+            ...(state.user || {}),
+            signature_image: sigRes.signature_image,
+            has_signature: true,
+          };
           if (defaultPrev && body.querySelector('input[name=sig_mode][value=default]')?.checked) {
             defaultPrev.innerHTML = `<img src="${sigRes.signature_image}" alt="預設簽名" style="max-height:70px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:2px" />`;
           }
@@ -501,8 +821,7 @@ async function renderDetail(body, id) {
               <div style="display:flex;align-items:center;gap:10px">
                 <img src="${dataUrl}" style="max-height:65px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:2px" alt="手寫簽名" />
                 <span style="color:#15803d;font-size:0.85rem">✅ 已儲存現場簽名</span>
-              </div>
-            `;
+              </div>`;
           }
         },
       });
@@ -523,23 +842,31 @@ async function renderDetail(body, id) {
         hoursId: 'actual_hours',
         hintId: 'actual-hours-hint',
         hintText:
-          '實際總計依實際工時開始／結束自動換算（17:30～24:00，最小 0.5 小時）',
+          '實際總計依實際工時開始／結束自動換算（00:00～24:00 全日，最小 0.5 小時）',
       });
     }
     // 人事：假別（人事核定）切換 → 剩餘日數／小時自動調整
     bindHrLeaveTypeAutoRemain(stepBox, applicantLabor);
+    bindSalesGrossAutoCalc(stepBox);
+    bindItRepairNoncompliantNote(stepBox);
   }
 
   body.querySelectorAll('[data-dl-att]').forEach((btn) => {
     btn.onclick = async () => {
+      const id = btn.dataset.dlAtt;
+      const name = btn.dataset.dlName || `attachment-${id}`;
+      if (btn.dataset.attView === '1' || isPreviewableAttachmentName(name)) {
+        await openAttachmentPreview(id, name);
+        return;
+      }
       try {
-        const blob = await api(`/api/attachments/${btn.dataset.dlAtt}`, {
+        const blob = await api(`/api/attachments/${id}`, {
           expectBlob: true,
         });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = btn.dataset.dlName || `attachment-${btn.dataset.dlAtt}`;
+        a.download = name;
         a.click();
         URL.revokeObjectURL(url);
       } catch (e) {
@@ -547,9 +874,9 @@ async function renderDetail(body, id) {
       }
     };
   });
-  body.querySelectorAll('[data-preview-att]').forEach((btn) => {
+  body.querySelectorAll('[data-view-att]').forEach((btn) => {
     btn.onclick = () =>
-      openAttachmentPreviewModal(btn.dataset.previewAtt, btn.dataset.previewName);
+      openAttachmentPreview(btn.dataset.viewAtt, btn.dataset.dlName || '');
   });
   body.querySelectorAll('[data-oo-edit]').forEach((btn) => {
     btn.onclick = () => openOnlyOfficeEditor(btn.dataset.ooEdit, request.id);
@@ -560,10 +887,34 @@ async function renderDetail(body, id) {
     if (action === 'reject' && !comment.trim()) {
       if (!confirm('確定要駁回嗎？（建議填寫意見）')) return;
     }
+    if (action === 'return') {
+      const prevName = previousStep?.name || '上一關';
+      if (
+        !confirm(
+          `確定退回「${prevName}」？\n\n上一位簽署人需重新簽核；請填寫退回原因以便對方了解。`
+        )
+      ) {
+        return;
+      }
+      if (!comment.trim()) {
+        if (!confirm('尚未填寫簽核意見，仍要退回上一位嗎？')) return;
+      }
+    }
     let step_form_data = {};
     if (action === 'approve' && (currentStep?.approverFields || []).length) {
       const box = $('#step-form-fields');
       if (box) {
+        for (const cid of IT_REPAIR_CHECK_IDS) {
+          const sel = box.querySelector(`[data-ff="${cid}"]`);
+          const note = box.querySelector(`[data-ff="${cid}_note"]`);
+          if (sel && isItRepairNoncompliantValue(sel.value) && note && !String(note.value || '').trim()) {
+            const lab = note.closest('.field')?.querySelector('label')?.dataset?.baseLabel
+              || note.closest('.field')?.querySelector('label')?.textContent
+              || '不符合說明';
+            toast(`${String(lab).replace(/\s*\*\s*$/, '').trim()}為必填`, 'error');
+            return;
+          }
+        }
         step_form_data = collectFormData(box);
       }
     }
@@ -577,10 +928,11 @@ async function renderDetail(body, id) {
       toast('最終審核步驟不可新增附件', 'error');
       return;
     }
-
+    // 退回／駁回／取消不帶附件
+    const attachFiles =
+      action === 'approve' ? files : action === 'return' || action === 'reject' ? [] : files;
     let finalSignatureImage = null;
-    if (action === 'approve') {
-      // 預設一律用個人預設簽名；僅明確選「現場手寫」才用白板
+    if (action === 'approve' && SIGNATURE_SETTINGS_ENABLED) {
       const selectedMode = body.querySelector('input[name=sig_mode]:checked')?.value || 'default';
       if (selectedMode === 'draw') {
         if (!spotSignatureImage) {
@@ -589,23 +941,24 @@ async function renderDetail(body, id) {
         }
         finalSignatureImage = spotSignatureImage;
       } else {
-        // default：優先記憶體中的個人簽名，否則再拉一次 API
         finalSignatureImage = state.user?.signature_image || null;
         if (!finalSignatureImage) {
           try {
             const sigRes = await api('/api/users/me/signature');
             finalSignatureImage = sigRes?.signature_image || null;
             if (finalSignatureImage) {
-              state.user = { ...(state.user || {}), signature_image: finalSignatureImage };
+              state.user = {
+                ...(state.user || {}),
+                signature_image: finalSignatureImage,
+                has_signature: true,
+              };
             }
           } catch {
             /* ignore */
           }
         }
-        // 未設定時仍可核准；後端也會再從 DB 套用預設簽名
       }
     }
-
     try {
       // 有附件時用 FormData；無附件仍可用 FormData 以統一 multipart 路由
       const body = new FormData();
@@ -615,14 +968,20 @@ async function renderDetail(body, id) {
       if (finalSignatureImage) {
         body.append('signature_image', finalSignatureImage);
       }
-      files.forEach((f) => body.append('attachments', f));
+      attachFiles.forEach((f) => body.append('attachments', f));
       const result = await api(`/api/requests/${id}/action`, {
         method: 'POST',
         body,
       });
       const msg =
         result?.message ||
-        (action === 'approve' ? '已核准' : action === 'reject' ? '已駁回' : '已取消');
+        (action === 'approve'
+          ? '已核准'
+          : action === 'reject'
+            ? '已駁回'
+            : action === 'return'
+              ? '已退回上一位'
+              : '已取消');
       toast(msg, 'success');
       navigate('detail', { id });
     } catch (e) {
@@ -655,12 +1014,163 @@ async function renderDetail(body, id) {
     }
   });
 
-  $('#btn-approve')?.addEventListener('click', () => doAction('approve'));
-  $('#btn-reject')?.addEventListener('click', () => doAction('reject'));
-  $('#btn-cosign')?.addEventListener('click', () => openCosignModal(request, () => navigate('detail', { id })));
-  $('#btn-forward')?.addEventListener('click', () => openForwardModal(request, () => navigate('detail', { id })));
+  $('#btn-pick-approved-step')?.addEventListener('click', async () => {
+    const already = (request.attachments || [])
+      .map((a) => a.source_request_id)
+      .filter((n) => Number(n) > 0);
+    await openApprovedRequestPicker({
+      excludeIds: [id],
+      alreadySelected: already,
+      onConfirm: async (picked) => {
+        if (!picked?.length) return;
+        const fd = new FormData();
+        fd.append('linked_request_ids', JSON.stringify(picked.map((x) => x.id)));
+        try {
+          const data = await api(`/api/requests/${id}/attachments`, {
+            method: 'POST',
+            body: fd,
+          });
+          toast(data.message || '已附加已核准申請單', 'success');
+          navigate('detail', { id });
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      },
+    });
+  });
+
+  const bindActionBtn = (sel, action) => {
+    document.querySelectorAll(sel).forEach((btn) => {
+      btn.addEventListener('click', () => doAction(action));
+    });
+  };
+  bindActionBtn('#btn-approve, #btn-approve-card', 'approve');
+  bindActionBtn('#btn-reject, #btn-reject-card', 'reject');
+  bindActionBtn('#btn-return, #btn-return-card', 'return');
+  const goDetail = () => navigate('detail', { id });
+  document.querySelectorAll('#btn-cosign, #btn-cosign-card').forEach((btn) => {
+    btn.addEventListener('click', () => openCosignModal(request, goDetail));
+  });
+  document.querySelectorAll('#btn-forward, #btn-forward-card').forEach((btn) => {
+    btn.addEventListener('click', () => openForwardModal(request, goDetail));
+  });
   $('#btn-cancel')?.addEventListener('click', () => {
     if (confirm('確定取消此申請？')) doAction('cancel');
+  });
+  $('#btn-void-apply')?.addEventListener('click', async () => {
+    const path = voidStepsPathText(voidPreviewSteps || []);
+    const reason = prompt(
+      `請輸入作廢原因（必填）。\n送出後將由原單簽核人再簽：\n${path || '（依原單簽核人）'}`
+    );
+    if (reason === null) return;
+    if (!String(reason).trim()) {
+      toast('請填寫作廢原因', 'error');
+      return;
+    }
+    if (
+      !confirm(
+        `確定提出作廢申請？\n原單：#${id}「${request.title}」\n流程：${
+          path || '原單簽核人依序簽核'
+        }\n全部通過後，原單才會自動改為已作廢。`
+      )
+    ) {
+      return;
+    }
+    const btn = $('#btn-void-apply');
+    if (btn) btn.disabled = true;
+    try {
+      const data = await api(`/api/requests/${id}/void-apply`, {
+        method: 'POST',
+        body: { reason: String(reason).trim() },
+      });
+      toast(data.message || '作廢申請已送出', 'success');
+      navigate('detail', { id: data.request?.id || id });
+    } catch (e) {
+      toast(e.message || '送出失敗', 'error');
+      if (btn) btn.disabled = false;
+    }
+  });
+  $('#btn-void')?.addEventListener('click', async () => {
+    const reason = prompt(
+      '請輸入作廢原因（必填）。\n此為直接作廢，不會再走原單簽核人流程。'
+    );
+    if (reason === null) return;
+    if (!String(reason).trim()) {
+      toast('請填寫作廢原因', 'error');
+      return;
+    }
+    if (
+      !confirm(
+        `確定直接作廢 #${id}「${request.title}」？\n狀態立即改為已作廢，歷程保留；將通知申請人與所有簽核人。`
+      )
+    ) {
+      return;
+    }
+    const btn = $('#btn-void');
+    if (btn) btn.disabled = true;
+    try {
+      const data = await api(`/api/requests/${id}/void`, {
+        method: 'POST',
+        body: { reason: String(reason).trim() },
+      });
+      toast(data.message || '申請已作廢', 'success');
+      navigate('detail', { id });
+    } catch (e) {
+      toast(e.message || '作廢失敗', 'error');
+      if (btn) btn.disabled = false;
+    }
+  });
+  $('#btn-edit-draft')?.addEventListener('click', () => {
+    navigate('new-request', { draftId: request.id });
+  });
+  $('#btn-submit-draft')?.addEventListener('click', async () => {
+    if (
+      !confirm(
+        '確定以目前草稿內容送出簽核？\n送出後將進入簽核流程，無法再當草稿編輯。'
+      )
+    ) {
+      return;
+    }
+    try {
+      const body = new FormData();
+      body.append('workflow_id', String(request.workflow_id));
+      body.append('title', request.title || '');
+      body.append('content', '');
+      body.append(
+        'form_data',
+        JSON.stringify(request.form_data || {})
+      );
+      body.append('submit', '1');
+      body.append('as_draft', '0');
+      // 代申請草稿：帶入被代理人，避免送出後變成以本人為申請人
+      if (
+        request.submitted_by &&
+        Number(request.submitted_by) === Number(state.user?.id) &&
+        Number(request.requester_id) !== Number(state.user?.id)
+      ) {
+        body.append('proxy_for', String(request.requester_id));
+        body.append('on_behalf_of_user_id', String(request.requester_id));
+      }
+      // 沿用草稿上的通知設定（若有）
+      if (request.notify_prefs) {
+        body.append(
+          'notify_prefs',
+          JSON.stringify(request.notify_prefs)
+        );
+        body.append(
+          'notify_email',
+          request.notify_email === 0 ? '0' : '1'
+        );
+      }
+      const data = await api(`/api/requests/${request.id}`, {
+        method: 'PUT',
+        body,
+      });
+      toast(data.message || '申請已送出', 'success');
+      navigate('detail', { id: request.id });
+    } catch (e) {
+      toast(e.message, 'error');
+    }
   });
   $('#btn-remind')?.addEventListener('click', async () => {
     if (
@@ -716,7 +1226,14 @@ async function renderDetail(body, id) {
         }
       }
       pdfPreviewObjectUrl = URL.createObjectURL(pdfBlob);
-      wrap.innerHTML = `<iframe class="pdf-frame" title="申請單 PDF 預覽" src="${pdfPreviewObjectUrl}#view=FitH"></iframe>`;
+      // FitH：寬度撐滿；toolbar=1 保留瀏覽器 PDF 工具列（縮放）
+      wrap.innerHTML = `<iframe class="pdf-frame" title="申請單 PDF 預覽" src="${pdfPreviewObjectUrl}#toolbar=1&navpanes=0&view=FitH"></iframe>`;
+      const newTabBtn = $('#btn-pdf-newtab');
+      if (newTabBtn) {
+        newTabBtn.onclick = () => {
+          window.open(pdfPreviewObjectUrl, '_blank', 'noopener');
+        };
+      }
     } catch (e) {
       wrap.innerHTML = `<div class="error-msg" style="margin:12px">PDF 預覽失敗：${esc(
         e.message || '未知錯誤'
@@ -762,20 +1279,21 @@ async function renderDetail(body, id) {
       toast(e.message, 'error');
     }
   });
+
+  $('#btn-clone-request')?.addEventListener('click', () => {
+    navigate('new-request', { cloneFrom: id });
+  });
   const finConfirmBtn = $('#btn-finance-confirm');
   if (finConfirmBtn) {
     finConfirmBtn.onclick = async () => {
-      const note = prompt(
-        '請輸入財務部建檔備註（選填，例如：已於 ERP 系統完成授信額度設定）：'
-      );
-      if (note === null) return;
       try {
         await api(`/api/requests/${id}/finance-confirm`, {
           method: 'POST',
-          body: { note: String(note || '').trim() },
+          body: { note: '已於ERP系統完成授信額度設定' },
         });
         toast('已完成財務部額度建檔登記，並發送通知至申請人', 'success');
-        renderDetail(body, id);
+        if (typeof onRefresh === 'function') onRefresh();
+        else renderDetail(body, id);
       } catch (err) {
         toast(err.message, 'error');
       }
@@ -787,7 +1305,8 @@ async function renderDetail(body, id) {
       try {
         await api(`/api/requests/${id}/applicant-ack`, { method: 'POST' });
         toast('已確認財務部建檔完成！', 'success');
-        renderDetail(body, id);
+        if (typeof onRefresh === 'function') onRefresh();
+        else renderDetail(body, id);
       } catch (err) {
         toast(err.message, 'error');
       }
@@ -799,30 +1318,14 @@ async function renderDetail(body, id) {
       try {
         await api(`/api/requests/${id}/final-notify-ack`, { method: 'POST' });
         toast('已確認收到最終核准通知', 'success');
-        renderDetail(body, id);
+        if (typeof onRefresh === 'function') onRefresh();
+        else renderDetail(body, id);
         refreshBadge();
       } catch (err) {
         toast(err.message, 'error');
       }
     };
   }
-
-  $('#btn-restore-request')?.addEventListener('click', async () => {
-    if (
-      !confirm(
-        `確定還原申請 #${id}「${request.title}」？\n還原後會重新出現在一般列表。`
-      )
-    ) {
-      return;
-    }
-    try {
-      await api(`/api/requests/${id}/restore`, { method: 'POST' });
-      toast('已還原申請', 'success');
-      navigate('records');
-    } catch (e) {
-      toast(e.message, 'error');
-    }
-  });
 
   $('#btn-del-request')?.addEventListener('click', async () => {
     const isLeave =
@@ -838,7 +1341,7 @@ async function renderDetail(body, id) {
     }
     if (
       !confirm(
-        `確定刪除申請 #${id}「${request.title}」？\n將從列表隱藏；單據、附件與備份仍保留供稽核。`
+        `確定刪除申請 #${id}「${request.title}」？\n將一併刪除歷程、附件與相關備份，無法復原。`
       )
     ) {
       return;
@@ -855,6 +1358,19 @@ async function renderDetail(body, id) {
       toast(e.message, 'error');
     }
   });
+}
+
+async function renderDetail(body, id) {
+  const detailData = await fetchRequestDetailData(id);
+  $('#page-title').textContent = `簽核詳情 #${detailData.request.id}${
+    detailData.request.status === 'draft' ? '（草稿）' : ''
+  }`;
+  $('#page-actions').innerHTML = buildRequestDetailActionsHtml(detailData);
+  body.innerHTML = `
+    <div class="detail-main">
+      ${buildRequestDetailMainHtml(detailData)}
+    </div>`;
+  bindRequestDetailEvents(body, detailData, () => renderDetail(body, id));
 }
 
 function openCosignModal(request, onDone) {
@@ -967,4 +1483,32 @@ function openForwardModal(request, onDone) {
       toast(err.message, 'error');
     }
   };
+}
+
+if (typeof window !== 'undefined') {
+  window.fetchRequestDetailData = fetchRequestDetailData;
+  window.buildRequestDetailActionsHtml = buildRequestDetailActionsHtml;
+  window.buildRequestDetailMainHtml = buildRequestDetailMainHtml;
+  window.bindRequestDetailEvents = bindRequestDetailEvents;
+  window.openCosignModal = openCosignModal;
+  window.openForwardModal = openForwardModal;
+}
+
+function userLabelById(id) {
+  const u = (state.users || []).find((x) => x.id === Number(id));
+  return u ? u.name : `#${id}`;
+}
+
+function describeStepForList(s) {
+  if (!s) return '';
+  if (s.assignType === 'form_user') return `${s.name}（表單指定）`;
+  if (s.assignType === 'dept_head') return `${s.name}（自選／可略過）`;
+  if (s.assignType === 'cosign_pick') return `${s.name}（會簽選填）`;
+  if (s.assignType === 'users_pick') return `${s.name}（申請人自選）`;
+  if (s.assignType === 'department') return `${s.name}（${s.department || '單位'}）`;
+  if (s.assignType === 'users' || (s.approverIds && s.approverIds.length)) {
+    const names = (s.approverIds || []).map(userLabelById).join('、');
+    return names ? `${s.name}（${names}）` : s.name;
+  }
+  return s.name;
 }

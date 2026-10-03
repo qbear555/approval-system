@@ -20,6 +20,7 @@ const flowEngineFactory = require('./flow-engine');
 const labor = require('./labor');
 const systemSettings = require('./system-settings');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const crypto = require('crypto');
 
@@ -85,10 +86,31 @@ function safeUploadExt(originalName) {
   return ext;
 }
 
-/** 設定包 JSON 上傳（記憶體，上限約 100MB） */
+/** 設定包 JSON 上傳（落到 data/tmp，上限 1GB） */
 const uploadPackage = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 },
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      const candidates = [
+        path.join(__dirname, '..', 'data', 'tmp'),
+        path.join(os.tmpdir(), 'approval-pkg'),
+      ];
+      for (const dir of candidates) {
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+          const probe = path.join(dir, `.w-${process.pid}`);
+          fs.writeFileSync(probe, 'ok');
+          fs.unlinkSync(probe);
+          return cb(null, dir);
+        } catch {
+          /* try next */
+        }
+      }
+      cb(null, os.tmpdir());
+    },
+    filename: (_req, _file, cb) =>
+      cb(null, `pkg_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.json`),
+  }),
+  limits: { fileSize: 1024 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const name = decodeUploadFilename(file.originalname || '').toLowerCase();
     if (name.endsWith('.json') || file.mimetype === 'application/json' || file.mimetype === 'text/plain') {

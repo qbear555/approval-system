@@ -7,71 +7,29 @@
   <link rel="icon" id="app-favicon" type="image/png" href="/img/argo-logo.png" />
   <link rel="shortcut icon" id="app-favicon-shortcut" type="image/png" href="/img/argo-logo.png" />
   <link rel="apple-touch-icon" id="app-favicon-apple" href="/img/argo-logo.png" />
-  <link rel="stylesheet" href="/css/style.css?v=20260814_att1" />
+  <link rel="stylesheet" href="/css/style.css?v=20260917_prev2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
   <div id="app">
     <!-- Auth screens：預設顯示，避免 JS 未載入時整頁空白 -->
     <div id="auth-view" class="auth-wrap">
-      <div class="auth-card-split">
-        <!-- Left Hero Section -->
-        <div class="auth-hero">
-          <div class="auth-hero-brand">
-            <img class="brand-logo brand-logo-auth-hero" src="/img/argo-logo.png" alt="ARGO" width="1048" height="289" decoding="async" />
-            <div class="hero-company">線上簽核系統</div>
-          </div>
-          <div class="auth-hero-content">
-            <h2>高效簽核 · 紀錄留存<br>全數位化企業流程</h2>
-            <ul class="hero-features">
-              <li>
-                <span class="feat-icon">⚡</span>
-                <div>
-                  <strong>彈性簽核流程</strong>
-                  <small>支援多關卡自訂、加簽與關卡條件</small>
-                </div>
-              </li>
-              <li>
-                <span class="feat-icon">📑</span>
-                <div>
-                  <strong>智慧 PDF 匯出</strong>
-                  <small>電子簽名檔、防偽浮水印與自動排版</small>
-                </div>
-              </li>
-              <li>
-                <span class="feat-icon">🔒</span>
-                <div>
-                  <strong>安全紀錄留存</strong>
-                  <small>完整系統稽核日誌與一鍵備份機制</small>
-                </div>
-              </li>
-            </ul>
-          </div>
-          <div class="auth-hero-foot">© 線上簽核系統 · 安全可靠 · 企業專屬</div>
+      <div class="auth-card">
+        <div class="auth-brand">
+          <img class="brand-logo brand-logo-auth" src="/img/argo-logo.png" alt="ARGO" width="1048" height="289" decoding="async" />
+          <div class="company-name">線上簽核系統</div>
+          <h1>線上簽核</h1>
+          <p>自訂流程 · 紀錄留存 · PDF 匯出</p>
+          <div class="app-version" id="auth-version" title="系統版本">v—</div>
         </div>
-
-        <!-- Right Form Section -->
-        <div class="auth-card-body">
-          <div class="auth-brand">
-            <img class="brand-logo brand-logo-auth" src="/img/argo-logo.png" alt="ARGO" width="1048" height="289" decoding="async" />
-            <div class="company-name">線上簽核系統</div>
-            <h1>使用者登入</h1>
-            <p>請輸入您的帳號與密碼進行驗證</p>
-            <div class="app-version" id="auth-version" title="系統版本">v—</div>
-          </div>
-          <form id="login-form" class="auth-form">
-            <div class="input-group-icon">
-              <span class="input-icon">👤</span>
-              <input name="username" autocomplete="username" required placeholder="請輸入帳號" value="" />
-            </div>
-            <div class="input-group-icon">
-              <span class="input-icon">🔒</span>
-              <input name="password" type="password" autocomplete="current-password" required placeholder="請輸入密碼" value="" />
-            </div>
-            <button type="submit" class="btn primary block auth-submit-btn">🔐 登入系統</button>
-          </form>
-          <div id="auth-error" class="error-msg hidden"></div>
-          <div class="auth-version-foot muted app-version" id="auth-version-foot">線上簽核系統</div>
-        </div>
+        <form id="login-form" class="auth-form">
+          <label>帳號<input name="username" autocomplete="username" required placeholder="請輸入帳號" value="" /></label>
+          <label>密碼<input name="password" type="password" autocomplete="current-password" required placeholder="請輸入密碼" value="" /></label>
+          <button type="submit" class="btn primary block">登入</button>
+        </form>
+        <div id="auth-error" class="error-msg hidden"></div>
+        <div class="auth-version-foot muted app-version" id="auth-version-foot">線上簽核系統</div>
       </div>
     </div>
 
@@ -86,20 +44,19 @@
           </div>
         </div>
         <nav class="nav">
-          <button type="button" class="nav-item active" data-page="dashboard"><span class="nav-label"><span class="nav-icon">📊</span> 總覽</span></button>
-          <button type="button" class="nav-item" data-page="inbox"><span class="nav-label"><span class="nav-icon">📥</span> 待我簽核</span> <span id="badge-pending" class="badge hidden">0</span></button>
-          <button type="button" class="nav-item" data-page="mine"><span class="nav-label"><span class="nav-icon">📄</span> 我的申請</span></button>
-          <button type="button" class="nav-item" data-page="records"><span class="nav-label"><span class="nav-icon">📑</span> 簽核紀錄</span></button>
-          <button type="button" class="nav-item" data-page="new-request"><span class="nav-label"><span class="nav-icon">✏️</span> 新增申請</span></button>
-          <button type="button" class="nav-item perm-nav hidden" data-perm="workflows" data-page="workflows"><span class="nav-label"><span class="nav-icon">⚙️</span> 簽核流程</span></button>
-          <button type="button" class="nav-item perm-nav hidden" data-perm="backups" data-page="backups"><span class="nav-label"><span class="nav-icon">💾</span> 備份資料</span></button>
-          <button type="button" class="nav-item perm-nav hidden" data-perm="leave_report" data-page="leave-report"><span class="nav-label"><span class="nav-icon">📈</span> 請假報表</span></button>
-          <button type="button" class="nav-item perm-nav hidden" data-perm="audit_logs" data-page="audit-logs"><span class="nav-label"><span class="nav-icon">🔍</span> 稽核日誌</span></button>
-          <button type="button" class="nav-item perm-nav hidden" data-perm="users_leave" data-page="users"><span class="nav-label"><span class="nav-icon">👥</span> 成員名單</span></button>
-          <button type="button" class="nav-item admin-only hidden" data-page="departments"><span class="nav-label"><span class="nav-icon">🏢</span> 部門</span></button>
-          <button type="button" class="nav-item" data-page="settings"><span class="nav-label"><span class="nav-icon">👤</span> 帳號設定</span></button>
-          <button type="button" class="nav-item hidden" id="nav-line-settings" data-page="line-settings"><span class="nav-label"><span class="nav-icon">💬</span> LINE 通知</span></button>
-          <button type="button" class="nav-item hidden" data-page="system-settings"><span class="nav-label"><span class="nav-icon">🛠️</span> 系統設定</span></button>
+          <button type="button" class="nav-item active" data-page="dashboard">總覽</button>
+          <button type="button" class="nav-item" data-page="inbox">待我簽核 <span id="badge-pending" class="badge hidden">0</span></button>
+          <button type="button" class="nav-item" data-page="mine">我的申請</button>
+          <button type="button" class="nav-item" data-page="records">簽核紀錄</button>
+          <button type="button" class="nav-item" data-page="new-request">新增申請</button>
+          <button type="button" class="nav-item perm-nav hidden" data-perm="workflows" data-page="workflows">簽核流程</button>
+          <button type="button" class="nav-item perm-nav hidden" data-perm="backups" data-page="backups">備份資料</button>
+          <button type="button" class="nav-item perm-nav hidden" data-perm="leave_report" data-page="leave-report">請假報表</button>
+          <button type="button" class="nav-item perm-nav hidden" data-perm="users_leave" data-page="users">成員名單</button>
+          <button type="button" class="nav-item admin-only hidden" data-page="departments">部門</button>
+          <button type="button" class="nav-item" data-page="settings">帳號設定</button>
+          <button type="button" class="nav-item hidden" id="nav-line-settings" data-page="line-settings">LINE 通知</button>
+          <button type="button" class="nav-item hidden" data-page="system-settings">系統設定</button>
         </nav>
         <div class="sidebar-user">
           <div class="avatar" id="user-avatar">U</div>
@@ -129,25 +86,28 @@
 
     <div id="toast" class="toast hidden"></div>
   </div>
-  <script src="/js/tw-calendar.js?v=20260806_p22"></script>
-  <script src="/js/rich-editor.js?v=20260806_p22"></script>
-  <script src="/js/ui-helpers.js?v=20260806_p22"></script>
-  <script src="/js/app.js?v=20260813_arch7"></script>
-  <script src="/js/pages-dashboard.js?v=20260813_arch7"></script>
-  <script src="/js/pages-request-fields.js?v=20260813_arch7"></script>
-  <script src="/js/pages-request-table.js?v=20260813_arch7"></script>
-  <script src="/js/pages-request-view.js?v=20260814_att1"></script>
-  <script src="/js/pages-request-list.js?v=20260813_arch7"></script>
-  <script src="/js/pages-request-new.js?v=20260813_arch7"></script>
-  <script src="/js/pages-request-detail.js?v=20260813_arch7"></script>
-  <script src="/js/pages-workflows.js?v=20260813_arch7"></script>
-  <script src="/js/pages-backups.js?v=20260813_arch7"></script>
-  <script src="/js/pages-users.js?v=20260813_arch7"></script>
-  <script src="/js/pages-audit.js?v=20260813_arch7"></script>
-  <script src="/js/pages-departments.js?v=20260813_arch7"></script>
-  <script src="/js/pages-settings.js?v=20260813_arch7"></script>
-  <script src="/js/pages-line.js?v=20260813_arch7"></script>
-  <script src="/js/pages-system.js?v=20260813_arch7"></script>
-  <script src="/js/flow-editor.js?v=20260807_sig_default"></script>
+  <script src="/vendor/pdfjs/pdf.min.js"></script>
+  <script src="/js/tw-calendar.js"></script>
+  <script src="/js/rich-editor.js"></script>
+  <script src="/js/ui-helpers.js?v=20261003_fixnav"></script>
+  <script src="/js/pdf-form-designer.js?v=20261003_fixnav"></script>
+  <script src="/js/flow-editor.js?v=20261003_fixnav"></script>
+  <script src="/js/app.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-dashboard.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-request-fields.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-request-table.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-request-view.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-request-list.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-request-new.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-request-detail.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-workflows.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-backups.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-leave-report.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-users.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-departments.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-audit.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-settings.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-line.js?v=20261003_fixnav"></script>
+  <script src="/js/pages-system.js?v=20261003_fixnav"></script>
 </body>
 </html>

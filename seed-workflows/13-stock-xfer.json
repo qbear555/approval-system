@@ -1,0 +1,296 @@
+{
+  "format": "approval-system-workflow",
+  "version": 2,
+  "sourceId": 26,
+  "name": "庫存調撥明細週報",
+  "description": "申請人 → 部門主管 → 採購單位 → 業務部 → 副總經理 → 總經理",
+  "formFields": [],
+  "steps": [
+    {
+      "order": 1,
+      "name": "部門主管",
+      "assignType": "users",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [
+        11
+      ],
+      "approvers": [
+        {
+          "id": 11,
+          "username": "Betty",
+          "name": "陳怡靜"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "採購單位",
+      "assignType": "users_pick",
+      "mode": "all",
+      "formFieldId": "agent",
+      "department": "採購部",
+      "approverIds": [
+        5,
+        21
+      ],
+      "approvers": [
+        {
+          "id": 5,
+          "username": "Judy",
+          "name": "林麗淑"
+        },
+        {
+          "id": 21,
+          "username": "Debby",
+          "name": "蘇佑真"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "業務部",
+      "assignType": "users_pick",
+      "mode": "all",
+      "formFieldId": "agent",
+      "department": "業務部",
+      "approverIds": [
+        23,
+        18,
+        20,
+        13,
+        16,
+        17,
+        19
+      ],
+      "approvers": [
+        {
+          "id": 23,
+          "username": "Vic",
+          "name": "林士楷"
+        },
+        {
+          "id": 18,
+          "username": "Linda",
+          "name": "林若妤"
+        },
+        {
+          "id": 20,
+          "username": "Ray",
+          "name": "楊宗憲"
+        },
+        {
+          "id": 13,
+          "username": "Vikky",
+          "name": "沈正儀"
+        },
+        {
+          "id": 16,
+          "username": "Sam",
+          "name": "潘柏成"
+        },
+        {
+          "id": 17,
+          "username": "Mars",
+          "name": "連煒巨"
+        },
+        {
+          "id": 19,
+          "username": "Robin",
+          "name": "邱文昭"
+        }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 4,
+      "name": "副總經理",
+      "assignType": "department",
+      "mode": "all",
+      "formFieldId": "agent",
+      "department": "副總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 5,
+      "name": "總經理",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ],
+  "pdfLayout": {
+    "type": "auto",
+    "label": "一般簽呈版面",
+    "options": {}
+  },
+  "finalNotify": {
+    "enabled": false,
+    "userIds": [],
+    "label": "最終核准完成通知",
+    "applicantMode": "all",
+    "applicantUserIds": [],
+    "users": [],
+    "applicants": []
+  },
+  "flow": {
+    "version": 2,
+    "nodes": [
+      {
+        "id": "start",
+        "type": "start",
+        "ui": {
+          "x": 40,
+          "y": 300
+        }
+      },
+      {
+        "id": "n1",
+        "type": "approval",
+        "name": "部門主管",
+        "assignType": "users",
+        "formFieldId": "agent",
+        "department": "",
+        "approverIds": [
+          11
+        ],
+        "mode": "any",
+        "approverFields": [],
+        "skipIfNoApprover": false,
+        "rejectTo": "requester",
+        "ui": {
+          "x": 230,
+          "y": 300
+        }
+      },
+      {
+        "id": "n2",
+        "type": "approval",
+        "name": "採購單位",
+        "assignType": "users_pick",
+        "formFieldId": "agent",
+        "department": "採購部",
+        "approverIds": [
+          5,
+          21
+        ],
+        "mode": "all",
+        "approverFields": [],
+        "skipIfNoApprover": false,
+        "rejectTo": "requester",
+        "ui": {
+          "x": 430,
+          "y": 300
+        }
+      },
+      {
+        "id": "n3",
+        "type": "approval",
+        "name": "業務部",
+        "assignType": "users_pick",
+        "formFieldId": "agent",
+        "department": "業務部",
+        "approverIds": [
+          23,
+          18,
+          20,
+          13,
+          16,
+          17,
+          19
+        ],
+        "mode": "all",
+        "approverFields": [],
+        "skipIfNoApprover": false,
+        "rejectTo": "requester",
+        "ui": {
+          "x": 630,
+          "y": 300
+        }
+      },
+      {
+        "id": "n4",
+        "type": "approval",
+        "name": "副總經理",
+        "assignType": "department",
+        "formFieldId": "agent",
+        "department": "副總經理",
+        "approverIds": [],
+        "mode": "all",
+        "approverFields": [],
+        "skipIfNoApprover": false,
+        "rejectTo": "requester",
+        "ui": {
+          "x": 830,
+          "y": 300
+        }
+      },
+      {
+        "id": "n5",
+        "type": "approval",
+        "name": "總經理",
+        "assignType": "department",
+        "formFieldId": "agent",
+        "department": "總經理",
+        "approverIds": [],
+        "mode": "any",
+        "approverFields": [],
+        "skipIfNoApprover": false,
+        "rejectTo": "requester",
+        "ui": {
+          "x": 1030,
+          "y": 300
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "ui": {
+          "x": 1230,
+          "y": 300
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "start",
+        "to": "n1"
+      },
+      {
+        "from": "n1",
+        "to": "n2"
+      },
+      {
+        "from": "n2",
+        "to": "n3"
+      },
+      {
+        "from": "n3",
+        "to": "n4"
+      },
+      {
+        "from": "n4",
+        "to": "n5"
+      },
+      {
+        "from": "n5",
+        "to": "end"
+      }
+    ]
+  },
+  "exportedAt": "2026-09-09T07:55:25.809Z"
+}

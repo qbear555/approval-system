@@ -210,7 +210,7 @@ app.get('/api/onlyoffice/file/:token', (req, res) => {
     const name = decodeUploadFilename(att.original_name || `file-${att.id}`);
     res.setHeader(
       'Content-Disposition',
-      contentDispositionAttachment(name, `file-${att.id}`)
+      `inline; filename="file-${att.id}"; filename*=UTF-8''${encodeURIComponent(name)}`
     );
     if (att.mime_type) res.setHeader('Content-Type', att.mime_type);
     else res.setHeader('Content-Type', 'application/octet-stream');

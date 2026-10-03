@@ -1,0 +1,132 @@
+{
+  "format": "approval-system-workflow",
+  "version": 2,
+  "name": "業務人員銷貨統計報表",
+  "description": "申請人 → 財務人員 → 選擇業務 → 副總經理 → 總經理",
+  "pdfLayout": {
+    "type": "auto",
+    "label": "依流程名稱自動判斷"
+  },
+  "formFields": [
+    {
+      "id": "stats_start",
+      "label": "統計開始日",
+      "type": "date",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "stats_end",
+      "label": "統計結束日",
+      "type": "date",
+      "required": true,
+      "placeholder": ""
+    },
+    {
+      "id": "content",
+      "label": "內容",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "請填寫報表說明或備註"
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "name": "財務人員",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "財務部",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [
+        {
+          "id": "sales_revenue",
+          "label": "銷貨收入（元）",
+          "type": "number",
+          "required": true,
+          "placeholder": "請填寫銷貨收入"
+        },
+        {
+          "id": "sales_cost",
+          "label": "銷貨成本（元）",
+          "type": "number",
+          "required": true,
+          "placeholder": "請填寫銷貨成本"
+        },
+        {
+          "id": "sales_gross_profit",
+          "label": "銷貨毛利（元）",
+          "type": "number",
+          "required": true,
+          "placeholder": "可依收入−成本自動帶入，可再調整"
+        },
+        {
+          "id": "sales_gross_diff_note",
+          "label": "毛利差異說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請說明毛利差異原因（選填）"
+        },
+        {
+          "id": "sales_remark",
+          "label": "備註說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "其他備註（選填）"
+        }
+      ],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 2,
+      "name": "選擇業務",
+      "assignType": "users_pick",
+      "mode": "any",
+      "formFieldId": "agent",
+      "department": "",
+      "approverIds": [],
+      "approvers": [
+        { "username": "Vivian", "name": "闋淑燕" },
+        { "username": "Lydia", "name": "蘇玲子" },
+        { "username": "Sam", "name": "潘柏成" },
+        { "username": "Mars", "name": "連煒巨" },
+        { "username": "Linda", "name": "林若妤" },
+        { "username": "Robin", "name": "邱文昭" },
+        { "username": "Ray", "name": "楊宗憲" },
+        { "username": "Vic", "name": "林士楷" },
+        { "username": "Ping", "name": "吳蕙萍" },
+        { "username": "Doris", "name": "賴香蓮" },
+        { "username": "Vikky", "name": "沈正儀" },
+        { "username": "Sindy", "name": "褚亞欣" }
+      ],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 3,
+      "name": "副總經理",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "副總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    },
+    {
+      "order": 4,
+      "name": "總經理",
+      "assignType": "department",
+      "mode": "any",
+      "formFieldId": "",
+      "department": "總經理",
+      "approverIds": [],
+      "approvers": [],
+      "approverFields": [],
+      "skipIfNoApprover": false
+    }
+  ]
+}

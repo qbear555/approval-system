@@ -1,14 +1,28 @@
-/**
- * 備份資料與請假報表
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
 async function renderBackups(body) {
-  if (!hasPerm('backups')) {
-    body.innerHTML = `<div class="error-msg">您沒有備份資料的權限</div>`;
+  if (!canAccessBackupsPage()) {
+    body.innerHTML = `<div class="error-msg">您沒有備份資料或人事請假相關權限</div>`;
     return;
   }
 
-  const { meta } = await api('/api/backups/meta');
+  const canFullBackup = hasPerm('backups');
+  const canLeaveDl = canDownloadLeaveForms();
+  let meta = { departments: [], workflows: [], years: [], total: 0, encrypt: {} };
+  if (canFullBackup) {
+    try {
+      const data = await api('/api/backups/meta');
+      meta = data.meta || meta;
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  } else if (canLeaveDl) {
+    try {
+      const data = await api('/api/backups/leave-forms-meta');
+      meta.departments = data.departments || [];
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
   const deptOpts = (meta.departments || [])
     .map((d) => `<option value="${esc(d)}">${esc(d)}</option>`)
     .join('');
@@ -29,7 +43,16 @@ async function renderBackups(body) {
     ['pending', '簽核中'],
     ['rejected', '已駁回'],
     ['cancelled', '已取消'],
+    ['voided', '已作廢'],
   ];
+
+  const now = new Date();
+  const ytdFrom = `${now.getFullYear()}-01-01`;
+  const ytdTo = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-');
 
   const enc = meta.encrypt || {};
   const encNote = enc.ready
@@ -38,7 +61,50 @@ async function renderBackups(body) {
       ? `<span style="color:#b45309">已勾選加密但尚未設定密碼</span> — 請至「系統設定 → 備份加密」設定後再備份`
       : `未加密。可於「系統設定 → 備份加密」啟用 AES-256 密碼保護`;
 
+  const leaveCard = canLeaveDl
+    ? `
+    <div class="card" style="margin-bottom:16px;border-color:#bfdbfe;background:#f8fbff">
+      <h3 style="margin-top:0">人事：查詢／下載請假申請單</h3>
+      <p class="muted" style="margin-top:0;line-height:1.55">
+        條件查詢<strong>僅請假申請</strong>，勾選後下載 PDF ZIP；亦可全選後一次下載。單次最多 500 筆。
+      </p>
+      <form id="leave-forms-query-form" class="form-grid two">
+        <div class="field"><label>請假期間起 *</label>
+          <input type="date" name="date_from" required value="${esc(ytdFrom)}" /></div>
+        <div class="field"><label>請假期間迄 *</label>
+          <input type="date" name="date_to" required value="${esc(ytdTo)}" /></div>
+        <div class="field"><label>狀態</label>
+          <select name="status">
+            ${STATUS_OPT.map(([v, l]) => `<option value="${v}"${v === 'approved' ? ' selected' : ''}>${l}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>部門（選填）</label>
+          <select name="department"><option value="">全部部門</option>${deptOpts}</select></div>
+        <div class="field"><label>假別（選填）</label>
+          <input name="leave_type" placeholder="例如：事假、特休" maxlength="40" /></div>
+        <div class="field"><label>關鍵字（選填）</label>
+          <input name="keyword" placeholder="姓名／帳號／單號／主旨" maxlength="80" /></div>
+        <div class="form-actions" style="grid-column:1/-1;flex-wrap:wrap;gap:8px">
+          <button type="submit" class="btn primary" id="btn-leave-forms-query">查詢請假單</button>
+          <button type="button" class="btn outline" id="btn-leave-forms-reset">清除條件</button>
+        </div>
+      </form>
+      <div id="leave-forms-list" style="margin-top:14px"><div class="muted">請先設定條件後按「查詢請假單」。</div></div>
+      <div id="leave-forms-dl-result" class="muted" style="margin-top:8px"></div>
+    </div>`
+    : '';
+
+  if (!canFullBackup) {
+    body.innerHTML =
+      leaveCard +
+      (canLeaveDl
+        ? `<p class="muted">您目前僅有人事請假權限，可使用上方「查詢／下載請假申請單」。完整備份需「備份資料」權限。</p>`
+        : '');
+    bindLeaveFormsUi({ ytdFrom, ytdTo });
+    return;
+  }
+
   body.innerHTML = `
+    ${leaveCard}
     <div class="card">
       <h3 style="margin-top:0">執行備份</h3>
       <p class="muted" style="margin-top:0">
@@ -141,6 +207,7 @@ async function renderBackups(body) {
     approved: '已核准',
     rejected: '已駁回',
     cancelled: '已取消',
+    voided: '已作廢',
   };
 
   const canDeleteBackup = isAdmin();
@@ -174,19 +241,12 @@ async function renderBackups(body) {
             : ''
         }
         <div class="table-wrap">
-          <table class="data" style="width:100%;min-width:1020px;table-layout:fixed">
+          <table class="data">
             <thead>
               <tr>
-                ${canDeleteBackup ? '<th style="width:36px;text-align:center"></th>' : ''}
-                <th style="width:70px;text-align:center;white-space:nowrap">單號</th>
-                <th style="width:120px">部門</th>
-                <th style="width:150px">表單類別</th>
-                <th style="width:85px;text-align:center;white-space:nowrap">年月</th>
-                <th style="min-width:300px">主旨</th>
-                <th style="width:100px;white-space:nowrap">申請人</th>
-                <th style="width:90px;text-align:center;white-space:nowrap">狀態</th>
-                <th style="width:145px;white-space:nowrap">備份時間</th>
-                <th style="width:140px;white-space:nowrap;text-align:center">操作</th>
+                ${canDeleteBackup ? '<th style="width:40px"></th>' : ''}
+                <th>單號</th><th>部門</th><th>表單類別</th><th>年月</th>
+                <th>主旨</th><th>申請人</th><th>狀態</th><th>備份時間</th><th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -196,18 +256,18 @@ async function renderBackups(body) {
                 <tr>
                   ${
                     canDeleteBackup
-                      ? `<td style="text-align:center"><input type="checkbox" data-backup-check value="${b.id}" /></td>`
+                      ? `<td><input type="checkbox" data-backup-check value="${b.id}" /></td>`
                       : ''
                   }
-                  <td style="white-space:nowrap;font-weight:600;text-align:center">#${b.request_id}</td>
-                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.department)}">${esc(b.department)}</td>
-                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.workflow_name)}">${esc(b.workflow_name)}</td>
-                  <td style="text-align:center;white-space:nowrap">${esc(b.period_year)}-${esc(b.period_month)}</td>
-                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.title)}"><strong>${esc(b.title)}</strong></td>
-                  <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.requester_name)}">${esc(b.requester_name)}</td>
-                  <td style="text-align:center;white-space:nowrap"><span class="tag ${b.status}">${esc(STATUS_MAP[b.status] || b.status)}</span></td>
-                  <td class="muted" style="white-space:nowrap;font-size:0.82rem">${esc(b.created_at)}</td>
-                  <td style="white-space:nowrap;text-align:center">
+                  <td>#${b.request_id}</td>
+                  <td>${esc(b.department)}</td>
+                  <td>${esc(b.workflow_name)}</td>
+                  <td>${esc(b.period_year)}-${esc(b.period_month)}</td>
+                  <td>${esc(b.title)}</td>
+                  <td>${esc(b.requester_name)}</td>
+                  <td>${esc(STATUS_MAP[b.status] || b.status)}</td>
+                  <td class="muted">${esc(b.created_at)}</td>
+                  <td style="white-space:nowrap">
                     <button type="button" class="btn sm primary" data-dl="${b.id}" data-fname="${esc(b.file_name || '')}">
                       ${/\.zip$/i.test(b.file_name || '') ? '下載 ZIP' : '下載 PDF'}
                     </button>
@@ -351,8 +411,219 @@ async function renderBackups(body) {
     loadList({});
   };
 
+  bindLeaveFormsUi({ ytdFrom, ytdTo });
+
   // 預設載入全部
   await loadList({});
+}
+
+/** 人事：請假申請單條件查詢／勾選／全選下載 */
+function bindLeaveFormsUi({ ytdFrom, ytdTo }) {
+  if (!$('#leave-forms-query-form')) return;
+  const STATUS_LEAVE = {
+    draft: '草稿',
+    pending: '簽核中',
+    approved: '已核准',
+    rejected: '已駁回',
+    cancelled: '已取消',
+    voided: '已作廢',
+  };
+  let lastLeaveItems = [];
+
+  function updateLeaveSelCount() {
+    const n = [
+      ...document.querySelectorAll('#leave-forms-list input[data-leave-check]:checked'),
+    ].length;
+    const el = $('#leave-sel-count');
+    if (el) el.textContent = `已選 ${n} / ${lastLeaveItems.length} 筆`;
+    const all = $('#chk-all-leave-forms');
+    if (all && lastLeaveItems.length) {
+      const checked = [
+        ...document.querySelectorAll('#leave-forms-list input[data-leave-check]'),
+      ];
+      all.checked = checked.length > 0 && checked.every((c) => c.checked);
+      all.indeterminate =
+        checked.some((c) => c.checked) && !checked.every((c) => c.checked);
+    }
+  }
+
+  function renderLeaveList(items) {
+    const box = $('#leave-forms-list');
+    if (!box) return;
+    lastLeaveItems = items || [];
+    if (!lastLeaveItems.length) {
+      box.innerHTML = emptyState({
+        title: '沒有符合條件的請假單',
+        desc: '請調整期間、部門、狀態或關鍵字後再查詢。',
+      });
+      return;
+    }
+    box.innerHTML = `
+      <div class="form-actions" style="margin-bottom:10px;flex-wrap:wrap;align-items:center;gap:8px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="chk-all-leave-forms" checked /> 全選
+        </label>
+        <button type="button" class="btn primary sm" id="btn-leave-dl-selected">下載選取（ZIP）</button>
+        <button type="button" class="btn outline sm" id="btn-leave-dl-all">下載本頁全部</button>
+        <span class="muted" id="leave-sel-count">已選 ${lastLeaveItems.length} / ${lastLeaveItems.length} 筆</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th style="width:40px"></th>
+              <th>單號</th><th>申請人</th><th>部門</th><th>假別</th>
+              <th>請假起</th><th>請假迄</th><th>天／時</th><th>狀態</th><th>主旨</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lastLeaveItems
+              .map((r) => {
+                const dh =
+                  [
+                    r.days != null ? `${r.days} 日` : '',
+                    r.hours != null && Number(r.hours) > 0 ? `${r.hours} 時` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' / ') || '—';
+                return `<tr>
+                  <td><input type="checkbox" data-leave-check value="${r.id}" checked /></td>
+                  <td>#${r.id}</td>
+                  <td>${esc(r.requester_name || '')}</td>
+                  <td>${esc(r.requester_dept || '—')}</td>
+                  <td>${esc(r.leave_type || '—')}</td>
+                  <td style="white-space:nowrap">${esc(r.leave_start || '—')}</td>
+                  <td style="white-space:nowrap">${esc(r.leave_end || '—')}</td>
+                  <td style="white-space:nowrap">${esc(dh)}</td>
+                  <td>${esc(STATUS_LEAVE[r.status] || r.status || '')}</td>
+                  <td title="${esc(r.title || '')}">${esc((r.title || '').slice(0, 40))}${(r.title || '').length > 40 ? '…' : ''}</td>
+                </tr>`;
+              })
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top:8px">共 ${lastLeaveItems.length} 筆請假申請。勾選後按「下載選取」；或「下載本頁全部」。</p>`;
+
+    $('#chk-all-leave-forms')?.addEventListener('change', (e) => {
+      box.querySelectorAll('input[data-leave-check]').forEach((c) => {
+        c.checked = e.target.checked;
+      });
+      updateLeaveSelCount();
+    });
+    box.querySelectorAll('input[data-leave-check]').forEach((c) => {
+      c.onchange = updateLeaveSelCount;
+    });
+
+    async function downloadLeaveIds(ids) {
+      if (!ids.length) {
+        toast('請至少勾選一筆請假單', 'error');
+        return;
+      }
+      const out = $('#leave-forms-dl-result');
+      const btnSel = $('#btn-leave-dl-selected');
+      const btnAll = $('#btn-leave-dl-all');
+      if (btnSel) btnSel.disabled = true;
+      if (btnAll) btnAll.disabled = true;
+      if (out) out.textContent = `正在打包 ${ids.length} 筆請假 PDF，請稍候…`;
+      try {
+        const metaDl = await api('/api/backups/leave-forms-download', {
+          method: 'POST',
+          body: { ids },
+          expectBlob: true,
+          returnMeta: true,
+        });
+        const blob = metaDl.blob || metaDl;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = metaDl.filename || `請假申請單_${ids.length}筆.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        if (out) out.textContent = `已開始下載 ZIP（${ids.length} 筆）。`;
+        toast(`請假申請單 ZIP 已開始下載（${ids.length} 筆）`, 'success');
+      } catch (err) {
+        if (out) out.textContent = '';
+        toast(err.message, 'error');
+      } finally {
+        if (btnSel) btnSel.disabled = false;
+        if (btnAll) btnAll.disabled = false;
+      }
+    }
+
+    $('#btn-leave-dl-selected')?.addEventListener('click', () => {
+      const ids = [
+        ...box.querySelectorAll('input[data-leave-check]:checked'),
+      ].map((c) => Number(c.value));
+      downloadLeaveIds(ids);
+    });
+    $('#btn-leave-dl-all')?.addEventListener('click', () => {
+      box.querySelectorAll('input[data-leave-check]').forEach((c) => {
+        c.checked = true;
+      });
+      const all = $('#chk-all-leave-forms');
+      if (all) {
+        all.checked = true;
+        all.indeterminate = false;
+      }
+      updateLeaveSelCount();
+      downloadLeaveIds(lastLeaveItems.map((r) => r.id));
+    });
+    updateLeaveSelCount();
+  }
+
+  $('#leave-forms-query-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      date_from: fd.get('date_from') || '',
+      date_to: fd.get('date_to') || '',
+      status: fd.get('status') || 'approved',
+      department: fd.get('department') || '',
+      leave_type: String(fd.get('leave_type') || '').trim(),
+      keyword: String(fd.get('keyword') || '').trim(),
+    };
+    if (!payload.date_from || !payload.date_to) {
+      toast('請指定請假期間起迄', 'error');
+      return;
+    }
+    const btn = $('#btn-leave-forms-query');
+    const box = $('#leave-forms-list');
+    if (btn) btn.disabled = true;
+    if (box) box.innerHTML = `<div class="muted">查詢中…</div>`;
+    try {
+      const data = await api('/api/backups/leave-forms-query', {
+        method: 'POST',
+        body: payload,
+      });
+      renderLeaveList(data.items || []);
+      toast(`查詢完成：${data.total || 0} 筆`, 'success');
+    } catch (err) {
+      if (box) box.innerHTML = `<div class="error-msg">${esc(err.message)}</div>`;
+      toast(err.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  $('#btn-leave-forms-reset')?.addEventListener('click', () => {
+    const form = $('#leave-forms-query-form');
+    if (!form) return;
+    form.reset();
+    const fromEl = form.querySelector('[name=date_from]');
+    const toEl = form.querySelector('[name=date_to]');
+    if (fromEl) fromEl.value = ytdFrom;
+    if (toEl) toEl.value = ytdTo;
+    const st = form.querySelector('[name=status]');
+    if (st) st.value = 'approved';
+    lastLeaveItems = [];
+    const box = $('#leave-forms-list');
+    if (box) {
+      box.innerHTML = `<div class="muted">請先設定條件後按「查詢請假單」。</div>`;
+    }
+    const out = $('#leave-forms-dl-result');
+    if (out) out.textContent = '';
+  });
 }
 
 const PERM_LABEL = {
@@ -406,140 +677,7 @@ async function downloadUsersExcel(ids, { resetPasswords = false } = {}) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `成員名單_${twToday()}.xlsx`;
+  a.download = `成員名單_${formatTaiwanDateTime(new Date(), { dateOnly: true })}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
-
-/** 人事：請假報表匯出 */
-async function renderLeaveReport(body) {
-  if (!hasPerm('leave_report')) {
-    body.innerHTML = `<div class="error-msg">您沒有「請假報表匯出」權限（請洽系統管理員於成員權限中開啟）</div>`;
-    return;
-  }
-  await loadUsers();
-  const users = (state.users || []).filter((u) => u.active !== 0);
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = String(today.getMonth() + 1).padStart(2, '0');
-  const d = String(today.getDate()).padStart(2, '0');
-  const defaultTo = `${y}-${m}-${d}`;
-  const defaultFrom = `${y}-01-01`;
-
-  body.innerHTML = `
-    <div class="card" style="max-width:960px">
-      <h3 style="margin-top:0">請假資料匯出（Excel）</h3>
-      <p class="muted" style="margin-top:0;line-height:1.55">
-        供<strong>人事單位</strong>匯出：可勾選<strong>多人</strong>、指定日期範圍。
-        僅統計<strong>已核准</strong>請假。
-        報表為<strong>一人一列</strong>：各有上限假別的<strong>應有／已請／剩餘／可請</strong>（天數），方便多人比對。
-      </p>
-      <div class="form-grid two" style="margin-bottom:12px">
-        <div class="field">
-          <label>日期起 *</label>
-          <input type="date" id="lr-from" value="${defaultFrom}" required />
-        </div>
-        <div class="field">
-          <label>日期迄 *</label>
-          <input type="date" id="lr-to" value="${defaultTo}" required />
-        </div>
-      </div>
-      <div class="field" style="margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <label style="margin:0">選擇人員 *（${users.length} 人）</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button type="button" class="btn outline sm" id="lr-all">全選</button>
-            <button type="button" class="btn outline sm" id="lr-none">全不選</button>
-            <span class="muted" id="lr-count">已選 0 人</span>
-          </div>
-        </div>
-        <div class="approver-list" id="lr-user-list" style="margin-top:8px;max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">
-          ${users
-            .map(
-              (u) => `
-            <label style="display:flex;align-items:center;gap:8px;padding:4px 0">
-              <input type="checkbox" data-lr-user value="${u.id}" />
-              <span>
-                <strong>${esc(u.name)}</strong>
-                <span class="muted">（${esc(u.username)}）</span>
-                ${u.department ? `<span class="muted">· ${esc(u.department)}</span>` : ''}
-              </span>
-            </label>`
-            )
-            .join('') || '<div class="muted">尚無成員</div>'}
-        </div>
-      </div>
-      <div class="form-actions" style="margin-top:16px">
-        <button type="button" class="btn primary" id="lr-export">匯出 Excel</button>
-      </div>
-      <p class="muted" style="font-size:0.82rem;margin-top:12px;line-height:1.45">
-        Excel：
-        <strong>人員餘額</strong>（一人一列 · 特休／事假／病假／祭儀等 · 應有／已請／剩餘／可請天數）、
-        <strong>請假明細</strong>（期間已核准）、
-        <strong>說明</strong>。
-      </p>
-    </div>`;
-
-  const updateCount = () => {
-    const n = body.querySelectorAll('input[data-lr-user]:checked').length;
-    const el = $('#lr-count');
-    if (el) el.textContent = `已選 ${n} 人`;
-  };
-  body.querySelectorAll('input[data-lr-user]').forEach((cb) => {
-    cb.addEventListener('change', updateCount);
-  });
-  $('#lr-all')?.addEventListener('click', () => {
-    body.querySelectorAll('input[data-lr-user]').forEach((cb) => {
-      cb.checked = true;
-    });
-    updateCount();
-  });
-  $('#lr-none')?.addEventListener('click', () => {
-    body.querySelectorAll('input[data-lr-user]').forEach((cb) => {
-      cb.checked = false;
-    });
-    updateCount();
-  });
-
-  $('#lr-export')?.addEventListener('click', async () => {
-    const userIds = [...body.querySelectorAll('input[data-lr-user]:checked')].map((c) =>
-      Number(c.value)
-    );
-    const dateFrom = $('#lr-from')?.value;
-    const dateTo = $('#lr-to')?.value;
-    if (!userIds.length) {
-      toast('請至少選擇一位人員', 'error');
-      return;
-    }
-    if (!dateFrom || !dateTo) {
-      toast('請選擇日期範圍', 'error');
-      return;
-    }
-    if (dateFrom > dateTo) {
-      toast('起始日期不可晚於結束日期', 'error');
-      return;
-    }
-    const btn = $('#lr-export');
-    if (btn) btn.disabled = true;
-    try {
-      // 一律僅匯出已核准
-      const blob = await api('/api/reports/leave-export', {
-        method: 'POST',
-        body: { userIds, dateFrom, dateTo },
-        expectBlob: true,
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `請假報表_${dateFrom}_${dateTo}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast('Excel 已開始下載', 'success');
-    } catch (e) {
-      toast(e.message || '匯出失敗', 'error');
-    } finally {
-      if (btn) btn.disabled = false;
-    }
-  });
-}
-

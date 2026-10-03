@@ -490,4 +490,76 @@ app.post(
     }
   }
 );
+
+  // ---------- 紙本 PDF 模版上傳與存取 ----------
+  const path = require('path');
+  const fs = require('fs');
+  const multer = require('multer');
+
+  const templatesDir = path.join(__dirname, '..', '..', 'data', 'templates');
+  if (!fs.existsSync(templatesDir)) {
+    fs.mkdirSync(templatesDir, { recursive: true });
+  }
+
+  const templateStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      if (!fs.existsSync(templatesDir)) fs.mkdirSync(templatesDir, { recursive: true });
+      cb(null, templatesDir);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase() || '.pdf';
+      const safeExt = ['.pdf', '.png', '.jpg', '.jpeg'].includes(ext) ? ext : '.pdf';
+      const name = `template_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${safeExt}`;
+      cb(null, name);
+    },
+  });
+
+  const uploadTemplate = multer({
+    storage: templateStorage,
+    limits: { fileSize: 25 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      if (['.pdf', '.png', '.jpg', '.jpeg'].includes(ext)) {
+        cb(null, true);
+      } else {
+        cb(new Error('僅支援上傳 PDF、PNG 或 JPG 格式檔案'));
+      }
+    },
+  });
+
+  app.post(
+    '/api/workflows/upload-template',
+    authMiddleware,
+    requirePerm('workflows'),
+    uploadTemplate.single('file'),
+    (req, res) => {
+      if (!req.file) {
+        return res.status(400).json({ error: '請選擇要上傳的底圖檔案' });
+      }
+      let origName = req.file.originalname;
+      try {
+        origName = Buffer.from(origName, 'latin1').toString('utf8');
+      } catch {}
+      res.json({
+        ok: true,
+        templateFile: `templates/${req.file.filename}`,
+        originalName: origName,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+      });
+    }
+  );
+
+  app.get('/api/templates/:filename', authMiddleware, (req, res) => {
+    const fn = path.basename(req.params.filename);
+    const fp = path.join(templatesDir, fn);
+    if (!fs.existsSync(fp)) {
+      return res.status(404).json({ error: '找不到底圖檔案' });
+    }
+    const ext = path.extname(fn).toLowerCase();
+    if (ext === '.pdf') res.setHeader('Content-Type', 'application/pdf');
+    else if (ext === '.png') res.setHeader('Content-Type', 'image/png');
+    else if (['.jpg', '.jpeg'].includes(ext)) res.setHeader('Content-Type', 'image/jpeg');
+    res.sendFile(fp);
+  });
 };

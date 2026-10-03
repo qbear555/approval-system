@@ -1,144 +1,104 @@
-/**
- * 申請詳情顯示／附件／OnlyOffice
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
-function renderFormTableHtml(table) {
-  const t = normalizeFormTable(table);
-  if (!t) return '';
-  let html = '<table class="form-view-table"><tbody>';
-  t.cells.forEach((row, ri) => {
-    html += '<tr>';
-    row.forEach((cell) => {
-      const tag = t.header && ri === 0 ? 'th' : 'td';
-      html += `<${tag}>${esc(cell) || '&nbsp;'}</${tag}>`;
-    });
-    html += '</tr>';
-  });
-  html += '</tbody></table>';
-  return html;
-}
-
-/**
- * 表單欄位顯示：富文字 HTML／分行格式；相容舊版 __table
- */
-function renderFormValueHtml(field, value, formData) {
-  const raw = value == null || value === '' ? '' : String(value);
-  const isRichField =
-    field?.type === 'textarea' ||
-    field?.id === 'subject' ||
-    /主旨|說明|事由|內容|備註|異常|規格/.test(String(field?.label || ''));
-
-  // 富文字 HTML
-  if (
-    isRichField &&
-    typeof RichEditor !== 'undefined' &&
-    (RichEditor.isProbablyHtml(raw) || formData?.[`${field?.id}__table`])
-  ) {
-    let html = raw;
-    const legacy = formData?.[`${field?.id}__table`];
-    if (legacy && !/<table/i.test(html)) {
-      const t = normalizeFormTable(legacy);
-      if (t) {
-        const rows = t.cells
-          .map(
-            (row, ri) =>
-              `<tr>${row
-                .map((c) => {
-                  const tag = t.header && ri === 0 ? 'th' : 'td';
-                  return `<${tag} style="border:1px solid #94a3b8;padding:6px 8px">${esc(c)}</${tag}>`;
-                })
-                .join('')}</tr>`
-          )
-          .join('');
-        html =
-          (html
-            ? RichEditor.isProbablyHtml(html)
-              ? html
-              : RichEditor.plainToHtml(html)
-            : '') +
-          `<table border="1" style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table>`;
-      }
-    }
-    return RichEditor.renderViewHtml(html || raw);
-  }
-
-  const text = formatFormValue(field, value, formData);
-  const escaped = esc(text);
-  const multiline =
-    isRichField ||
-    String(text).includes('\n') ||
-    String(text).includes('\r');
-  const tableHtml = renderFormTableHtml(formData?.[`${field?.id}__table`]);
-  let body = '';
-  if (multiline && text !== '—') {
-    body = `<div class="form-value-pre">${escaped}</div>`;
-  } else if (text !== '—' || !tableHtml) {
-    body = escaped;
-  }
-  if (tableHtml) body += tableHtml;
-  return body || '—';
-}
-
-function renderPlainValueHtml(val) {
-  const text = val == null || val === '' ? '—' : String(val);
-  const escaped = esc(text);
-  if (text !== '—' && (text.includes('\n') || text.includes('\r'))) {
-    return `<div class="form-value-pre">${escaped}</div>`;
-  }
-  return escaped;
-}
-
-/** 依 id 取「姓名（部門）」顯示字串；查無此人回傳 fallback */
-function userLabelById(id, fallback) {
-  const u = (state.users || []).find((x) => x.id === Number(id));
-  if (!u) return fallback;
-  return u.department ? `${u.name}（${u.department}）` : u.name;
-}
-
-/** 「1,2,3」→「姓名（部門）、…」；沒有有效 id 時回傳空字串 */
-function userLabelsFromIds(val) {
-  return String(val)
-    .split(/[,，\s]+/)
-    .map(Number)
-    .filter((n) => n > 0)
-    .map((id) => userLabelById(id, `#${id}`))
-    .join('、');
-}
-
-function renderFormDataBlock(formFields, formData) {
+function renderFormDataBlock(formFields, formData, steps, templateSteps) {
   const fields = formFields || [];
   const data = formData || {};
+  const leaveTypeVal = String(data.leave_type || data.假別 || '');
+  const personalDisp = /事假/.test(leaveTypeVal)
+    ? computePersonalLeaveDisplay(data)
+    : isSickLeaveTypeClient(leaveTypeVal)
+      ? computeSickLeaveDisplay(data)
+      : null;
+  /** 表單鍵 users_pick_N／dept_head_N／cosign_N 的 N＝流程模板序 */
+  const stepForFormKey = (n, assignType) => {
+    const num = Number(n);
+    const tpl = Array.isArray(templateSteps) ? templateSteps : [];
+    const fromWfSame = tpl.find(
+      (s) => Number(s.order) === num && s.assignType === assignType
+    );
+    if (fromWfSame) return fromWfSame;
+    const fromWfOrder = tpl.find((s) => Number(s.order) === num);
+    if (fromWfOrder) return fromWfOrder;
+    const list = Array.isArray(steps) ? steps : [];
+    const byTpl = list.find(
+      (s) =>
+        Number(s.templateOrder) === num &&
+        (!assignType || s.assignType === assignType)
+    );
+    if (byTpl) return byTpl;
+    const byOrderType = list.find(
+      (s) => Number(s.order) === num && s.assignType === assignType
+    );
+    if (byOrderType) return byOrderType;
+    const same = list.filter((s) => s.assignType === assignType);
+    if (same.length === 1) return same[0];
+    return list.find((s) => Number(s.order) === num) || null;
+  };
+  const labelForFormKey = (n, assignType, fallback) => {
+    const step = stepForFormKey(n, assignType);
+    const name = String(step?.name || '').trim();
+    if (!name) return fallback;
+    const tpl = Array.isArray(templateSteps) ? templateSteps : [];
+    const dup =
+      tpl.filter((s) => String(s.name || '').trim() === name).length > 1;
+    return dup ? `${name}（第${Number(n)}關）` : name;
+  };
   // 部門主管自選欄位（dept_head_N）
   const deptHeadRows = Object.keys(data)
     .filter((k) => /^dept_head_\d+$/.test(k))
     .map((k) => {
       const v = data[k];
-      let label = '部門主管';
+      const label = labelForFormKey(
+        k.replace('dept_head_', ''),
+        'dept_head',
+        '部門主管'
+      );
       let display = '略過';
       if (v && v !== 'skip' && Number(v)) {
-        display = userLabelById(
-          v,
-          data[`${k}__label`] || data[`${k}__name`] || `#${v}`
-        );
+        const u = (state.users || []).find((x) => x.id === Number(v));
+        display = u
+          ? u.department
+            ? `${u.name}（${u.department}）`
+            : u.name
+          : data[`${k}__label`] || data[`${k}__name`] || `#${v}`;
       }
       return `<dt>${esc(label)}</dt><dd>${esc(display)}</dd>`;
     })
     .join('');
-  // 申請人自選簽核人（users_pick_N，如副總；可多位勾選）
+  // 申請人自選簽核人（users_pick_N）：標籤用步驟名稱（信用額度＝業務人員，勿寫死副總）
   const usersPickRows = Object.keys(data)
     .filter((k) => /^users_pick_\d+$/.test(k))
     .map((k) => {
       const v = data[k];
+      const label = labelForFormKey(
+        k.replace('users_pick_', ''),
+        'users_pick',
+        '自選簽核人'
+      );
       let display = data[`${k}__label`] || '—';
-      if (data[`${k}__label`]) {
+      if (v === 'skip' || v === '' || v == null || v === '0') {
+        display = '略過';
+      } else if (data[`${k}__label`]) {
         display = data[`${k}__label`];
       } else if (String(v) === 'all') {
         display = '全部';
       } else if (v) {
-        const labels = userLabelsFromIds(v);
-        if (labels) display = labels;
+        const ids = String(v)
+          .split(/[,，\s]+/)
+          .map(Number)
+          .filter((n) => n > 0);
+        if (ids.length) {
+          display = ids
+            .map((id) => {
+              const u = (state.users || []).find((x) => x.id === id);
+              return u
+                ? u.department
+                  ? `${u.name}（${u.department}）`
+                  : u.name
+                : `#${id}`;
+            })
+            .join('、');
+        }
       }
-      return `<dt style="white-space:nowrap">副總經理簽核</dt><dd style="white-space:nowrap">${esc(display)}</dd>`;
+      return `<dt style="white-space:nowrap">${esc(label)}</dt><dd style="white-space:nowrap">${esc(display)}</dd>`;
     })
     .join('');
   // 會簽人員 cosign_N（可多位 1,2,3）
@@ -150,10 +110,29 @@ function renderFormDataBlock(formFields, formData) {
       if (data[`${k}__label`]) {
         display = data[`${k}__label`];
       } else if (v && v !== 'skip') {
-        const labels = userLabelsFromIds(v);
-        if (labels) display = labels;
+        const ids = String(v)
+          .split(/[,，\s]+/)
+          .map(Number)
+          .filter((n) => n > 0);
+        if (ids.length) {
+          display = ids
+            .map((id) => {
+              const u = (state.users || []).find((x) => x.id === id);
+              return u
+                ? u.department
+                  ? `${u.name}（${u.department}）`
+                  : u.name
+                : `#${id}`;
+            })
+            .join('、');
+        }
       }
-      return `<dt>會簽人員</dt><dd>${esc(display)}</dd>`;
+      const label = labelForFormKey(
+        k.replace('cosign_', ''),
+        'cosign_pick',
+        '會簽人員'
+      );
+      return `<dt>${esc(label)}</dt><dd>${esc(display)}</dd>`;
     })
     .join('');
   if (!fields.length) {
@@ -168,7 +147,24 @@ function renderFormDataBlock(formFields, formData) {
     return `
       <h3 style="margin-top:20px">表單資料</h3>
       <dl class="kv">
-        ${keys.map((k) => `<dt>${esc(k)}</dt><dd>${renderPlainValueHtml(data[k])}</dd>`).join('')}
+        ${keys
+          .map((k) => {
+            if (k === 'attendee_ids') return '';
+            if (k === 'attendees') {
+              return `<dt>出席人員</dt><dd>${esc(String(data[k] || '—'))}</dd>`;
+            }
+            if (personalDisp && k === 'hours') return '';
+            if (personalDisp && k === 'days') {
+              return `<dt>${esc(k)}</dt><dd>${esc(personalDisp.text)}</dd>`;
+            }
+            const shown = isMoneyFormField(null, k)
+              ? formatYuanWanStyle(data[k])
+              : renderPlainValueHtml(data[k]);
+            return `<dt>${esc(k)}</dt><dd>${
+              isMoneyFormField(null, k) ? esc(shown) : shown
+            }</dd>`;
+          })
+          .join('')}
         ${deptHeadRows}
         ${cosignRows}
         ${usersPickRows}
@@ -178,10 +174,61 @@ function renderFormDataBlock(formFields, formData) {
     <h3 style="margin-top:20px">表單資料</h3>
     <dl class="kv">
       ${fields
-        .map(
-          (f) =>
-            `<dt>${esc(f.label)}</dt><dd>${renderFormValueHtml(f, data[f.id], data)}</dd>`
-        )
+        .map((f) => {
+          if (personalDisp && f.id === 'days') {
+            return `<dt>${esc(f.label)}</dt><dd>${esc(personalDisp.text)}</dd>`;
+          }
+          if (personalDisp && f.id === 'hours') return '';
+          if (f.id === 'period_roc_year') return '';
+          if (f.id === 'period_month') {
+            const y = welfareCurrentRocYear(data);
+            const m = String(data[f.id] || '').replace(/[^\d]/g, '');
+            const text = m ? `民國 ${y} 年 ${Number(m)} 月` : '—';
+            return `<dt>所屬月份</dt><dd>${esc(text)}</dd>`;
+          }
+          if (f.id === 'submit_month') {
+            const m = String(data[f.id] || '').replace(/[^\d]/g, '');
+            const text = m ? `${Number(m)}月` : '—';
+            return `<dt>${esc(f.label)}</dt><dd>${esc(text)}</dd>`;
+          }
+          if (f.id === 'stats_start') {
+            const fmt = (d) => {
+              const s = String(d || '').trim();
+              const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+              if (!m) return s || '—';
+              const y = Number(m[1]);
+              const roc = y > 1911 ? y - 1911 : y;
+              return `民國 ${roc} 年 ${Number(m[2])} 月 ${Number(m[3])} 日`;
+            };
+            const a = fmt(data.stats_start);
+            const b = fmt(data.stats_end);
+            const text =
+              a !== '—' && b !== '—' ? `${a} ～ ${b}` : a !== '—' ? a : '—';
+            return `<dt>統計時間</dt><dd>${esc(text)}</dd>`;
+          }
+          if (f.id === 'stats_end') return '';
+          if (f.id === 'attendee_ids') return '';
+          if (f.id === 'attendees') {
+            return `<dt>出席人員</dt><dd>${esc(String(data.attendees || '—'))}</dd>`;
+          }
+          if (f.id === 'followup_items') {
+            const rows = parseFollowupItemsClient(data[f.id]);
+            if (!rows.length) {
+              return `<dt>${esc(f.label)}</dt><dd>—</dd>`;
+            }
+            const body = `<table class="form-view-table followup-ledger"><thead><tr><th>後續交辦事項</th><th>承辦人</th><th>完成期限</th></tr></thead><tbody>${rows
+              .map(
+                (it) =>
+                  `<tr><td>${esc(it.item || '')}</td><td>${esc(it.owner || '')}</td><td>${esc(it.due || '')}</td></tr>`
+              )
+              .join('')}</tbody></table>`;
+            return `<dt>${esc(f.label)}</dt><dd>${body}</dd>`;
+          }
+          const body = isMoneyFormField(f)
+            ? esc(formatFormValue(f, data[f.id], data))
+            : renderFormValueHtml(f, data[f.id], data);
+          return `<dt>${esc(f.label)}</dt><dd>${body}</dd>`;
+        })
         .join('')}
       ${deptHeadRows}
       ${cosignRows}
@@ -193,8 +240,253 @@ function isOfficeFileName(name) {
   return /\.(docx?|xlsx?|pptx?|odt|ods|odp|csv|rtf)$/i.test(String(name || ''));
 }
 
-function isPreviewableAttachmentName(name) {
-  return /\.(pdf|png|jpe?g|gif|webp)$/i.test(String(name || ''));
+function isPreviewableAttachmentName(name, mime) {
+  const n = String(name || '');
+  const m = String(mime || '').toLowerCase();
+  return (
+    m.includes('pdf') ||
+    /\.pdf$/i.test(n) ||
+    m.startsWith('image/') ||
+    /\.(png|jpe?g|gif|webp|bmp)$/i.test(n)
+  );
+}
+
+async function openRequestPdfPreview(reqId, title) {
+  const id = Number(reqId);
+  if (!id) return;
+  try {
+    const meta = await api(`/api/requests/${id}/pdf?preview=1`, {
+      expectBlob: true,
+      returnMeta: true,
+    });
+    const url = URL.createObjectURL(meta.blob);
+    const name = title || meta.filename || `申請單#${id}.pdf`;
+    openModal(`
+      <h3 style="margin-top:0">已核准申請單預覽</h3>
+      <p class="muted" style="margin:-4px 0 10px;font-size:0.9rem">${esc(name)}</p>
+      <div id="att-preview-box">
+        <iframe class="att-preview-iframe" title="${esc(name)}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>
+      </div>
+      <div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn outline" data-close-modal>關閉</button>
+      </div>
+    `);
+    $('#modal-panel')?.classList.add('wide', 'wide-announcement', 'wide-att-preview');
+    setTimeout(() => URL.revokeObjectURL(url), 180_000);
+  } catch (e) {
+    toast(e.message || '預覽失敗', 'error');
+  }
+}
+
+function formatApprovedRequestLabel(r) {
+  if (!r) return '';
+  const when = String(r.completed_at || '').replace('T', ' ').slice(0, 16);
+  const wf = r.workflow_name ? `${r.workflow_name} · ` : '';
+  const who = r.requester_name ? `（${r.requester_name}）` : '';
+  return `#${r.id}　${wf}${r.title || ''}${who}${when ? `　${when}` : ''}`;
+}
+
+/**
+ * 挑選已核准申請單作為附件
+ * @param {{ excludeIds?: number[], alreadySelected?: number[], onConfirm: (rows: object[]) => void }} opts
+ */
+async function openApprovedRequestPicker(opts = {}) {
+  const exclude = new Set((opts.excludeIds || []).map(Number).filter((n) => n > 0));
+  const already = new Set((opts.alreadySelected || []).map(Number).filter((n) => n > 0));
+  openModal(`
+    <h3 style="margin-top:0">附加已核准申請單</h3>
+    <p class="muted" style="margin:-4px 0 10px;font-size:0.9rem">
+      選擇已簽核完成的申請單，送出後會以 PDF 作為本單附件；可先預覽再加入。
+    </p>
+    <div class="field" style="margin-bottom:8px">
+      <input id="appr-pick-q" type="search" placeholder="搜尋單號、主旨、流程、申請人…" autocomplete="off" />
+    </div>
+    <div id="appr-pick-list" class="appr-pick-list"><div class="muted" style="padding:16px">載入中…</div></div>
+    <div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button type="button" class="btn primary" id="appr-pick-ok">加入附件</button>
+      <button type="button" class="btn outline" data-close-modal>取消</button>
+      <span class="muted" id="appr-pick-count" style="font-size:0.85rem"></span>
+    </div>
+  `);
+  $('#modal-panel')?.classList.add('wide');
+  const listEl = $('#appr-pick-list');
+  const countEl = $('#appr-pick-count');
+  let rows = [];
+  let timer = null;
+
+  const selectedIds = () =>
+    [...(listEl?.querySelectorAll('input[data-appr-pick]:checked') || [])]
+      .map((el) => Number(el.value))
+      .filter((n) => n > 0);
+
+  const syncCount = () => {
+    if (countEl) {
+      const n = selectedIds().length;
+      countEl.textContent = n ? `已選 ${n} 張` : '';
+    }
+  };
+
+  const renderRows = (items) => {
+    const vis = (items || []).filter((r) => !exclude.has(Number(r.id)));
+    if (!vis.length) {
+      listEl.innerHTML = `<div class="muted" style="padding:16px">沒有符合的已核准申請單</div>`;
+      syncCount();
+      return;
+    }
+    listEl.innerHTML = vis
+      .map((r) => {
+        const checked = already.has(Number(r.id)) ? 'checked' : '';
+        const disabled = already.has(Number(r.id)) ? 'disabled' : '';
+        return `
+        <div class="appr-pick-row" data-appr-id="${r.id}">
+          <label class="appr-pick-check">
+            <input type="checkbox" data-appr-pick value="${r.id}" ${checked} ${disabled} />
+            <span>
+              <strong>#${r.id}</strong>
+              ${r.workflow_name ? `<span class="tag" style="margin-left:6px">${esc(r.workflow_name)}</span>` : ''}
+              <div style="margin-top:2px">${esc(r.title || '')}</div>
+              <div class="muted" style="font-size:0.8rem">
+                ${esc(r.requester_name || '')}
+                ${r.completed_at ? ` · ${esc(String(r.completed_at).replace('T', ' ').slice(0, 16))}` : ''}
+                ${already.has(Number(r.id)) ? ' · 已加入' : ''}
+              </div>
+            </span>
+          </label>
+          <button type="button" class="btn outline sm" data-appr-preview="${r.id}" data-appr-title="${esc(
+            formatApprovedRequestLabel(r)
+          )}">預覽</button>
+        </div>
+        <div class="appr-pick-iframe-wrap hidden" id="appr-prev-${r.id}"></div>`;
+      })
+      .join('');
+    listEl.querySelectorAll('[data-appr-pick]').forEach((el) => {
+      el.addEventListener('change', syncCount);
+    });
+    listEl.querySelectorAll('[data-appr-preview]').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const rid = Number(btn.dataset.apprPreview);
+        const box = $(`#appr-prev-${rid}`);
+        if (!box) return;
+        if (!box.classList.contains('hidden') && box.querySelector('iframe')) {
+          box.classList.add('hidden');
+          box.innerHTML = '';
+          btn.textContent = '預覽';
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = '載入中…';
+        try {
+          const meta = await api(`/api/requests/${rid}/pdf?preview=1`, {
+            expectBlob: true,
+            returnMeta: true,
+          });
+          const url = URL.createObjectURL(meta.blob);
+          listEl.querySelectorAll('.appr-pick-iframe-wrap').forEach((w) => {
+            if (w !== box) {
+              w.classList.add('hidden');
+              w.innerHTML = '';
+            }
+          });
+          listEl.querySelectorAll('[data-appr-preview]').forEach((b) => {
+            if (b !== btn) b.textContent = '預覽';
+          });
+          box.innerHTML = `<iframe class="appr-pick-iframe" title="${esc(
+            btn.dataset.apprTitle || `申請單#${rid}`
+          )}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`;
+          box.classList.remove('hidden');
+          btn.textContent = '收合預覽';
+          setTimeout(() => URL.revokeObjectURL(url), 180_000);
+        } catch (e) {
+          toast(e.message || '預覽失敗', 'error');
+          btn.textContent = '預覽';
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+    syncCount();
+  };
+
+  const load = async () => {
+    const q = String($('#appr-pick-q')?.value || '').trim();
+    if (listEl) listEl.innerHTML = `<div class="muted" style="padding:16px">載入中…</div>`;
+    try {
+      const qs = new URLSearchParams();
+      if (q) qs.set('q', q);
+      qs.set('limit', '80');
+      if (exclude.size === 1) qs.set('exclude_id', String([...exclude][0]));
+      const data = await api(`/api/requests/approved-for-attach?${qs.toString()}`);
+      rows = data.requests || [];
+      renderRows(rows);
+    } catch (e) {
+      if (listEl) {
+        listEl.innerHTML = `<div class="error-msg" style="padding:16px">${esc(e.message || '載入失敗')}</div>`;
+      }
+    }
+  };
+
+  $('#appr-pick-q')?.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(load, 280);
+  });
+  $('#appr-pick-ok')?.addEventListener('click', () => {
+    const ids = selectedIds().filter((id) => !already.has(id));
+    const picked = ids
+      .map((id) => rows.find((r) => Number(r.id) === id))
+      .filter(Boolean);
+    closeModal();
+    if (typeof opts.onConfirm === 'function') opts.onConfirm(picked);
+  });
+  await load();
+}
+
+async function openAttachmentPreview(attId, fileName) {
+  try {
+    const meta = await api(`/api/attachments/${attId}?inline=1`, {
+      expectBlob: true,
+      returnMeta: true,
+    });
+    const url = URL.createObjectURL(meta.blob);
+    const ct = String(meta.contentType || meta.blob.type || '').toLowerCase();
+    const name = String(meta.filename || fileName || `附件#${attId}`);
+    const isPdf = ct.includes('pdf') || /\.pdf$/i.test(name);
+    const isImg =
+      ct.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
+    const previewHtml =
+      isPdf
+        ? `<iframe class="att-preview-iframe" title="${esc(name)}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`
+        : isImg
+          ? `<img class="att-preview-img" alt="${esc(name)}" src="${url}" />`
+          : `<p class="muted">此格式無法內嵌預覽，請改用下載。</p>`;
+    openModal(`
+      <h3 style="margin-top:0">附件檢視</h3>
+      <p class="muted" style="margin:-4px 0 10px;font-size:0.9rem">${esc(name)}</p>
+      <div id="att-preview-box">${previewHtml}</div>
+      <div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn outline" id="btn-att-download">下載</button>
+        <button type="button" class="btn outline" data-close-modal>關閉</button>
+      </div>
+    `);
+    $('#modal-panel')?.classList.add('wide', 'wide-announcement', 'wide-att-preview');
+    $('#btn-att-download')?.addEventListener('click', async () => {
+      try {
+        const blob = await api(`/api/attachments/${attId}`, { expectBlob: true });
+        const dl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = dl;
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(dl);
+      } catch (e) {
+        toast(e.message || '下載失敗', 'error');
+      }
+    });
+    setTimeout(() => URL.revokeObjectURL(url), 180_000);
+  } catch (e) {
+    toast(e.message || '附件開啟失敗', 'error');
+  }
 }
 
 function renderAttachmentsBlock(attachments, opts = {}) {
@@ -225,13 +517,23 @@ function renderAttachmentsBlock(attachments, opts = {}) {
       ${list
         .map((a) => {
           const office = ooOn && isOfficeFileName(a.original_name);
-          const previewable = isPreviewableAttachmentName(a.original_name);
+          const isPdf = /\.pdf$/i.test(String(a.original_name || '')) ||
+            /pdf/i.test(String(a.mime_type || ''));
+          const isImg = /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(a.original_name || '')) ||
+            /^image\//i.test(String(a.mime_type || ''));
           return `
         <li style="margin:6px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
-          <button type="button" class="linkish" data-dl-att="${a.id}" data-dl-name="${esc(a.original_name || '')}">${esc(a.original_name)}</button>
+          <button type="button" class="linkish" data-dl-att="${a.id}" data-dl-name="${esc(a.original_name || '')}" data-att-view="${isPdf || isImg ? '1' : '0'}">${esc(a.original_name)}</button>
           ${
-            previewable
-              ? `<button type="button" class="btn outline sm" data-preview-att="${a.id}" data-preview-name="${esc(a.original_name || '')}">預覽</button>`
+            a.source_request_id
+              ? `<span class="tag" style="background:#ecfdf5;color:#047857">已核准申請單 #${esc(
+                  String(a.source_request_id)
+                )}</span>`
+              : ''
+          }
+          ${
+            isPdf || isImg
+              ? `<button type="button" class="btn outline sm" data-view-att="${a.id}" data-dl-name="${esc(a.original_name || '')}">線上檢視</button>`
               : ''
           }
           ${
@@ -256,41 +558,10 @@ function renderAttachmentsBlock(attachments, opts = {}) {
     </ul>`;
 }
 
-async function openAttachmentPreviewModal(attId, attName) {
-  openModal(`
-    <h3 style="margin-top:0">📎 ${esc(attName || '附件預覽')}</h3>
-    <div id="att-preview-box" class="muted" style="font-size:0.9rem">載入中…</div>
-    <div class="modal-actions" style="margin-top:16px">
-      <button type="button" class="btn outline" data-close-modal>關閉</button>
-    </div>
-  `);
-  $('#modal-panel')?.classList.add('wide', 'modal-panel-att');
-  const box = $('#att-preview-box');
-  try {
-    const meta = await api(`/api/attachments/${attId}?inline=1`, {
-      expectBlob: true,
-      returnMeta: true,
-    });
-    const url = URL.createObjectURL(meta.blob);
-    const ct = String(meta.contentType || meta.blob.type || '').toLowerCase();
-    const name = String(meta.filename || attName || '');
-    const isPdf = ct.includes('pdf') || /\.pdf$/i.test(name);
-    if (box) {
-      if (isPdf) {
-        box.innerHTML = `<iframe class="att-preview-frame" src="${url}#view=FitH" title="附件預覽"></iframe>`;
-      } else {
-        box.innerHTML = `<img class="att-preview-img" src="${url}" alt="附件預覽" />`;
-      }
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 120_000);
-  } catch (err) {
-    if (box) box.innerHTML = '';
-    toast(err.message || '附件預覽失敗', 'error');
-  }
-}
-
 let onlyOfficeScriptPromise = null;
 let onlyOfficeEditorInstance = null;
+/** @type {(() => void)|null} */
+let onlyOfficeResizeHandler = null;
 
 function loadOnlyOfficeScript(src) {
   if (window.DocsAPI) return Promise.resolve();
@@ -314,6 +585,14 @@ function loadOnlyOfficeScript(src) {
 }
 
 function closeOnlyOfficeEditor(reloadDetailId) {
+  if (onlyOfficeResizeHandler) {
+    try {
+      window.removeEventListener('resize', onlyOfficeResizeHandler);
+    } catch {
+      /* ignore */
+    }
+    onlyOfficeResizeHandler = null;
+  }
   try {
     if (onlyOfficeEditorInstance && typeof onlyOfficeEditorInstance.destroyEditor === 'function') {
       onlyOfficeEditorInstance.destroyEditor();
@@ -328,47 +607,20 @@ function closeOnlyOfficeEditor(reloadDetailId) {
   }
 }
 
-function onlyOfficeEvalAllowed() {
-  try {
-    return new Function('return 1')() === 1;
-  } catch {
-    return false;
-  }
-}
-
 async function openOnlyOfficeEditor(attachmentId, requestId) {
   try {
-    if (!onlyOfficeEvalAllowed()) {
-      try {
-        if (!sessionStorage.getItem('oo-csp-reload')) {
-          sessionStorage.setItem('oo-csp-reload', '1');
-          toast('瀏覽器安全政策已更新，正在重新載入頁面…', 'info');
-          setTimeout(() => location.reload(), 200);
-          return;
-        }
-      } catch {
-        /* sessionStorage 不可用 */
-      }
-      throw new Error('瀏覽器阻擋了線上編輯（CSP）。請按 Ctrl+F5 強制重新整理後再試');
-    }
     const data = await api(`/api/onlyoffice/editor/${attachmentId}`);
     if (!data?.config || !data.docsApiScript) {
       throw new Error(data?.error || '無法取得編輯器設定');
     }
-    // HTTPS 不可載入 http://:8088（混合內容）；走同源 /__oo 以免命中舊 CSP 快取
+    // HTTPS 頁面不可載入 http:// 腳本（混合內容）；改走同源 /web-apps
     let scriptUrl = data.docsApiScript;
     if (
       typeof location !== 'undefined' &&
       location.protocol === 'https:' &&
       /^http:\/\//i.test(scriptUrl)
     ) {
-      scriptUrl = `${location.origin}/__oo/web-apps/apps/api/documents/api.js`;
-    } else if (
-      scriptUrl &&
-      scriptUrl.includes('/web-apps/') &&
-      !scriptUrl.includes('/__oo/')
-    ) {
-      scriptUrl = scriptUrl.replace('/web-apps/', '/__oo/web-apps/');
+      scriptUrl = `${location.origin}/web-apps/apps/api/documents/api.js`;
     }
     await loadOnlyOfficeScript(scriptUrl);
     if (!window.DocsAPI || !window.DocsAPI.DocEditor) {
@@ -396,17 +648,31 @@ async function openOnlyOfficeEditor(attachmentId, requestId) {
     const panel = $('#modal-panel');
     if (modal) modal.classList.add('modal-oo-open');
     if (panel) {
-      panel.classList.add('modal-panel-oo');
-      panel.classList.remove('wide', 'modal-panel-wide');
+      panel.className = 'modal-panel modal-panel-oo';
     }
 
-    // 高度由 CSS 的 flex 撐滿（.oo-editor-host { flex:1 }），
-    // 這裡量實際可用高度傳給 DocsAPI —— 它需要明確的 px 值。
-    // 原本用 window.innerHeight 沒扣掉標題列，會超出視窗高度。
     const host = document.getElementById('onlyoffice-placeholder');
-    const barH = document.querySelector('.oo-editor-bar')?.offsetHeight || 52;
-    const editorH = Math.max(480, (host?.clientHeight || window.innerHeight - barH));
-    if (host) host.style.width = '100%';
+    const shell = document.querySelector('.oo-editor-shell');
+    const bar = document.querySelector('.oo-editor-bar');
+
+    function measureEditorHeight() {
+      const panelH =
+        panel?.clientHeight ||
+        Math.floor(window.innerHeight * 0.96);
+      const barH = bar?.offsetHeight || 52;
+      // 近全螢幕：扣除工具列，至少 560px
+      return Math.max(560, panelH - barH);
+    }
+
+    const editorH = measureEditorHeight();
+    if (host) {
+      host.style.height = `${editorH}px`;
+      host.style.minHeight = `${editorH}px`;
+      host.style.width = '100%';
+    }
+    if (shell) {
+      shell.style.height = '100%';
+    }
 
     const cfg = {
       ...data.config,
@@ -417,24 +683,7 @@ async function openOnlyOfficeEditor(attachmentId, requestId) {
         onDocumentStateChange: () => {},
         onError: (e) => {
           console.error('OnlyOffice error', e);
-          const code = e?.data?.errorCode ?? e?.data;
-          const map = {
-            '-1': '編輯器未知錯誤',
-            '-2': '連線逾時',
-            '-3': '文件轉換逾時',
-            '-4': '無法下載附件（請確認 OnlyOffice 能連回簽核系統）',
-            '-5': '文件識別錯誤，請關閉後重開',
-            '-6': '文件轉換失敗',
-            '-7': '檔案有密碼保護，無法線上開啟',
-            '-8': 'Document Server 資料庫錯誤',
-            '-9': '安全權杖錯誤（JWT 密鑰不一致）',
-          };
-          const msg =
-            map[String(code)] ||
-            e?.data?.errorDescription ||
-            (typeof e?.data === 'string' ? e.data : '') ||
-            'OnlyOffice 編輯器錯誤';
-          toast(msg, 'error');
+          toast(e?.data || 'OnlyOffice 編輯器錯誤', 'error');
         },
         onWarning: (e) => console.warn('OnlyOffice warning', e),
       },
@@ -445,7 +694,9 @@ async function openOnlyOfficeEditor(attachmentId, requestId) {
         customization: {
           ...(cfg.editorConfig.customization || {}),
           compactHeader: true,
+          compactToolbar: false,
           zoom: 100,
+          autosave: true,
         },
       };
     }
@@ -454,6 +705,28 @@ async function openOnlyOfficeEditor(attachmentId, requestId) {
       'onlyoffice-placeholder',
       cfg
     );
+
+    if (onlyOfficeResizeHandler) {
+      window.removeEventListener('resize', onlyOfficeResizeHandler);
+    }
+    onlyOfficeResizeHandler = () => {
+      const h = measureEditorHeight();
+      if (host) {
+        host.style.height = `${h}px`;
+        host.style.minHeight = `${h}px`;
+      }
+      try {
+        if (
+          onlyOfficeEditorInstance &&
+          typeof onlyOfficeEditorInstance.resizeEditor === 'function'
+        ) {
+          onlyOfficeEditorInstance.resizeEditor();
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('resize', onlyOfficeResizeHandler);
 
     $('#btn-oo-close')?.addEventListener('click', () => {
       closeOnlyOfficeEditor(requestId);
@@ -478,6 +751,10 @@ function hrLeaveFieldLabels(hrLeaveType) {
         ? `剩餘${shortName}日數（核准後）`
         : `剩餘${shortName}日數（目前）`
       : '剩餘日數',
+    leave_month_days: '本月累計日數',
+    leave_month_hours: '本月累計時數',
+    leave_year_days: '本年累計日數',
+    leave_year_hours: '本年累計時數',
     hr_note: '人事備註',
   };
 }
@@ -504,6 +781,10 @@ function labelForApproverField(key, flatOrFd) {
   );
   if (hrLabels[key]) return hrLabels[key];
   const staticLabels = {
+    leave_month_days: '本月累計日數',
+    leave_month_hours: '本月累計時數',
+    leave_year_days: '本年累計日數',
+    leave_year_hours: '本年累計時數',
     pc_acquired_date: '原電腦取得日期',
     check_os: '作業系統（Windows10）',
     check_memory: '記憶體（4G 以上）',
@@ -512,12 +793,38 @@ function labelForApproverField(key, flatOrFd) {
     check_email: '電子郵件定期清理',
     check_backup: '重要資料定期備份',
     check_battery: '電池容量（70% 以下）',
+    check_os_note: '作業系統不符合說明',
+    check_memory_note: '記憶體不符合說明',
+    check_disk_note: '硬碟不符合說明',
+    check_3dmark_note: '3DMARK 分數不符合說明',
+    check_email_note: '電子郵件不符合說明',
+    check_backup_note: '重要資料不符合說明',
+    check_battery_note: '電池容量不符合說明',
     handle_result: '電腦處理情形',
     handle_note: '處理說明／其他',
     actual_start: '實際工時開始',
     actual_end: '實際工時結束',
     actual_hours: '實際總計（小時）',
     comp_leave_balance: '目前累計可用時數（補休）',
+    // 信用額度：簽核單位填寫（中文說明；金額單位：元）
+    requested_credit_limit: '申請信用額度（元）',
+    sales_requested_limit: '業務員申請額度（元）',
+    reason_for_increase: '增加額度原由',
+    sales_conditions: '業務員要求條件',
+    finance_suggested_limit: '財務建議額度（元）',
+    finance_conditions: '財務要求條件',
+    vp_suggested_limit: '副總經理建議額度（元）',
+    vp_conditions: '副總經理要求條件',
+    gm_approved_limit: '總經理核定額度（元）',
+    gm_conditions: '總經理要求條件',
+    finance_established_limit: '財務部建立額度（元）',
+    finance_note: '財務部建檔備註',
+    finance_confirm_note: '財務部建檔備註',
+    sales_revenue: '銷貨收入（元）',
+    sales_cost: '銷貨成本（元）',
+    sales_gross_profit: '銷貨毛利（元）',
+    sales_gross_diff_note: '毛利差異說明',
+    sales_remark: '備註說明',
   };
   return staticLabels[key] || key;
 }
@@ -538,13 +845,61 @@ function renderApproverDataBlock(approverData) {
     flat.pc_acquired_date != null ||
     flat.check_os != null ||
     flat.handle_result != null;
+  const isCredit =
+    flat.requested_credit_limit != null ||
+    flat.vp_suggested_limit != null ||
+    flat.gm_approved_limit != null ||
+    flat.reason_for_increase != null ||
+    flat.sales_conditions != null ||
+    flat.vp_conditions != null ||
+    flat.gm_conditions != null;
+  const isSalesStat =
+    flat.sales_revenue != null ||
+    flat.sales_cost != null ||
+    flat.sales_gross_profit != null;
   const sectionTitle = isIt
     ? '管理部／簽核單位填寫'
-    : flat.hr_leave_type != null || flat.remaining_special_leave_days != null
-      ? '人事／簽核單位填寫'
-      : '簽核單位填寫';
-  // 顯示順序：假別 → 剩餘日 → 備註 → 其他（不再顯示特休小時）
-  const order = ['hr_leave_type', 'remaining_special_leave_days', 'hr_note'];
+    : isCredit
+      ? '核決單位填寫（信用額度）'
+      : isSalesStat
+        ? '財務單位填寫'
+        : flat.hr_leave_type != null ||
+            flat.remaining_special_leave_days != null ||
+            flat.leave_month_days != null ||
+            flat.leave_year_days != null
+          ? '人事／簽核單位填寫'
+          : '簽核單位填寫';
+  // 顯示順序：信用額度核決 → 假別／特休 → 本月／本年累計 → 其餘（不再顯示特休小時）
+  const creditOrder = [
+    'sales_revenue',
+    'sales_cost',
+    'sales_gross_profit',
+    'sales_gross_diff_note',
+    'sales_remark',
+    'requested_credit_limit',
+    'sales_requested_limit',
+    'reason_for_increase',
+    'sales_conditions',
+    'finance_suggested_limit',
+    'finance_conditions',
+    'vp_suggested_limit',
+    'vp_conditions',
+    'gm_approved_limit',
+    'gm_conditions',
+    'finance_established_limit',
+    'finance_note',
+    'finance_confirm_note',
+  ];
+  const order = [
+    ...creditOrder,
+    'hr_leave_type',
+    'remaining_special_leave_days',
+    'leave_month_days',
+    'leave_month_hours',
+    'leave_year_days',
+    'leave_year_hours',
+    'hr_note',
+  ];
   const orderedKeys = [
     ...order.filter((k) => keys.includes(k)),
     ...keys.filter(
@@ -554,38 +909,103 @@ function renderApproverDataBlock(approverData) {
         !/特休.*小時|剩餘.*小時/.test(String(k))
     ),
   ];
+  /** 本月／本年累計：合併為「X 日 Y 時」一列顯示 */
+  const fmtDayHour = (d, h) => {
+    const hasD = d != null && d !== '';
+    const hasH = h != null && h !== '';
+    if (!hasD && !hasH) return null;
+    const parts = [];
+    if (hasD) parts.push(`${d} 日`);
+    if (hasH) parts.push(`${h} 時`);
+    return parts.join(' ');
+  };
+  const monthCum = fmtDayHour(flat.leave_month_days, flat.leave_month_hours);
+  const yearCum = fmtDayHour(flat.leave_year_days, flat.leave_year_hours);
+  const skipCumKeys = new Set([
+    'leave_month_days',
+    'leave_month_hours',
+    'leave_year_days',
+    'leave_year_hours',
+  ]);
+  const displayRows = [];
+  for (const k of orderedKeys) {
+    if (skipCumKeys.has(k)) continue;
+    let val = flat[k];
+    if (k === 'remaining_special_leave_days' && (val === '' || val == null)) {
+      val = '—';
+    }
+    if (
+      val != null &&
+      val !== '' &&
+      val !== '—' &&
+      (/limit|額度/.test(k) ||
+        /^(sales_revenue|sales_cost|sales_gross_profit)$/.test(k)) &&
+      !/條件|原由|備註|note|condition|reason/i.test(k)
+    ) {
+      // 例：1230478 → 123萬478元
+      val = formatYuanWanStyle(val);
+    }
+    displayRows.push({ label: labelForApproverField(k, flat), val });
+    if (k === 'remaining_special_leave_days') {
+      if (monthCum) displayRows.push({ label: '本月累計', val: monthCum });
+      if (yearCum) displayRows.push({ label: '本年累計', val: yearCum });
+    }
+  }
+  // 若無剩餘特休日數列但仍有累計，補在假別後或開頭
+  if (
+    (monthCum || yearCum) &&
+    !displayRows.some((r) => r.label === '本月累計' || r.label === '本年累計')
+  ) {
+    const insertAt = Math.max(
+      0,
+      displayRows.findIndex((r) => /假別/.test(r.label)) + 1
+    );
+    const extra = [];
+    if (monthCum) extra.push({ label: '本月累計', val: monthCum });
+    if (yearCum) extra.push({ label: '本年累計', val: yearCum });
+    displayRows.splice(insertAt, 0, ...extra);
+  }
   return `
     <h3 style="margin-top:20px">${sectionTitle}</h3>
     <dl class="kv">
-      ${orderedKeys
-        .map((k) => {
-          let val = flat[k];
-          if (k === 'remaining_special_leave_days' && (val === '' || val == null)) {
-            val = '—';
-          }
-          return `<dt>${esc(labelForApproverField(k, flat))}</dt><dd>${esc(
-            val
-          )}</dd>`;
+      ${displayRows
+        .map((row) => {
+          return `<dt>${esc(row.label)}</dt><dd>${esc(row.val)}</dd>`;
         })
         .join('')}
     </dl>`;
 }
 
-function userLabelById(id) {
-  const u = (state.users || []).find((x) => x.id === Number(id));
-  return u ? u.name : `#${id}`;
+/** 依表單名稱與分類回傳代表圖示 */
+function getWorkflowIcon(name = '', category = '') {
+  const n = String(name || '').toLowerCase();
+  const c = String(category || '').toLowerCase();
+  if (/請假|休假|特別休假|病假|事假|特休|假單/.test(n)) return '🏖️';
+  if (/出差/.test(n)) return '🚄';
+  if (/延長工時|加班/.test(n)) return '⏱️';
+  if (/福委|補助|三節/.test(n)) return '🎁';
+  if (/請購|採購/.test(n)) return '🛒';
+  if (/費用|報支|報銷|請款/.test(n)) return '💰';
+  if (/信用額度|授信/.test(n)) return '💳';
+  if (/電腦|異常報修|報修|維修|it/i.test(n)) return '💻';
+  if (/會議|例會/.test(n)) return '📅';
+  if (/業務|銷售|業績/.test(n)) return '📊';
+  if (/庫存|調撥|調庫/.test(n)) return '📦';
+  if (/作廢/.test(n)) return '🚫';
+  if (/一般簽呈|簽呈|公文/.test(n)) return '📝';
+  if (c.includes('人事')) return '👥';
+  if (c.includes('財務') || c.includes('採購')) return '💵';
+  if (c.includes('資訊') || c.includes('總務')) return '🛠️';
+  if (c.includes('業務')) return '📈';
+  return '📋';
 }
 
-function describeStepForList(s) {
-  if (!s) return '';
-  if (s.assignType === 'form_user') return `${s.name}（表單指定）`;
-  if (s.assignType === 'dept_head') return `${s.name}（自選／可略過）`;
-  if (s.assignType === 'cosign_pick') return `${s.name}（會簽選填）`;
-  if (s.assignType === 'users_pick') return `${s.name}（申請人自選）`;
-  if (s.assignType === 'department') return `${s.name}（${s.department || '單位'}）`;
-  if (s.assignType === 'users' || (s.approverIds && s.approverIds.length)) {
-    const names = (s.approverIds || []).map(userLabelById).join('、');
-    return names ? `${s.name}（${names}）` : s.name;
-  }
-  return s.name;
+/** 依分類回傳 CSS 類別（配色用） */
+function getCategoryClass(category = '') {
+  const c = String(category || '');
+  if (c.includes('人事')) return 'cat-hr';
+  if (c.includes('財務') || c.includes('採購')) return 'cat-fin';
+  if (c.includes('資訊') || c.includes('總務')) return 'cat-it';
+  if (c.includes('業務')) return 'cat-sales';
+  return 'cat-memo';
 }

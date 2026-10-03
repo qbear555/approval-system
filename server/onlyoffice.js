@@ -18,9 +18,6 @@ const jwt = require('jsonwebtoken');
 const ROOT = path.join(__dirname, '..');
 const UPLOAD_DIR = path.join(ROOT, 'data', 'uploads');
 
-/** 同源代理掛載點；改此前綴可讓瀏覽器丟棄已快取、帶舊 CSP 的編輯器 HTML */
-const DOCS_MOUNT = '/__oo';
-
 const OFFICE_EXTS = new Set([
   'doc',
   'docx',
@@ -56,9 +53,10 @@ function getConfig() {
       process.env.PUBLIC_APP_URL ||
       `http://127.0.0.1:${process.env.PORT || 3847}`
   ).replace(/\/$/, '');
-  const { JWT_SECRET, isWeakSecret } = require('./auth');
-  const ooEnv = String(process.env.ONLYOFFICE_JWT_SECRET || '').trim();
-  const jwtSecret = ooEnv && !isWeakSecret(ooEnv) ? ooEnv : JWT_SECRET;
+  const jwtSecret =
+    process.env.ONLYOFFICE_JWT_SECRET ||
+    process.env.JWT_SECRET ||
+    'onlyoffice-dev-secret-change-me';
   const jwtEnabled = envBool('ONLYOFFICE_JWT_ENABLED', true);
   return {
     enabled,
@@ -185,9 +183,10 @@ function publicDocsBase(req) {
     }
   }
 
-  // HTTP／HTTPS 都走同源代理：8088 常被防火牆擋，且跨主機會踩 CSP／混合內容
-  // /__oo 前綴用來避開瀏覽器把舊 CSP 連 Document Server HTML 快取一年
-  return `${proto}://${host}${DOCS_MOUNT}`;
+  // HTTPS 簽核頁必須同源，否則混合內容會擋腳本
+  if (proto === 'https') return `${proto}://${host}`;
+  // HTTP 可直連 Document Server（略過代理）
+  return cfg.docsUrl;
 }
 
 function publicStatus(req) {
@@ -202,32 +201,10 @@ function publicStatus(req) {
   };
 }
 
-function stripDocsMount(urlPath) {
-  const s = String(urlPath || '');
-  if (s === DOCS_MOUNT || s.startsWith(`${DOCS_MOUNT}/`) || s.startsWith(`${DOCS_MOUNT}?`)) {
-    return s.slice(DOCS_MOUNT.length) || '/';
-  }
-  return s;
-}
-
-function rewritePublicDocsPath(pathname) {
-  const p = String(pathname || '/');
-  if (p === DOCS_MOUNT || p.startsWith(`${DOCS_MOUNT}/`)) return p;
-  return `${DOCS_MOUNT}${p.startsWith('/') ? p : `/${p}`}`;
-}
-
 /** Document Server 靜態／即時通訊路徑（同源代理用） */
 function isDocsProxyPath(urlPath) {
-  const original = String(urlPath || '');
-  if (
-    original === DOCS_MOUNT ||
-    original.startsWith(`${DOCS_MOUNT}/`) ||
-    original.startsWith(`${DOCS_MOUNT}?`)
-  ) {
-    return true;
-  }
   // 去掉 querystring
-  const raw = stripDocsMount(original).split('?')[0];
+  const raw = String(urlPath || '').split('?')[0];
   // OnlyOffice 8.x 會在路徑前加版本碼，例如 /8.2.3-abc123/web-apps/...
   // 編輯器還會連 WebSocket：/8.2.3-xxx/doc/{key}/c/?EIO=4&transport=websocket
   const p = raw.replace(/^\/\d+\.\d+\.\d+-[a-f0-9]+(?=\/)/i, '');
@@ -236,13 +213,9 @@ function isDocsProxyPath(urlPath) {
     p.startsWith('/web-apps') ||
     p.startsWith('/cache') ||
     p.startsWith('/sdkjs') ||
-    p.startsWith('/sdkjs-plugins') ||
     p.startsWith('/fonts') ||
-    p.startsWith('/dictionaries') ||
-    p.startsWith('/themes') ||
     p.startsWith('/common') ||
     p.startsWith('/downloadas') ||
-    p.startsWith('/printfile') ||
     p.startsWith('/coauthoring') ||
     p.startsWith('/docbuilder') ||
     p.startsWith('/welcome') ||
@@ -253,7 +226,6 @@ function isDocsProxyPath(urlPath) {
     p === '/doc' ||
     p.startsWith('/info') ||
     p.startsWith('/7.') ||
-    p.startsWith('/8.') ||
     p === '/healthcheck' ||
     p.startsWith('/healthcheck')
   );
@@ -297,7 +269,7 @@ function createDocsProxy() {
       protocol: target.protocol,
       hostname: target.hostname,
       port: target.port || (target.protocol === 'https:' ? 443 : 80),
-      path: stripDocsMount(req.url) || '/',
+      path: req.url,
       method: req.method,
       headers,
       timeout: 120000,
@@ -307,35 +279,19 @@ function createDocsProxy() {
       // 不要把 upstream 的 connection 掛死
       delete out.connection;
       delete out['transfer-encoding'];
-      // 簽核 CSP 不可跟著代理出去；並禁止 DS 的一年快取把舊 CSP 鎖在瀏覽器
-      try {
-        res.removeHeader('Content-Security-Policy');
-      } catch {
-        /* ignore */
-      }
-      delete out['content-security-policy'];
-      delete out['Content-Security-Policy'];
-      delete out.etag;
-      delete out.ETag;
-      delete out.expires;
-      delete out.Expires;
-      out['cache-control'] = 'no-store';
-      out.pragma = 'no-cache';
-      // 改寫 Location: http://onlyoffice/web-apps → https://host/__oo/web-apps
+      // 改寫 Location: http://onlyoffice/... → https://catshome.tw:3848/...
       const locKey = out.location ? 'location' : out.Location ? 'Location' : null;
       if (locKey && out[locKey] && pubHost) {
         try {
-          const loc = new URL(String(out[locKey]), `${target.protocol}//${target.host}`);
-          const pubHostname = pubHost.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+          const loc = new URL(String(out[locKey]), target);
           const internalHosts = new Set([
             target.hostname,
             'onlyoffice',
             'localhost',
             '127.0.0.1',
-            pubHostname,
           ]);
-          if (internalHosts.has(loc.hostname) || isDocsProxyPath(loc.pathname)) {
-            out[locKey] = `${pubProto}://${pubHost}${rewritePublicDocsPath(loc.pathname)}${loc.search}${loc.hash}`;
+          if (internalHosts.has(loc.hostname)) {
+            out[locKey] = `${pubProto}://${pubHost}${loc.pathname}${loc.search}${loc.hash}`;
           }
         } catch {
           /* keep original */
@@ -409,7 +365,7 @@ function attachDocsWsProxy(server) {
         protocol: target.protocol,
         hostname: target.hostname,
         port: target.port || (target.protocol === 'https:' ? 443 : 80),
-        path: stripDocsMount(req.url) || '/',
+        path: req.url,
         method: 'GET',
         headers,
         timeout: 120000,
@@ -585,6 +541,165 @@ function buildEditorConfig({ att, user, canEdit, requestId, req }) {
 }
 
 /**
+ * 將 OnlyOffice 回傳的編輯結果下載網址改寫為容器內可達位址。
+ * 同源代理下 DS 常給 https://簽核主機/cache/...（自簽憑證），
+ * 容器內應改連 http://onlyoffice/cache/...
+ */
+function rewriteSaveDownloadUrl(fileUrl) {
+  const cfg = getConfig();
+  try {
+    const u = new URL(String(fileUrl));
+    const pathAndQuery = `${u.pathname}${u.search}${u.hash}`;
+    const internalBase = String(cfg.internalUrl || 'http://onlyoffice').replace(
+      /\/$/,
+      ''
+    );
+
+    // Document Server 上的快取／匯出路徑 → 一律走內網
+    if (
+      isDocsProxyPath(u.pathname) ||
+      /\/cache\//i.test(u.pathname) ||
+      /\/downloadas/i.test(u.pathname)
+    ) {
+      return `${internalBase}${pathAndQuery}`;
+    }
+
+    // 對外 docs 主機（例 192.168.11.116:8088）→ 內網 onlyoffice
+    try {
+      const docs = new URL(cfg.docsUrl);
+      if (u.hostname === docs.hostname) {
+        return `${internalBase}${pathAndQuery}`;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 已知內網主機名但用了 https → 改 http 內網
+    const internalHosts = new Set(['onlyoffice', 'localhost', '127.0.0.1']);
+    try {
+      const internal = new URL(internalBase);
+      internalHosts.add(internal.hostname);
+    } catch {
+      /* ignore */
+    }
+    if (internalHosts.has(u.hostname) && u.protocol === 'https:') {
+      u.protocol = 'http:';
+      if (!u.port || u.port === '443') {
+        try {
+          const internal = new URL(internalBase);
+          u.host = internal.host;
+        } catch {
+          u.port = '';
+        }
+      }
+      return u.toString();
+    }
+  } catch {
+    /* keep original */
+  }
+  return String(fileUrl);
+}
+
+/**
+ * 下載編輯結果；優先內網 HTTP，HTTPS 時略過自簽憑證驗證（區網常見）。
+ */
+async function fetchEditedDocument(fileUrl) {
+  const original = String(fileUrl);
+  const rewritten = rewriteSaveDownloadUrl(original);
+  const candidates = rewritten === original ? [original] : [rewritten, original];
+  let lastErr = null;
+
+  for (const tryUrl of candidates) {
+    try {
+      const res = await fetchUrlAllowSelfSigned(tryUrl);
+      if (res.ok) {
+        if (tryUrl !== original) {
+          console.log(
+            `[onlyoffice] 編輯結果改走內網下載: ${safeUrlForLog(original)} → ${safeUrlForLog(tryUrl)}`
+          );
+        }
+        return res;
+      }
+      lastErr = new Error(`HTTP ${res.status} ${safeUrlForLog(tryUrl)}`);
+      console.warn('[onlyoffice] 下載編輯結果非 2xx', lastErr.message);
+    } catch (e) {
+      lastErr = e;
+      console.warn(
+        '[onlyoffice] 下載編輯結果失敗',
+        safeUrlForLog(tryUrl),
+        e.message || e,
+        e.cause ? `(cause: ${e.cause.message || e.cause})` : ''
+      );
+    }
+  }
+  throw lastErr || new Error('下載編輯結果失敗');
+}
+
+function safeUrlForLog(u) {
+  try {
+    const x = new URL(String(u));
+    // 隱藏 query 中可能的 token
+    return `${x.origin}${x.pathname}`;
+  } catch {
+    return String(u).slice(0, 120);
+  }
+}
+
+async function fetchUrlAllowSelfSigned(url) {
+  const u = new URL(String(url));
+  if (u.protocol === 'https:') {
+    // Node 18+ undici：區網自簽／同源 HTTPS 代理
+    try {
+      const { Agent } = require('undici');
+      const agent = new Agent({
+        connect: { rejectUnauthorized: false },
+      });
+      return await fetch(String(url), { dispatcher: agent });
+    } catch (e) {
+      // undici 不可用時改用 https 模組
+      if (e && e.code === 'MODULE_NOT_FOUND') {
+        return fetchHttpsInsecure(String(url));
+      }
+      // dispatcher 不被支援等：再試 https 模組
+      try {
+        return await fetchHttpsInsecure(String(url));
+      } catch {
+        throw e;
+      }
+    }
+  }
+  return fetch(String(url));
+}
+
+function fetchHttpsInsecure(url) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      url,
+      { rejectUnauthorized: false, timeout: 120000 },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            arrayBuffer: async () =>
+              buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('download timeout'));
+    });
+  });
+}
+
+/**
  * 處理 OnlyOffice callback body
  * @returns {{ handled: boolean, error?: string }}
  */
@@ -624,8 +739,8 @@ async function handleCallback(body, tokenPayload, db) {
   }
 
   const abs = path.join(UPLOAD_DIR, att.stored_name);
-  // 下載編輯後檔案
-  const res = await fetch(url);
+  // 下載編輯後檔案（改寫內網位址，並容許自簽憑證）
+  const res = await fetchEditedDocument(url);
   if (!res.ok) {
     return { handled: false, error: `下載編輯結果失敗 HTTP ${res.status}` };
   }
@@ -675,13 +790,11 @@ function resolveAttachmentPath(att) {
 }
 
 module.exports = {
-  DOCS_MOUNT,
   getConfig,
   isEnabled,
   publicStatus,
   publicDocsBase,
   isDocsProxyPath,
-  stripDocsMount,
   createDocsProxy,
   attachDocsWsProxy,
   isOfficeAttachment,

@@ -16,15 +16,8 @@ const {
 const pdfSign = require('./pdf-sign');
 const systemSettings = require('./system-settings');
 
+const BACKUP_ROOT = path.join(__dirname, '..', 'data', 'backups');
 const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
-
-/** 動態取得備份根目錄（可由 admin 在系統設定中變更） */
-function getBackupRoot() {
-  return systemSettings.getBackupDir();
-}
-
-// 向後相容：匯出靜態值供其他模組參考（實際備份時用 getBackupRoot()）
-const BACKUP_ROOT = getBackupRoot;
 
 let encryptedFormatRegistered = false;
 
@@ -183,9 +176,8 @@ async function backupOneRequest(detail, adminId) {
   const fileName = asZip
     ? buildApprovalZipFileName(detail, { hasAttachments })
     : buildApprovalPdfFileName(detail);
-  const BACKUP_ROOT_NOW = getBackupRoot();
   const relDir = path.join(department, workflowName, `${year}-${month}`);
-  const absDir = path.join(BACKUP_ROOT_NOW, relDir);
+  const absDir = path.join(BACKUP_ROOT, relDir);
   ensureDir(absDir);
   const absFile = path.join(absDir, fileName);
   const relFile = path.join(relDir, fileName).replace(/\\/g, '/');
@@ -193,7 +185,7 @@ async function backupOneRequest(detail, adminId) {
   // 舊檔清理（同一 request_id 可能改名或 PDF↔ZIP 互換）
   const prev = db.prepare(`SELECT file_rel_path FROM backup_files WHERE request_id = ?`).get(detail.id);
   if (prev?.file_rel_path) {
-    const oldAbs = path.join(BACKUP_ROOT_NOW, prev.file_rel_path);
+    const oldAbs = path.join(BACKUP_ROOT, prev.file_rel_path);
     if (fs.existsSync(oldAbs) && path.resolve(oldAbs) !== path.resolve(absFile)) {
       try {
         fs.unlinkSync(oldAbs);
@@ -422,7 +414,7 @@ function getBackupMeta() {
     ),
     years,
     total: count,
-    backup_root: getBackupRoot(),
+    backup_root: BACKUP_ROOT,
     encrypt: {
       enabled: encryptCfg.enabled,
       hasPass: encryptCfg.hasPass,
@@ -437,7 +429,7 @@ function getBackupById(id) {
 
 function resolveBackupAbsPath(row) {
   if (!row?.file_rel_path) return null;
-  const abs = path.join(getBackupRoot(), row.file_rel_path);
+  const abs = path.join(BACKUP_ROOT, row.file_rel_path);
   if (!fs.existsSync(abs)) return null;
   return abs;
 }
@@ -480,9 +472,147 @@ function deleteBackups(ids) {
   return { deleted, failed };
 }
 
+/**
+ * 是否為請假申請單（僅限請假表單）
+ */
+function isLeaveRequestRow(row) {
+  if (!row) return false;
+  if (/請假/.test(String(row.workflow_name || ''))) return true;
+  if (/請假/.test(String(row.title || ''))) return true;
+  try {
+    const fd =
+      typeof row.form_data === 'string'
+        ? JSON.parse(row.form_data || '{}')
+        : row.form_data || {};
+    if (fd.leave_type || fd.假別) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
+ * 查詢請假申請單（條件查詢／勾選下載）
+ */
+function listLeaveRequestIds(opts = {}) {
+  const {
+    status = 'approved',
+    department = '',
+    date_from = '',
+    date_to = '',
+    keyword = '',
+    leave_type = '',
+    ids = null,
+    limit = 500,
+  } = opts;
+
+  const idList = Array.isArray(ids)
+    ? [...new Set(ids.map(Number).filter(Boolean))]
+    : null;
+
+  let sql = `
+    SELECT r.id, r.title, r.status, r.form_data, r.approver_data_json,
+           r.created_at, r.completed_at,
+           w.name AS workflow_name,
+           u.department AS requester_dept, u.name AS requester_name,
+           u.username AS requester_username
+    FROM approval_requests r
+    JOIN workflows w ON w.id = r.workflow_id
+    JOIN users u ON u.id = r.requester_id
+    WHERE r.status != 'draft'
+  `;
+  const params = [];
+
+  if (idList && idList.length) {
+    const ph = idList.map(() => '?').join(',');
+    sql += ` AND r.id IN (${ph})`;
+    params.push(...idList);
+  } else {
+    if (status && status !== 'all') {
+      sql += ` AND r.status = ?`;
+      params.push(status);
+    }
+    if (department) {
+      sql += ` AND u.department = ?`;
+      params.push(department);
+    }
+    sql += ` AND (w.name LIKE '%請假%' OR r.title LIKE '%請假%' OR r.form_data LIKE '%leave_type%' OR r.form_data LIKE '%假別%')`;
+    if (keyword) {
+      const k = `%${String(keyword).trim()}%`;
+      sql += ` AND (r.title LIKE ? OR u.name LIKE ? OR u.username LIKE ? OR CAST(r.id AS TEXT) LIKE ? OR r.form_data LIKE ?)`;
+      params.push(k, k, k, k, k);
+    }
+  }
+
+  sql += ` ORDER BY r.id DESC LIMIT ?`;
+  params.push(Math.min(Math.max(Number(limit) || 500, 1), 500));
+
+  const rows = db.prepare(sql).all(...params);
+  const d0 = date_from ? String(date_from).slice(0, 10) : '';
+  const d1 = date_to ? String(date_to).slice(0, 10) : '';
+  const typeFilter = String(leave_type || '').trim();
+  const out = [];
+
+  for (const row of rows) {
+    if (!isLeaveRequestRow(row)) continue;
+    let fd = {};
+    let ad = {};
+    try {
+      fd = JSON.parse(row.form_data || '{}');
+    } catch {
+      fd = {};
+    }
+    try {
+      ad = JSON.parse(row.approver_data_json || '{}');
+    } catch {
+      ad = {};
+    }
+    const leaveType = String(
+      ad.hr_leave_type || fd.leave_type || fd.假別 || ''
+    ).trim();
+    if (typeFilter && leaveType !== typeFilter && !leaveType.includes(typeFilter)) {
+      continue;
+    }
+    const leaveStart = String(fd.start_date || '').slice(0, 10);
+    const leaveEnd = String(fd.end_date || leaveStart || '').slice(0, 10);
+    const fallback = String(row.completed_at || row.created_at || '').slice(0, 10);
+    const rangeStart = leaveStart || fallback;
+    const rangeEnd = leaveEnd || leaveStart || fallback;
+    if (!idList && (d0 || d1)) {
+      if (!rangeStart && !rangeEnd) continue;
+      if (d0 && rangeEnd && rangeEnd < d0) continue;
+      if (d1 && rangeStart && rangeStart > d1) continue;
+    }
+    let days = Number(fd.days);
+    if (!Number.isFinite(days) || days < 0) days = null;
+    let hours = Number(fd.hours);
+    if (!Number.isFinite(hours) || hours < 0) hours = null;
+    out.push({
+      id: row.id,
+      title: row.title || '',
+      status: row.status,
+      workflow_name: row.workflow_name,
+      requester_name: row.requester_name,
+      requester_username: row.requester_username || '',
+      requester_dept: row.requester_dept || '',
+      leave_type: leaveType || '—',
+      leave_start: leaveStart || fallback || '',
+      leave_end: leaveEnd || leaveStart || fallback || '',
+      days,
+      hours,
+      created_at: row.created_at || '',
+      completed_at: row.completed_at || '',
+    });
+  }
+  if (idList && idList.length) {
+    const map = new Map(out.map((r) => [r.id, r]));
+    return idList.map((id) => map.get(id)).filter(Boolean);
+  }
+  return out;
+}
+
 module.exports = {
-  BACKUP_ROOT: getBackupRoot,   // 函式參考，動態取值
-  getBackupRoot,
+  BACKUP_ROOT,
   backupOneRequest,
   runBackupJob,
   listBackups,
@@ -494,4 +624,7 @@ module.exports = {
   deleteBackups,
   ensureDir,
   createZipArchive,
+  isLeaveRequestRow,
+  listLeaveRequestIds,
+  safeZipEntryName,
 };

@@ -9,6 +9,10 @@ dist
 !README.md
 installer
 scripts
+server/test-*.js
+server/create-users.js
+server/list-users-quick.js
+server/*-test.js
 *.log
 Desktop.ini
 Thumbs.db

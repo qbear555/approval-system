@@ -1,160 +1,166 @@
-/**
- * 簽核流程編輯頁
- * 依賴 app.js 掛到 window 的 state、$、api、esc、toast、navigate 等。
- */
-async function renderWorkflows(body) {
-  if (!hasPerm('workflows')) {
-    body.innerHTML = `<div class="error-msg">您沒有管理簽核流程的權限（請洽系統管理員）</div>`;
-    return;
-  }
-  const workflows = await loadWorkflows(true);
-  await loadUsers();
-  $('#page-actions').innerHTML = `
+function getWorkflowsActionsHtml() {
+  return `
+    <button type="button" class="btn success" id="btn-new-paper-wf" style="font-weight:600;" title="上傳紙本 PDF 或掃描圖檔，在線上畫布自訂拖拉欄位與簽章格">📄 匯入紙本文件建立流程</button>
     <button type="button" class="btn outline" id="btn-export-wf" title="含表單欄位、簽核步驟、PDF 排版；不含系統設定">匯出全部流程模組</button>
-    <button type="button" class="btn outline" id="btn-import-wf" title="匯入流程＋表單＋PDF 排版；不影響系統設定">匯入流程模組</button>
+    <button type="button" class="btn outline" id="btn-import-wf" title="匯入流程＋表單＋PDF 排版；不影響系統設定">匯入流程模組 (.json)</button>
     <button type="button" class="btn primary" id="btn-new-wf">＋ 建立簽核流程</button>
     <input type="file" id="wf-import-file" accept=".json,application/json" class="hidden" />
   `;
-  $('#btn-new-wf').onclick = () => openWorkflowEditor();
-  $('#btn-export-wf').onclick = async () => {
-    try {
-      const blob = await api('/api/workflows/export', { expectBlob: true });
-      // 流程模組：formFields + steps + pdfLayout（version 2）
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `全部簽核流程_可匯入_${twToday()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast('已匯出流程模組（表單＋步驟＋PDF 排版；不含系統設定）', 'success');
-    } catch (e) {
-      toast(e.message, 'error');
-    }
-  };
-  $('#btn-import-wf').onclick = () => $('#wf-import-file')?.click();
-  $('#wf-import-file').onchange = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const payload = JSON.parse(text);
-      const data = await api('/api/workflows/import', {
-        method: 'POST',
-        body: payload,
+}
+
+function bindWorkflowsActions(hostEl, onRefresh) {
+  const host = hostEl || document;
+  const btnNewPaper = host.querySelector('#btn-new-paper-wf');
+  if (btnNewPaper) {
+    btnNewPaper.onclick = () => {
+      openWorkflowEditor({
+        pdfLayout: { type: 'pdf_template', fields: [] },
+        _autoOpenDesigner: true,
       });
-      toast(
-        data.message ||
-          `已匯入 ${data.imported} 個流程模組（含 PDF 排版；未變更系統設定）`,
-        'success'
-      );
-      navigate('workflows');
-    } catch (err) {
-      toast(err.message || '匯入失敗（請確認 JSON 格式）', 'error');
-    }
-  };
-
-  if (!workflows.length) {
-    body.innerHTML = emptyState({
-      title: '尚無簽核流程',
-      desc: '建立第一個流程後，同仁即可在「新增申請」選擇表單送出。也可匯入流程模組（含 PDF 排版）。',
-      actions: [
-        { label: '＋ 建立第一個流程', id: 'btn-new-wf-empty', primary: true },
-        { label: '匯入流程模組 JSON', id: 'btn-import-wf-empty', outline: true },
-      ],
-    });
-    const b = $('#btn-new-wf-empty');
-    if (b) b.onclick = () => openWorkflowEditor();
-    const bi = $('#btn-import-wf-empty');
-    if (bi) bi.onclick = () => $('#wf-import-file')?.click();
-    return;
+    };
   }
+  const btnNewWf = host.querySelector('#btn-new-wf');
+  if (btnNewWf) btnNewWf.onclick = () => openWorkflowEditor();
+  const btnExport = host.querySelector('#btn-export-wf');
+  if (btnExport) {
+    btnExport.onclick = async () => {
+      try {
+        const blob = await api('/api/workflows/export', { expectBlob: true });
+        // 流程模組：formFields + steps + pdfLayout（version 2）
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `全部簽核流程_可匯入_${formatTaiwanDateTime(new Date(), { dateOnly: true })}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('已匯出流程模組（表單＋步驟＋PDF 排版；不含系統設定）', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    };
+  }
+  const btnImport = host.querySelector('#btn-import-wf');
+  const importFile = host.querySelector('#wf-import-file');
+  if (btnImport && importFile) {
+    btnImport.onclick = () => importFile.click();
+    importFile.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        const data = await api('/api/workflows/import', {
+          method: 'POST',
+          body: payload,
+        });
+        toast(
+          data.message ||
+            `已匯入 ${data.imported} 個流程模組（含 PDF 排版；未變更系統設定）`,
+          'success'
+        );
+        if (typeof onRefresh === 'function') onRefresh();
+        else navigate('workflows');
+      } catch (err) {
+        toast(err.message || '匯入失敗（請確認 JSON 格式）', 'error');
+      }
+    };
+  }
+}
 
-  body.innerHTML = `
-    <div class="card">
+function getWorkflowsEmptyHtml() {
+  return emptyState({
+    title: '尚無簽核流程',
+    desc: '建立第一個流程後，同仁即可在「新增申請」選擇表單送出。也可匯入流程模組（含 PDF 排版）。',
+    actions: [
+      { label: '＋ 建立第一個流程', id: 'btn-new-wf-empty', primary: true },
+      { label: '匯入流程模組 JSON', id: 'btn-import-wf-empty', outline: true },
+    ],
+  });
+}
+
+function getWorkflowsTableInnerHtml(workflows) {
+  const rowsHtml = workflows
+    .map((w) => {
+      const steps = [
+        '申請人',
+        ...(w.steps || []).map((s) => describeStepForList(s)),
+      ].join(' → ');
+      const fieldCount = (w.formFields || []).length;
+      const isOn = !!w.active;
+      const pl = w.pdfLayout || {};
+      const plLabel = pl.label || pl.type || '自動';
+      const plResolved =
+        pl.type && pl.type !== 'auto' && pl.resolvedType && pl.resolvedType !== pl.type
+          ? ''
+          : pl.type === 'auto' && pl.resolvedType
+            ? `（${pl.resolvedType}）`
+            : '';
+      const fn = w.finalNotify || {};
+      const fnRecv = (fn.userIds || fn.users || []).length;
+      const fnAppMode = fn.applicantMode === 'selected' ? 'selected' : 'all';
+      const fnAppN = (fn.applicantUserIds || fn.applicants || []).length;
+      const fnText = fn.enabled
+        ? `通知 ${fnRecv} 人${
+            fnAppMode === 'selected' ? `／限 ${fnAppN} 位申請人` : '／全部申請人'
+          }`
+        : '關閉';
+      return `
+    <tr>
+      <td>
+        <strong>${esc(w.name)}</strong>
+        <div class="muted">${esc(w.description || '')}</div>
+        <div class="muted" style="margin-top:4px">表單 ${fieldCount} 個欄位</div>
+      </td>
+      <td style="white-space:nowrap"><span class="field-type-tag">${esc(w.category || '一般簽呈')}</span></td>
+      <td style="max-width:420px;font-size:0.88rem;line-height:1.45">${esc(steps) || '—'}</td>
+      <td style="font-size:0.85rem;white-space:nowrap" title="${esc(pl.type || 'auto')}">${esc(plLabel)}${esc(plResolved)}</td>
+      <td style="font-size:0.85rem;white-space:nowrap" title="${esc(fn.label || '')}">${esc(fnText)}</td>
+      <td>${esc(w.creator_name)}</td>
+      <td>
+        <label class="switch" title="${isOn ? '點擊停用' : '點擊啟用'}">
+          <input type="checkbox" data-toggle-wf="${w.id}" data-wf-name="${esc(w.name)}"
+            ${isOn ? 'checked' : ''} />
+          <span class="switch-slider"></span>
+          <span class="switch-text" data-switch-label="${w.id}">${isOn ? '啟用' : '停用'}</span>
+        </label>
+      </td>
+      <td>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+          <button type="button" class="btn sm outline" data-edit="${w.id}">編輯</button>
+          <button type="button" class="btn sm outline" data-flow="${w.id}" title="以流程圖方式編輯關卡順序與連線">🔀 流程圖</button>
+          <button type="button" class="btn sm outline" data-export-one="${w.id}">匯出</button>
+          ${
+            !isOn
+              ? `<button type="button" class="btn sm danger" data-purge-wf="${w.id}" data-wf-name="${esc(w.name)}">永久刪除</button>`
+              : ''
+          }
+        </div>
+      </td>
+    </tr>`;
+    })
+    .join('');
+
+  return `
       <p class="muted" style="margin-top:0">
         每個申請表單可<strong>啟用</strong>或<strong>停用</strong>：停用後「新增申請」不會出現，歷史單據仍可查閱。
         亦可<strong>建立／編輯</strong>步驟與表單，或<strong>匯出／匯入</strong> JSON。
         不需要的表單可先停用；確認無用再<strong>永久刪除</strong>。
       </p>
       <div class="table-wrap">
-        <table class="data" style="width:100%;min-width:1080px;table-layout:fixed">
+        <table class="data">
           <thead>
-            <tr>
-              <th style="width:200px">名稱</th>
-              <th style="min-width:320px">簽核步驟</th>
-              <th style="width:110px">PDF 排版</th>
-              <th style="width:140px">最終核准通知</th>
-              <th style="width:100px;white-space:nowrap">建立者</th>
-              <th style="width:85px;text-align:center;white-space:nowrap">狀態</th>
-              <th style="width:180px;text-align:center;white-space:nowrap">操作</th>
-            </tr>
+            <tr><th>名稱</th><th>分類</th><th>簽核步驟</th><th>PDF 排版</th><th>最終核准通知</th><th>建立者</th><th>狀態</th><th>操作</th></tr>
           </thead>
           <tbody>
-            ${workflows
-              .map((w) => {
-                const steps = [
-                  '申請人',
-                  ...(w.steps || []).map((s) => describeStepForList(s)),
-                ].join(' → ');
-                const fieldCount = (w.formFields || []).length;
-                const isOn = !!w.active;
-                const pl = w.pdfLayout || {};
-                const plLabel = pl.label || pl.type || '自動';
-                const plResolved =
-                  pl.type && pl.type !== 'auto' && pl.resolvedType && pl.resolvedType !== pl.type
-                    ? ''
-                    : pl.type === 'auto' && pl.resolvedType
-                      ? `（${pl.resolvedType}）`
-                      : '';
-                const fn = w.finalNotify || {};
-                const fnRecv = (fn.userIds || fn.users || []).length;
-                const fnAppMode = fn.applicantMode === 'selected' ? 'selected' : 'all';
-                const fnAppN = (fn.applicantUserIds || fn.applicants || []).length;
-                const fnText = fn.enabled
-                  ? `通知 ${fnRecv} 人${
-                      fnAppMode === 'selected' ? `／限 ${fnAppN} 位申請人` : '／全部申請人'
-                    }`
-                  : '關閉';
-                return `
-              <tr>
-                <td style="white-space:normal;word-break:break-word">
-                  <strong>${esc(w.name)}</strong>
-                  ${w.description ? `<div class="muted" style="font-size:0.82rem;margin-top:2px">${esc(w.description)}</div>` : ''}
-                  <div class="muted" style="margin-top:4px;font-size:0.8rem">表單 ${fieldCount} 個欄位</div>
-                </td>
-                <td style="white-space:normal;word-break:break-word;font-size:0.88rem;line-height:1.5">${esc(steps) || '—'}</td>
-                <td style="font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(pl.type || 'auto')}">${esc(plLabel)}${esc(plResolved)}</td>
-                <td style="font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(fn.label || '')}">${esc(fnText)}</td>
-                <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(w.creator_name)}</td>
-                <td style="text-align:center;white-space:nowrap">
-                  <label class="switch" title="${isOn ? '點擊停用' : '點擊啟用'}">
-                    <input type="checkbox" data-toggle-wf="${w.id}" data-wf-name="${esc(w.name)}"
-                      ${isOn ? 'checked' : ''} />
-                    <span class="switch-slider"></span>
-                    <span class="switch-text" data-switch-label="${w.id}">${isOn ? '啟用' : '停用'}</span>
-                  </label>
-                </td>
-                <td style="text-align:center;white-space:nowrap">
-                  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center">
-                    <button type="button" class="btn sm outline" data-edit="${w.id}">編輯</button>
-                    <button type="button" class="btn sm outline" data-flow="${w.id}" title="以流程圖方式編輯，可建立分支與並行簽核">🔀 流程圖</button>
-                    <button type="button" class="btn sm outline" data-export-one="${w.id}">匯出</button>
-                    ${
-                      !isOn
-                        ? `<button type="button" class="btn sm danger" data-purge-wf="${w.id}" data-wf-name="${esc(w.name)}">刪除</button>`
-                        : ''
-                    }
-                  </div>
-                </td>
-              </tr>`;
-              })
-              .join('')}
+            ${rowsHtml}
           </tbody>
         </table>
       </div>
-    </div>`;
+  `;
+}
 
+function bindWorkflowsTable(body, workflows, onRefresh) {
   body.querySelectorAll('[data-edit]').forEach((btn) => {
     btn.onclick = () => {
       const w = workflows.find((x) => x.id === Number(btn.dataset.edit));
@@ -162,24 +168,30 @@ async function renderWorkflows(body) {
     };
   });
 
-  // 流程圖編輯器（v2）：儲存後該流程即升級為圖模型
   body.querySelectorAll('[data-flow]').forEach((btn) => {
     btn.onclick = async () => {
       const w = workflows.find((x) => x.id === Number(btn.dataset.flow));
       if (!w) return;
+      if (typeof openFlowEditor !== 'function') {
+        toast('流程圖編輯器尚未載入，請重新整理頁面', 'error');
+        return;
+      }
       await loadUsers();
+      try {
+        await loadDepartmentOptions();
+      } catch {
+        /* ignore */
+      }
       openFlowEditor(w, async (graph) => {
         try {
-          // api() 內部已會 JSON.stringify，這裡傳物件即可。
-          // 先 stringify 會變成雙重編碼，body-parser 解析失敗後由 express
-          // 預設錯誤處理回傳 HTML，前端取不到 error 欄位只會看到「請求失敗 (400)」
           await api(`/api/workflows/${w.id}`, {
             method: 'PUT',
             body: { flow: graph },
           });
           closeModal();
-          toast('流程圖已儲存，此流程已改用圖模型執行');
-          renderWorkflows(body);
+          toast('流程圖已儲存，並同步更新簽核關卡。進行中單據不受影響。', 'success');
+          if (typeof onRefresh === 'function') onRefresh();
+          else renderWorkflows(body);
         } catch (e) {
           toast(e.message || '儲存失敗', 'error');
         }
@@ -236,7 +248,8 @@ async function renderWorkflows(body) {
           if (label) label.textContent = '停用';
           toast(`「${name}」已停用`, 'success');
         }
-        navigate('workflows');
+        if (typeof onRefresh === 'function') onRefresh();
+        else navigate('workflows');
       } catch (e) {
         input.checked = !wantOn;
         toast(e.message, 'error');
@@ -264,12 +277,51 @@ async function renderWorkflows(body) {
           body: { permanent: true },
         });
         toast('流程已永久刪除', 'success');
-        navigate('workflows');
+        if (typeof onRefresh === 'function') onRefresh();
+        else navigate('workflows');
       } catch (e) {
         toast(e.message || '永久刪除失敗', 'error');
       }
     };
   });
+}
+
+async function renderWorkflows(body) {
+  if (!hasPerm('workflows')) {
+    body.innerHTML = `<div class="error-msg">您沒有管理簽核流程的權限（請洽系統管理員）</div>`;
+    return;
+  }
+  const workflows = await loadWorkflows(true);
+  await loadUsers();
+  const pageActions = $('#page-actions');
+  if (pageActions) {
+    pageActions.innerHTML = getWorkflowsActionsHtml();
+    bindWorkflowsActions(pageActions);
+  }
+
+  if (!workflows.length) {
+    body.innerHTML = getWorkflowsEmptyHtml();
+    const b = $('#btn-new-wf-empty');
+    if (b) b.onclick = () => openWorkflowEditor();
+    const bi = $('#btn-import-wf-empty');
+    if (bi) bi.onclick = () => $('#wf-import-file')?.click();
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="card">
+      ${getWorkflowsTableInnerHtml(workflows)}
+    </div>`;
+
+  bindWorkflowsTable(body, workflows);
+}
+
+if (typeof window !== 'undefined') {
+  window.getWorkflowsActionsHtml = getWorkflowsActionsHtml;
+  window.bindWorkflowsActions = bindWorkflowsActions;
+  window.getWorkflowsEmptyHtml = getWorkflowsEmptyHtml;
+  window.getWorkflowsTableInnerHtml = getWorkflowsTableInnerHtml;
+  window.bindWorkflowsTable = bindWorkflowsTable;
 }
 
 function newFormField() {
@@ -284,23 +336,17 @@ function newFormField() {
   };
 }
 
-function openWorkflowEditor(workflow = null) {
+async function openWorkflowEditor(workflow = null) {
+  try {
+    await loadDepartmentOptions();
+  } catch {
+    /* ignore */
+  }
   const users = state.users;
-  const deptNames = [
-    ...new Set(
-      [
-        '管理部',
-        '工程部',
-        '採購部',
-        '業務部',
-        '財務部',
-        '倉管部',
-        '人事單位',
-        ...(users || []).map((u) => u.department).filter(Boolean),
-      ].filter(Boolean)
-    ),
-  ];
-  const steps = workflow
+  const deptNames = collectWorkflowDeptNames(
+    (workflow?.steps || []).map((s) => s.department)
+  );
+  const steps = (workflow && workflow.steps && workflow.steps.length)
     ? JSON.parse(JSON.stringify(workflow.steps || [])).map((s) => ({
         assignType: 'users',
         formFieldId: 'agent',
@@ -327,7 +373,7 @@ function openWorkflowEditor(workflow = null) {
           mode: 'any',
         },
       ];
-  const formFields = workflow
+  const formFields = (workflow && workflow.formFields && workflow.formFields.length)
     ? JSON.parse(JSON.stringify(workflow.formFields || [])).map((f) => ({
         ...f,
         optionsText: Array.isArray(f.options) ? f.options.join('\n') : '',
@@ -346,23 +392,15 @@ function openWorkflowEditor(workflow = null) {
       if (typeSel) s.assignType = typeSel.value;
       if (ffSel) s.formFieldId = ffSel.value;
       if (deptSel) s.department = deptSel.value;
+      const skipCb = document.querySelector(
+        `[data-field="skipIfNoApprover"][data-i="${i}"]`
+      );
+      if (skipCb) s.skipIfNoApprover = !!skipCb.checked;
+      else if (s.assignType !== 'users_pick') s.skipIfNoApprover = false;
       if (s.assignType === 'users' || s.assignType === 'users_pick') {
         s.approverIds = [...document.querySelectorAll(`[data-approver="${i}"]:checked`)].map((c) =>
           Number(c.value)
         );
-      }
-
-      const condEnable = document.querySelector(`[data-cond-enable="${i}"]`)?.checked;
-      if (condEnable) {
-        s.condition = {
-          enabled: true,
-          fieldId: document.querySelector(`[data-cond-field="${i}"]`)?.value || 'amount',
-          operator: document.querySelector(`[data-cond-op="${i}"]`)?.value || '>=',
-          value: document.querySelector(`[data-cond-val="${i}"]`)?.value?.trim() || '0',
-          action: document.querySelector(`[data-cond-action="${i}"]`)?.value || 'require',
-        };
-      } else {
-        s.condition = { enabled: false };
       }
     });
   };
@@ -381,7 +419,6 @@ function openWorkflowEditor(workflow = null) {
             <span class="step-num">${i + 1}</span>
             <strong>簽核步驟</strong>
             <span class="field-type-tag">${esc(ASSIGN_TYPE_LABEL[at] || at)}</span>
-            ${s.condition?.enabled ? `<span class="tag draft" style="font-size:0.75rem">🔀 條件分支</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button type="button" class="btn sm outline" data-up="${i}" ${i === 0 ? 'disabled' : ''}>上移</button>
@@ -464,10 +501,20 @@ function openWorkflowEditor(workflow = null) {
           </div>
           <p class="muted" style="font-size:0.8rem;margin:6px 0 0">${
             at === 'users_pick'
-              ? '申請時必選其中一人，或選「全部」。核准模式決定全部時是否需人人簽核。'
+              ? '申請人從名單勾選一位或多位；若下方勾選「非必填」則可不選（略過此步驟）。'
               : '可隨時增刪指定人員；儲存流程後生效。新申請單會依最新設定解析簽核人。'
           }</p>
         </div>
+        ${
+          at === 'users_pick'
+            ? `<label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:0.9rem">
+                <input type="checkbox" data-field="skipIfNoApprover" data-i="${i}" ${
+                  s.skipIfNoApprover ? 'checked' : ''
+                } />
+                <span>非必填（申請人可不選，略過「${esc(s.name || '此步驟')}」）</span>
+              </label>`
+            : ''
+        }
         ${
           at === 'dept_head'
             ? `<p class="muted" style="margin:8px 0 0;font-size:0.85rem">
@@ -479,7 +526,11 @@ function openWorkflowEditor(workflow = null) {
         ${
           at === 'users_pick'
             ? `<p class="muted" style="margin:8px 0 0;font-size:0.85rem">
-                申請人<strong>必選</strong>名單中的一位，或選<strong>全部</strong>。
+                ${
+                  s.skipIfNoApprover
+                    ? '申請人<strong>可不選</strong>（略過）；或勾選名單中的一位／多位。'
+                    : '申請人<strong>必選</strong>名單中的一位，或選<strong>全部</strong>。'
+                }
               </p>`
             : ''
         }
@@ -490,42 +541,6 @@ function openWorkflowEditor(workflow = null) {
               </p>`
             : ''
         }
-
-        <!-- 關卡條件式動態分支 -->
-        <div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px;background:#f8fafc;margin-top:10px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;margin:0 0 4px">
-            <input type="checkbox" data-cond-enable="${i}" ${s.condition?.enabled ? 'checked' : ''} />
-            <span>🔀 啟用關卡條件式動態分支 (符合/未達門檻時自動跳過關卡)</span>
-          </label>
-          <div data-cond-panel="${i}" class="${s.condition?.enabled ? '' : 'hidden'}" style="margin-top:8px">
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <span style="font-size:0.85rem">當欄位</span>
-              <select data-cond-field="${i}" style="font-size:0.85rem">
-                <option value="amount" ${s.condition?.fieldId === 'amount' ? 'selected' : ''}>金額 (amount / 總金額)</option>
-                <option value="days" ${s.condition?.fieldId === 'days' ? 'selected' : ''}>請假天數 (days)</option>
-                <option value="hours" ${s.condition?.fieldId === 'hours' ? 'selected' : ''}>請假小時 (hours)</option>
-                ${(formFields || []).map(f => `<option value="${esc(f.id)}" ${s.condition?.fieldId === f.id ? 'selected' : ''}>${esc(f.label)} (${esc(f.id)})</option>`).join('')}
-              </select>
-              <select data-cond-op="${i}" style="font-size:0.85rem">
-                <option value=">=" ${s.condition?.operator === '>=' ? 'selected' : ''}>&gt;= (大於等於)</option>
-                <option value=">" ${s.condition?.operator === '>' ? 'selected' : ''}>&gt; (大於)</option>
-                <option value="<=" ${s.condition?.operator === '<=' ? 'selected' : ''}>&lt;= (小於等於)</option>
-                <option value="<" ${s.condition?.operator === '<' ? 'selected' : ''}>&lt; (小於)</option>
-                <option value="==" ${s.condition?.operator === '==' ? 'selected' : ''}>== (等於)</option>
-                <option value="!=" ${s.condition?.operator === '!=' ? 'selected' : ''}>!= (不等於)</option>
-                <option value="contains" ${s.condition?.operator === 'contains' ? 'selected' : ''}>包含 (contains)</option>
-              </select>
-              <input type="text" data-cond-val="${i}" value="${esc(s.condition?.value || '')}" placeholder="數值或文字 (例: 100000)" style="width:140px;font-size:0.85rem" />
-              <select data-cond-action="${i}" style="font-size:0.85rem">
-                <option value="require" ${s.condition?.action !== 'skip' ? 'selected' : ''}>符合才簽核 (未達則自動跳過)</option>
-                <option value="skip" ${s.condition?.action === 'skip' ? 'selected' : ''}>符合則跳過 (未達才簽核)</option>
-              </select>
-            </div>
-            <p class="muted" style="font-size:0.8rem;margin:6px 0 0">
-              例：金額 &gt;= 100000 且選擇「符合才簽核」→ 當請購金額未滿 10 萬時，系統將自動跳過此關卡，直接進入下一關。
-            </p>
-          </div>
-        </div>
       </div>`;
       })
       .join('');
@@ -566,8 +581,13 @@ function openWorkflowEditor(workflow = null) {
       inp.onchange = inp.oninput = () => {
         const i = Number(inp.dataset.i);
         const field = inp.dataset.field;
-        steps[i][field] = inp.value;
+        if (inp.type === 'checkbox') {
+          steps[i][field] = !!inp.checked;
+        } else {
+          steps[i][field] = inp.value;
+        }
         if (field === 'assignType') renderSteps();
+        if (field === 'skipIfNoApprover') renderSteps();
         if (field === 'name') syncFlowPathFromSteps();
       };
     });
@@ -581,24 +601,6 @@ function openWorkflowEditor(workflow = null) {
         steps[i].approverIds = [...set];
       };
     });
-    // 條件式分支：勾選時展開設定面板，並即時反映到流程圖
-    box.querySelectorAll('[data-cond-enable]').forEach((cb) => {
-      cb.onchange = () => {
-        const i = cb.dataset.condEnable;
-        const panel = box.querySelector(`[data-cond-panel="${i}"]`);
-        if (panel) panel.classList.toggle('hidden', !cb.checked);
-        syncStepsFromDom();
-        syncFlowPathFromSteps();
-      };
-    });
-    box
-      .querySelectorAll('[data-cond-field],[data-cond-op],[data-cond-val],[data-cond-action]')
-      .forEach((el) => {
-        el.onchange = el.oninput = () => {
-          syncStepsFromDom();
-          syncFlowPathFromSteps();
-        };
-      });
     syncFlowPathFromSteps();
   };
 
@@ -642,9 +644,8 @@ function openWorkflowEditor(workflow = null) {
     const preview = document.querySelector('#flow-path-preview');
     if (descEl) descEl.value = path;
     if (preview) {
-      // 流程圖 + 底下保留文字路徑（與「說明」欄位一致）
       preview.innerHTML = `${flowChartHtml(steps, { showLegend: false })}
-        <div class="muted" style="margin-top:4px">${esc(path)}</div>`;
+        <div class="muted" style="margin-top:6px">${esc(path)}</div>`;
     }
     if (nameEl) {
       const cur = String(nameEl.value || '').trim();
@@ -763,16 +764,20 @@ function openWorkflowEditor(workflow = null) {
 
   const PDF_LAYOUT_OPTIONS = [
     { type: 'auto', label: '依流程名稱自動判斷' },
+    { type: 'pdf_template', label: '📄 紙本底圖套印版面（畫布拖拉設計）' },
     { type: 'leave', label: '請假單版面' },
     { type: 'credit_limit', label: '信用額度申請表版面' },
+    { type: 'welfare', label: '福利金明細月報表版面' },
     { type: 'purchase', label: '請購申請版面' },
     { type: 'expense', label: '費用報支版面' },
     { type: 'travel', label: '出差申請版面' },
     { type: 'it_repair', label: '電腦異常報修版面' },
     { type: 'overtime', label: '延長工時版面' },
+    { type: 'dept_meeting', label: '會議記錄版面' },
     { type: 'general', label: '一般簽呈版面' },
   ];
-  const curPdfType = (workflow?.pdfLayout && workflow.pdfLayout.type) || 'auto';
+  let curPdfLayout = workflow?.pdfLayout ? JSON.parse(JSON.stringify(workflow.pdfLayout)) : { type: 'auto' };
+  const curPdfType = curPdfLayout.type || 'auto';
   const curFinalNotify = workflow?.finalNotify || {
     enabled: false,
     userIds: [],
@@ -794,13 +799,40 @@ function openWorkflowEditor(workflow = null) {
     /信用額度|授信額度|額度申請/i.test(String(workflow?.name || ''));
   const isLeaveWorkflowName = /請假|休假|leave/i.test(String(workflow?.name || ''));
 
+  const curCategory = workflow?.category || '一般簽呈';
+  const defaultCategories = ['人事差勤', '財務採購', '資訊總務', '業務行政', '一般簽呈'];
+  const allKnownCategories = Array.from(
+    new Set([
+      ...defaultCategories,
+      ...(state.workflows || []).map((w) => w.category).filter(Boolean),
+      curCategory,
+    ])
+  );
+
   openModal(`
-    <h3>${workflow ? '編輯流程' : '建立簽核流程'}</h3>
+    <h3>${workflow && workflow.id ? '編輯流程' : '建立簽核流程'}</h3>
     <form id="wf-form" class="form-grid">
       <div class="field">
         <label>流程名稱 *</label>
         <input name="name" required value="${esc(workflow?.name || '')}" placeholder="例如：請假申請、請購申請" />
         <p class="muted" style="font-size:0.8rem;margin:4px 0 0">若名稱為路徑格式，增刪步驟時會自動同步更新。</p>
+      </div>
+      <div class="field">
+        <label>表單分類 *</label>
+        <select id="wf-category-select" style="width:100%">
+          ${allKnownCategories
+            .map(
+              (c) =>
+                `<option value="${esc(c)}" ${c === curCategory ? 'selected' : ''}>${esc(c)}</option>`
+            )
+            .join('')}
+          <option value="__custom__">➕ 自訂新分類...</option>
+        </select>
+        <div id="wf-category-custom-wrap" class="hidden" style="margin-top:6px">
+          <input type="text" id="wf-category-custom-inp" placeholder="請輸入新分類名稱，例如：倉儲物流、品保管理" style="width:100%" />
+        </div>
+        <input type="hidden" name="category" id="wf-category-val" value="${esc(curCategory)}" />
+        <p class="muted" style="font-size:0.8rem;margin:4px 0 0">供「新增申請」表單中心分類瀏覽；可直接選擇或自訂新分類。</p>
       </div>
       <div class="field">
         <label>說明（簽核路徑，隨步驟自動更新）</label>
@@ -826,6 +858,17 @@ function openWorkflowEditor(workflow = null) {
               `<option value="${esc(o.type)}" ${curPdfType === o.type ? 'selected' : ''}>${esc(o.label)}</option>`
           ).join('')}
         </select>
+        <div id="pdf-template-config-box" class="${curPdfType === 'pdf_template' ? '' : 'hidden'}" style="margin-top:10px;padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div>
+              <strong style="color:#1e3a5f;">📄 紙本底圖套印設定</strong>
+              <div id="pdf-template-status-text" class="muted" style="margin-top:2px;">
+                ${curPdfLayout.templateFile ? `已綁定底圖：${curPdfLayout.templateMeta?.originalName || curPdfLayout.templateFile}（${(curPdfLayout.fields || []).length} 個套印欄位）` : '尚未上傳底圖或設計套印欄位'}
+              </div>
+            </div>
+            <button type="button" class="btn sm primary" id="btn-open-pdf-designer">🎨 開啟畫布設計器</button>
+          </div>
+        </div>
         <p class="muted" style="font-size:0.8rem;margin:6px 0 0">
           與簽核流程一體：匯出／匯入時會一併帶出 PDF 排版，不影響系統設定、Email、使用者。
         </p>
@@ -833,8 +876,8 @@ function openWorkflowEditor(workflow = null) {
       <div class="field" style="grid-column:1/-1">
         <label>目前簽核路徑</label>
         <div id="flow-path-preview" style="padding:6px 12px 10px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;color:#1e3a5f;line-height:1.5">
-          ${flowChartHtml(workflow?.steps || [], { showLegend: false })}
-          <div class="muted" style="margin-top:4px">${esc(workflow?.description || '申請人')}</div>
+          ${flowChartHtml(workflow?.steps || [], { showLegend: false, flow: workflow?.flow || null })}
+          <div class="muted" style="margin-top:6px">${esc(workflow?.description || '申請人')}</div>
         </div>
       </div>
       <div style="grid-column:1/-1;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#f8fafc">
@@ -997,6 +1040,28 @@ function openWorkflowEditor(workflow = null) {
       wfActiveLabel.textContent = wfActive.checked ? '啟用' : '停用';
     });
   }
+
+  const catSelect = $('#wf-category-select');
+  const catCustomWrap = $('#wf-category-custom-wrap');
+  const catCustomInp = $('#wf-category-custom-inp');
+  const catVal = $('#wf-category-val');
+  if (catSelect && catCustomWrap && catCustomInp && catVal) {
+    catSelect.addEventListener('change', () => {
+      if (catSelect.value === '__custom__') {
+        catCustomWrap.classList.remove('hidden');
+        catCustomInp.focus();
+        catVal.value = catCustomInp.value.trim();
+      } else {
+        catCustomWrap.classList.add('hidden');
+        catVal.value = catSelect.value;
+      }
+    });
+    catCustomInp.addEventListener('input', () => {
+      if (catSelect.value === '__custom__') {
+        catVal.value = catCustomInp.value.trim();
+      }
+    });
+  }
   const fnEnabled = $('#wf-final-notify-enabled');
   const fnLabel = $('#wf-final-notify-label');
   const fnPanel = $('#wf-final-notify-panel');
@@ -1033,6 +1098,51 @@ function openWorkflowEditor(workflow = null) {
     r.addEventListener('change', syncApplicantModeUi);
   });
   syncApplicantModeUi();
+
+  const pdfLayoutSel = $('#wf-pdf-layout');
+  const templateConfigBox = $('#pdf-template-config-box');
+  const templateStatusText = $('#pdf-template-status-text');
+  const btnOpenDesigner = $('#btn-open-pdf-designer');
+
+  if (pdfLayoutSel && templateConfigBox) {
+    pdfLayoutSel.addEventListener('change', () => {
+      const isTemplate = pdfLayoutSel.value === 'pdf_template';
+      templateConfigBox.classList.toggle('hidden', !isTemplate);
+      if (isTemplate && (!curPdfLayout || curPdfLayout.type !== 'pdf_template')) {
+        curPdfLayout = { type: 'pdf_template', fields: [] };
+      }
+    });
+  }
+
+  if (btnOpenDesigner) {
+    btnOpenDesigner.addEventListener('click', () => {
+      syncStepsFromDom();
+      if (!window.PdfFormDesigner) {
+        toast('PDF 畫布設計器元件載入中，請稍候重試', 'error');
+        return;
+      }
+      window.PdfFormDesigner.openPdfFormDesignerModal({
+        workflow: { ...workflow, steps },
+        initialPdfLayout: curPdfLayout,
+        onSave: (res) => {
+          curPdfLayout = res.pdfLayout;
+          if (templateStatusText) {
+            templateStatusText.textContent = `已綁定底圖：${curPdfLayout.templateMeta?.originalName || curPdfLayout.templateFile}（${(curPdfLayout.fields || []).length} 個套印欄位）`;
+          }
+          if (Array.isArray(res.formFields) && res.formFields.length) {
+            res.formFields.forEach((cf) => {
+              const exist = formFields.find((f) => f.id === cf.id);
+              if (!exist) {
+                formFields.push(cf);
+              }
+            });
+            renderFormFields();
+          }
+          toast('紙本底圖模版與欄位已更新', 'success');
+        },
+      });
+    });
+  }
   // 常用層級一鍵新增（可任意組合、自行修改）
   const findUserId = (name) => {
     const u = (users || []).find((x) => x.name === name);
@@ -1166,6 +1276,28 @@ function openWorkflowEditor(workflow = null) {
       },
     },
   ];
+  const presetDeptSet = new Set(
+    STEP_PRESETS.filter((p) => p.step.assignType === 'department').map(
+      (p) => p.step.department
+    )
+  );
+  const extraDeptPresets = deptNames
+    .filter((name) => name && name !== '人事單位' && !presetDeptSet.has(name))
+    .sort((a, b) => String(a).localeCompare(String(b), 'zh-Hant'))
+    .map((name) => ({
+      label: name,
+      step: {
+        name,
+        assignType: 'department',
+        formFieldId: 'agent',
+        department: name,
+        approverIds: [],
+        mode: 'any',
+      },
+    }));
+  const insertAt = STEP_PRESETS.findIndex((p) => p.label === '會簽人員（選填）');
+  if (insertAt >= 0) STEP_PRESETS.splice(insertAt, 0, ...extraDeptPresets);
+  else STEP_PRESETS.push(...extraDeptPresets);
 
   const presetsBox = $('#step-presets');
   if (presetsBox) {
@@ -1289,8 +1421,24 @@ function openWorkflowEditor(workflow = null) {
       toast('已選「僅下列申請人」，請至少勾選一位申請人', 'error');
       return;
     }
+
+    const catSelectEl = $('#wf-category-select');
+    const catCustomInpEl = $('#wf-category-custom-inp');
+    let categoryVal = String(fd.get('category') || '').trim();
+    if (catSelectEl && catSelectEl.value === '__custom__') {
+      const customName = catCustomInpEl ? catCustomInpEl.value.trim() : '';
+      if (!customName) {
+        toast('請輸入自訂分類名稱', 'error');
+        catCustomInpEl?.focus();
+        return;
+      }
+      categoryVal = customName;
+    }
+    if (!categoryVal) categoryVal = '一般簽呈';
+
     const payload = {
       name: nameVal,
+      category: categoryVal,
       description: pathDesc,
       steps: steps.map((s) => ({
         name: s.name,
@@ -1305,7 +1453,9 @@ function openWorkflowEditor(workflow = null) {
             : [],
         // 保留步驟簽核表單（如人事：剩餘特休）
         approverFields: Array.isArray(s.approverFields) ? s.approverFields : [],
-        condition: s.condition || { enabled: false },
+        // 申請人自選：非必填可略過（users_pick）
+        skipIfNoApprover:
+          s.assignType === 'users_pick' ? !!s.skipIfNoApprover : false,
       })),
       formFields: formFields.map((f) => ({
         id: f.id,
@@ -1315,7 +1465,16 @@ function openWorkflowEditor(workflow = null) {
         placeholder: f.placeholder || '',
         options: f.type === 'select' ? f.options || [] : undefined,
       })),
-      pdfLayout: { type: String(pdfLayoutType || 'auto') },
+      pdfLayout:
+        pdfLayoutType === 'pdf_template'
+          ? {
+              type: 'pdf_template',
+              templateFile: curPdfLayout.templateFile || '',
+              templateMeta: curPdfLayout.templateMeta || null,
+              fields: curPdfLayout.fields || [],
+              formMode: curPdfLayout.formMode || 'paper',
+            }
+          : { type: String(pdfLayoutType || 'auto') },
       finalNotify: {
         enabled: finalNotifyEnabled,
         userIds: finalNotifyUserIds,
@@ -1328,7 +1487,7 @@ function openWorkflowEditor(workflow = null) {
       active: document.querySelector('#wf-active')?.checked ? 1 : 0,
     };
     try {
-      if (workflow) {
+      if (workflow && workflow.id) {
         await api(`/api/workflows/${workflow.id}`, { method: 'PUT', body: payload });
       } else {
         await api('/api/workflows', { method: 'POST', body: payload });
@@ -1340,5 +1499,10 @@ function openWorkflowEditor(workflow = null) {
       toast(err.message, 'error');
     }
   };
-}
 
+  if (workflow?._autoOpenDesigner) {
+    setTimeout(() => {
+      $('#btn-open-pdf-designer')?.click();
+    }, 150);
+  }
+}

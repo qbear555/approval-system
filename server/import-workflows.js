@@ -33,7 +33,7 @@ function resolveApproverIds(step) {
     for (const a of step.approvers) {
       if (a?.username) {
         const u = db
-          .prepare(`SELECT id FROM users WHERE username = ? AND active = 1`)
+          .prepare(`SELECT id FROM users WHERE username = ? COLLATE NOCASE AND active = 1`)
           .get(String(a.username).trim());
         if (u) ids.add(u.id);
       } else if (a?.id) {
@@ -57,7 +57,10 @@ function cleanSteps(steps) {
       mode: s.mode === 'all' ? 'all' : 'any',
       formFieldId: s.formFieldId || '',
       department: s.department || '',
-      approverIds: assignType === 'users' ? resolveApproverIds(s) : [],
+      approverIds:
+        assignType === 'users' || assignType === 'users_pick'
+          ? resolveApproverIds(s)
+          : [],
       approverFields: Array.isArray(s.approverFields) ? s.approverFields : [],
       skipIfNoApprover: Boolean(s.skipIfNoApprover),
     };
@@ -171,9 +174,10 @@ function upsertWorkflow(item, adminId) {
   });
 
   const existing = db
-    .prepare(`SELECT id FROM workflows WHERE name = ? AND COALESCE(purged, 0) = 0 ORDER BY id DESC LIMIT 1`)
+    .prepare(`SELECT id, category FROM workflows WHERE name = ? AND COALESCE(purged, 0) = 0 ORDER BY id DESC LIMIT 1`)
     .get(name);
 
+  const category = String(item.category || '').trim();
   const stepsJson = JSON.stringify(steps);
   const fieldsJson = JSON.stringify(formFields);
 
@@ -181,6 +185,7 @@ function upsertWorkflow(item, adminId) {
     db.prepare(
       `UPDATE workflows SET
         description = ?,
+        category = CASE WHEN ? != '' THEN ? ELSE category END,
         steps_json = ?,
         form_fields_json = ?,
         pdf_layout_json = ?,
@@ -190,6 +195,8 @@ function upsertWorkflow(item, adminId) {
        WHERE id = ?`
     ).run(
       description,
+      category,
+      category,
       stepsJson,
       fieldsJson,
       pdfLayoutJson,
@@ -209,12 +216,13 @@ function upsertWorkflow(item, adminId) {
 
   const info = db
     .prepare(
-      `INSERT INTO workflows (name, description, created_by, steps_json, form_fields_json, pdf_layout_json, final_notify_json, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1)`
+      `INSERT INTO workflows (name, description, category, created_by, steps_json, form_fields_json, pdf_layout_json, final_notify_json, active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`
     )
     .run(
       name,
       description,
+      category || '一般簽呈',
       adminId,
       stepsJson,
       fieldsJson,

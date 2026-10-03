@@ -59,8 +59,16 @@
           "required": true,
           "options": [
             "符合",
-            "不符合"
+            "不符合",
+            "NA"
           ]
+        },
+        {
+          "id": "check_os_note",
+          "label": "作業系統不符合說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請填寫實際規格／不符合原因"
         },
         {
           "id": "check_memory",
@@ -69,8 +77,16 @@
           "required": true,
           "options": [
             "符合",
-            "不符合"
+            "不符合",
+            "NA"
           ]
+        },
+        {
+          "id": "check_memory_note",
+          "label": "記憶體不符合說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請填寫實際規格／不符合原因"
         },
         {
           "id": "check_disk",
@@ -79,8 +95,16 @@
           "required": true,
           "options": [
             "符合",
-            "不符合"
+            "不符合",
+            "NA"
           ]
+        },
+        {
+          "id": "check_disk_note",
+          "label": "硬碟不符合說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請填寫實際規格／不符合原因"
         },
         {
           "id": "check_3dmark",
@@ -89,8 +113,16 @@
           "required": true,
           "options": [
             "符合",
-            "不符合"
+            "不符合",
+            "NA"
           ]
+        },
+        {
+          "id": "check_3dmark_note",
+          "label": "3DMARK 分數不符合說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請填寫實際規格／不符合原因"
         },
         {
           "id": "check_email",
@@ -99,8 +131,16 @@
           "required": true,
           "options": [
             "符合",
-            "不符合"
+            "不符合",
+            "NA"
           ]
+        },
+        {
+          "id": "check_email_note",
+          "label": "電子郵件不符合說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請填寫實際規格／不符合原因"
         },
         {
           "id": "check_backup",
@@ -109,18 +149,34 @@
           "required": true,
           "options": [
             "符合",
-            "不符合"
+            "不符合",
+            "NA"
           ]
         },
         {
+          "id": "check_backup_note",
+          "label": "重要資料不符合說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請填寫實際規格／不符合原因"
+        },
+        {
           "id": "check_battery",
-          "label": "電池容量（70% 以下）",
+          "label": "電池容量",
           "type": "select",
           "required": true,
           "options": [
-            "符合",
-            "不符合"
+            "70%以上",
+            "低於70%",
+            "NA"
           ]
+        },
+        {
+          "id": "check_battery_note",
+          "label": "電池容量不符合說明",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "請填寫實際規格／不符合原因"
         },
         {
           "id": "handle_result",

@@ -62,7 +62,9 @@ powershell -ExecutionPolicy Bypass -File scripts\sync-oneclick-packages.ps1
 
 ## 技術
 
-Node.js 22+、Express、JWT Cookie、SQLite（`node:sqlite`）、PDFKit。
+Node.js 22+、Express、JWT Cookie、MariaDB／MySQL、PDFKit。
+
+應用 SQL 維持 SQLite 寫法，由 `server/db-adapter` 翻譯。正式 NAS 預設仍用 `data/approval.db`，不需改設定。
 
 ```
 approval-system/
@@ -88,7 +90,7 @@ approval-system/
 
 ## 注意
 
-- 定期備份 `data/approval.db` 與整個 `data/`
+- 定期備份 `data/approval.db` 與整個 `data/`（若改 MySQL，改備份該資料庫）
 - 設計約 30 人、上限約 50 人
 - PDF 中文請用專案 `fonts/Deng.ttf`，勿用 `simsunb.ttf`
 - JWT 未設環境變數時寫入 `data/.jwt-secret`（勿提交）

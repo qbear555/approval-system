@@ -2,7 +2,6 @@
  * 系統設定（公司名稱、Logo、PDF 數位簽章憑證、備份加密）
  * 儲存於 data/system-settings.json；Logo 於 data/branding/；憑證於 data/certs/
  */
-const tz = require('./tz');
 const fs = require('fs');
 const path = require('path');
 
@@ -13,13 +12,6 @@ const ANNOUNCE_DIR = path.join(DATA_DIR, 'announcements');
 const SETTINGS_PATH = path.join(DATA_DIR, 'system-settings.json');
 const DEFAULT_LOGO_URL = '/img/argo-logo.png';
 const DEFAULT_COMPANY_NAME = '線上簽核系統';
-
-/**
- * 電腦綁定功能總開關。
- * 開發階段（2026-08）先停用：不檢查、不新增綁定；系統設定勾選也無效。
- * 上線要恢復：改成 true，既有 system-settings.json 的勾選會立刻生效。
- */
-const DEVICE_BIND_FEATURE_ENABLED = false;
 
 const DEFAULTS = {
   companyName: DEFAULT_COMPANY_NAME,
@@ -36,9 +28,8 @@ const DEFAULTS = {
   // 備份 ZIP AES-256 加密（密碼僅伺服器端）
   backupEncryptEnabled: false,
   backupEncryptPass: '',
-  // 備份根目錄（空字串 = 預設 data/backups）
-  backupDir: '',
-  // 總覽公告（單則最小版）
+  // 總覽公告（最多 2 則；slot 0 亦鏡像到下方舊欄位以相容）
+  announcements: null, // 載入時正規化為長度 2 的陣列
   announcementEnabled: false,
   announcementTitle: '',
   announcementBody: '',
@@ -47,13 +38,85 @@ const DEFAULTS = {
   announcementStartAt: null, // ISO；null＝不限制開始
   announcementEndAt: null, // ISO；null＝不限制結束；超過則自動不顯示
   announcementUpdatedAt: null,
-  // 內網與裝置綁定
-  intranetOnly: true,
-  loginCidrs: '192.168.99.0/24,172.16.0.0/12,127.0.0.1,::1',
-  deviceBindEnabled: true,
-  deviceBindMax: 3,
   updatedAt: null,
 };
+
+const ANNOUNCE_SLOTS = 2;
+
+function emptyAnnounceItem() {
+  return {
+    enabled: false,
+    title: '',
+    body: '',
+    file: null,
+    originalName: null,
+    startAt: null,
+    endAt: null,
+    updatedAt: null,
+  };
+}
+
+function normalizeAnnounceItem(raw) {
+  const base = emptyAnnounceItem();
+  if (!raw || typeof raw !== 'object') return base;
+  return {
+    enabled: !!raw.enabled,
+    title: raw.title != null ? String(raw.title).slice(0, 120) : '',
+    body: raw.body != null ? String(raw.body).slice(0, 8000) : '',
+    file: raw.file ? String(raw.file).replace(/[\\/]/g, '') : null,
+    originalName: raw.originalName
+      ? String(raw.originalName).replace(/[\\/]/g, '').slice(0, 200)
+      : null,
+    startAt: normalizeAnnounceIso(raw.startAt),
+    endAt: normalizeAnnounceIso(raw.endAt),
+    updatedAt: raw.updatedAt || null,
+  };
+}
+
+/** 自 JSON 或舊版單則欄位組出固定 2 則公告 */
+function loadAnnouncementsFromRaw(raw) {
+  if (Array.isArray(raw?.announcements) && raw.announcements.length) {
+    const items = [];
+    for (let i = 0; i < ANNOUNCE_SLOTS; i++) {
+      items.push(normalizeAnnounceItem(raw.announcements[i]));
+    }
+    return items;
+  }
+  return [
+    normalizeAnnounceItem({
+      enabled: raw?.announcementEnabled,
+      title: raw?.announcementTitle,
+      body: raw?.announcementBody,
+      file: raw?.announcementFile,
+      originalName: raw?.announcementOriginalName,
+      startAt: raw?.announcementStartAt,
+      endAt: raw?.announcementEndAt,
+      updatedAt: raw?.announcementUpdatedAt,
+    }),
+    emptyAnnounceItem(),
+  ];
+}
+
+function syncLegacyAnnounceFields(announcements) {
+  const a0 = announcements[0] || emptyAnnounceItem();
+  return {
+    announcementEnabled: !!a0.enabled,
+    announcementTitle: a0.title || '',
+    announcementBody: a0.body || '',
+    announcementFile: a0.file || null,
+    announcementOriginalName: a0.originalName || null,
+    announcementStartAt: a0.startAt || null,
+    announcementEndAt: a0.endAt || null,
+    announcementUpdatedAt: a0.updatedAt || null,
+  };
+}
+
+function clampAnnounceSlot(slot) {
+  const n = Number(slot);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  if (n >= ANNOUNCE_SLOTS) return ANNOUNCE_SLOTS - 1;
+  return Math.floor(n);
+}
 
 function ensureDirs() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -116,37 +179,18 @@ function loadRaw() {
       backupEncryptEnabled: !!raw.backupEncryptEnabled,
       backupEncryptPass:
         raw.backupEncryptPass != null ? String(raw.backupEncryptPass) : '',
-      backupDir: raw.backupDir ? String(raw.backupDir).trim().slice(0, 500) : '',
-      announcementEnabled: !!raw.announcementEnabled,
-      announcementTitle:
-        raw.announcementTitle != null
-          ? String(raw.announcementTitle).slice(0, 120)
-          : '',
-      announcementBody:
-        raw.announcementBody != null
-          ? String(raw.announcementBody).slice(0, 8000)
-          : '',
-      announcementFile: raw.announcementFile
-        ? String(raw.announcementFile).replace(/[\\/]/g, '')
-        : null,
-      announcementOriginalName: raw.announcementOriginalName
-        ? String(raw.announcementOriginalName).replace(/[\\/]/g, '').slice(0, 200)
-        : null,
-      announcementStartAt: normalizeAnnounceIso(raw.announcementStartAt),
-      announcementEndAt: normalizeAnnounceIso(raw.announcementEndAt),
-      announcementUpdatedAt: raw.announcementUpdatedAt || null,
-      intranetOnly: raw.intranetOnly === undefined ? true : !!raw.intranetOnly,
-      loginCidrs:
-        raw.loginCidrs != null && String(raw.loginCidrs).trim()
-          ? String(raw.loginCidrs).trim().slice(0, 500)
-          : DEFAULTS.loginCidrs,
-      deviceBindEnabled:
-        raw.deviceBindEnabled === undefined ? true : !!raw.deviceBindEnabled,
-      deviceBindMax: Math.min(10, Math.max(1, Number(raw.deviceBindMax) || 3)),
+      announcements: loadAnnouncementsFromRaw(raw),
+      ...(() => {
+        const announcements = loadAnnouncementsFromRaw(raw);
+        return syncLegacyAnnounceFields(announcements);
+      })(),
       updatedAt: raw.updatedAt || null,
     };
   } catch {
-    return { ...DEFAULTS };
+    return {
+      ...DEFAULTS,
+      announcements: [emptyAnnounceItem(), emptyAnnounceItem()],
+    };
   }
 }
 
@@ -155,7 +199,7 @@ function normalizeAnnounceIso(v) {
   if (v == null || String(v).trim() === '') return null;
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
-  return tz.nowIso(d);
+  return d.toISOString();
 }
 
 function saveRaw(settings) {
@@ -176,38 +220,37 @@ function saveRaw(settings) {
     backupEncryptEnabled: !!cur.backupEncryptEnabled,
     backupEncryptPass:
       cur.backupEncryptPass != null ? String(cur.backupEncryptPass) : '',
-    backupDir: cur.backupDir ? String(cur.backupDir).trim().slice(0, 500) : '',
-    announcementEnabled: !!cur.announcementEnabled,
-    announcementTitle: cur.announcementTitle != null ? String(cur.announcementTitle).slice(0, 120) : '',
-    announcementBody: cur.announcementBody != null ? String(cur.announcementBody).slice(0, 8000) : '',
-    announcementFile: cur.announcementFile
-      ? String(cur.announcementFile).replace(/[\\/]/g, '')
-      : null,
-    announcementOriginalName: cur.announcementOriginalName
-      ? String(cur.announcementOriginalName).replace(/[\\/]/g, '').slice(0, 200)
-      : null,
-    announcementStartAt: normalizeAnnounceIso(cur.announcementStartAt),
-    announcementEndAt: normalizeAnnounceIso(cur.announcementEndAt),
-    announcementUpdatedAt: cur.announcementUpdatedAt || null,
-    intranetOnly: cur.intranetOnly === undefined ? true : !!cur.intranetOnly,
-    loginCidrs:
-      cur.loginCidrs != null && String(cur.loginCidrs).trim()
-        ? String(cur.loginCidrs).trim().slice(0, 500)
-        : DEFAULTS.loginCidrs,
-    deviceBindEnabled:
-      cur.deviceBindEnabled === undefined ? true : !!cur.deviceBindEnabled,
-    deviceBindMax: Math.min(10, Math.max(1, Number(cur.deviceBindMax) || 3)),
-    updatedAt: tz.nowIso(),
+    announcements: (() => {
+      const list = Array.isArray(cur.announcements)
+        ? cur.announcements
+        : loadAnnouncementsFromRaw(cur);
+      const items = [];
+      for (let i = 0; i < ANNOUNCE_SLOTS; i++) {
+        items.push(normalizeAnnounceItem(list[i]));
+      }
+      return items;
+    })(),
+    ...(() => {
+      const list = Array.isArray(cur.announcements)
+        ? cur.announcements
+        : loadAnnouncementsFromRaw(cur);
+      const items = [];
+      for (let i = 0; i < ANNOUNCE_SLOTS; i++) {
+        items.push(normalizeAnnounceItem(list[i]));
+      }
+      return syncLegacyAnnounceFields(items);
+    })(),
+    updatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(payload, null, 2), 'utf8');
   return payload;
 }
 
-function announcementHasFile(s) {
-  const settings = s || loadRaw();
+function announcementItemHasFile(item) {
   return !!(
-    settings.announcementFile &&
-    fs.existsSync(path.join(ANNOUNCE_DIR, settings.announcementFile))
+    item &&
+    item.file &&
+    fs.existsSync(path.join(ANNOUNCE_DIR, item.file))
   );
 }
 
@@ -217,9 +260,9 @@ function announcementHasFile(s) {
  * - 現在 < 開始：尚未公布
  * - 現在 > 結束：已過期自動下架
  */
-function getAnnouncementSchedule(s, now = new Date()) {
-  const startAt = normalizeAnnounceIso(s.announcementStartAt);
-  const endAt = normalizeAnnounceIso(s.announcementEndAt);
+function getAnnouncementSchedule(item, now = new Date()) {
+  const startAt = normalizeAnnounceIso(item?.startAt);
+  const endAt = normalizeAnnounceIso(item?.endAt);
   const start = startAt ? new Date(startAt) : null;
   const end = endAt ? new Date(endAt) : null;
   let withinPeriod = true;
@@ -234,65 +277,96 @@ function getAnnouncementSchedule(s, now = new Date()) {
   return { startAt, endAt, withinPeriod, scheduleStatus };
 }
 
-/** 登入使用者可見的公告（未啟用／逾時則 active=false，總覽不顯示） */
-function getAnnouncementPublic() {
-  const s = loadRaw();
-  const hasFile = announcementHasFile(s);
-  const title = (s.announcementTitle || '').trim();
-  const body = (s.announcementBody || '').trim();
-  const enabled = !!s.announcementEnabled;
+function toAnnouncementPublic(item, slot) {
+  const it = normalizeAnnounceItem(item);
+  const hasFile = announcementItemHasFile(it);
+  const title = (it.title || '').trim();
+  const body = (it.body || '').trim();
+  const enabled = !!it.enabled;
   const hasContent = !!(title || body || hasFile);
-  const schedule = getAnnouncementSchedule(s);
+  const schedule = getAnnouncementSchedule(it);
   const active = enabled && hasContent && schedule.withinPeriod;
   return {
+    slot: Number(slot) || 0,
     enabled,
     active,
-    title: active || enabled ? title : title, // admin 仍看得到內容
-    body: active || enabled ? body : body,
+    title,
+    body,
     hasFile,
-    originalName: hasFile ? s.announcementOriginalName || s.announcementFile : null,
+    originalName: hasFile ? it.originalName || it.file : null,
     startAt: schedule.startAt,
     endAt: schedule.endAt,
     withinPeriod: schedule.withinPeriod,
     scheduleStatus: schedule.scheduleStatus,
-    updatedAt: s.announcementUpdatedAt || null,
+    updatedAt: it.updatedAt || null,
   };
 }
 
-function updateAnnouncement(patch = {}) {
-  const cur = loadRaw();
-  if (patch.enabled !== undefined) {
-    cur.announcementEnabled = !!patch.enabled;
+/** 全部公告（固定 2 則） */
+function getAnnouncementsPublic() {
+  const s = loadRaw();
+  const list = Array.isArray(s.announcements)
+    ? s.announcements
+    : loadAnnouncementsFromRaw(s);
+  const out = [];
+  for (let i = 0; i < ANNOUNCE_SLOTS; i++) {
+    out.push(toAnnouncementPublic(list[i], i));
   }
+  return out;
+}
+
+/** 相容：回傳第一則「公布中」或 slot 0 */
+function getAnnouncementPublic() {
+  const all = getAnnouncementsPublic();
+  return all.find((a) => a.active) || all[0] || toAnnouncementPublic(null, 0);
+}
+
+/**
+ * 更新指定則公告
+ * @param {{ slot?: number, enabled?, title?, body?, startAt?, endAt? }} patch
+ */
+function updateAnnouncement(patch = {}) {
+  const slot = clampAnnounceSlot(patch.slot);
+  const cur = loadRaw();
+  const list = Array.isArray(cur.announcements)
+    ? cur.announcements.map(normalizeAnnounceItem)
+    : loadAnnouncementsFromRaw(cur);
+  while (list.length < ANNOUNCE_SLOTS) list.push(emptyAnnounceItem());
+  const item = { ...list[slot] };
+  if (patch.enabled !== undefined) item.enabled = !!patch.enabled;
   if (patch.title !== undefined) {
-    cur.announcementTitle = String(patch.title || '').trim().slice(0, 120);
+    item.title = String(patch.title || '').trim().slice(0, 120);
   }
   if (patch.body !== undefined) {
-    cur.announcementBody = String(patch.body || '').slice(0, 8000);
+    item.body = String(patch.body || '').slice(0, 8000);
   }
-  // startAt / endAt：明確傳入（含 null／空字串）可更新；未傳則保留
   if (Object.prototype.hasOwnProperty.call(patch, 'startAt')) {
-    cur.announcementStartAt = normalizeAnnounceIso(patch.startAt);
+    item.startAt = normalizeAnnounceIso(patch.startAt);
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'endAt')) {
-    cur.announcementEndAt = normalizeAnnounceIso(patch.endAt);
+    item.endAt = normalizeAnnounceIso(patch.endAt);
   }
-  const start = cur.announcementStartAt ? new Date(cur.announcementStartAt) : null;
-  const end = cur.announcementEndAt ? new Date(cur.announcementEndAt) : null;
+  const start = item.startAt ? new Date(item.startAt) : null;
+  const end = item.endAt ? new Date(item.endAt) : null;
   if (start && end && start.getTime() > end.getTime()) {
     throw new Error('公布開始時間不可晚於結束時間');
   }
-  cur.announcementUpdatedAt = tz.nowIso();
+  item.updatedAt = new Date().toISOString();
+  list[slot] = item;
+  cur.announcements = list;
+  Object.assign(cur, syncLegacyAnnounceFields(list));
   saveRaw(cur);
-  return getAnnouncementPublic();
+  return toAnnouncementPublic(item, slot);
 }
 
 /**
  * 儲存公告附件
  * @param {{ buffer: Buffer, originalname: string, mimetype: string }} file
+ * @param {number} [slot]
  */
-function saveAnnouncementFile(file) {
+function saveAnnouncementFile(file, slot = 0) {
   ensureDirs();
+  const si = clampAnnounceSlot(slot);
   if (!file || !file.buffer) throw new Error('未選擇檔案');
   if (file.buffer.length > 15 * 1024 * 1024) {
     throw new Error('附件請小於 15MB');
@@ -325,8 +399,13 @@ function saveAnnouncementFile(file) {
   if (ext === '.jpeg') ext = '.jpg';
 
   const cur = loadRaw();
-  if (cur.announcementFile) {
-    const old = path.join(ANNOUNCE_DIR, cur.announcementFile);
+  const list = Array.isArray(cur.announcements)
+    ? cur.announcements.map(normalizeAnnounceItem)
+    : loadAnnouncementsFromRaw(cur);
+  while (list.length < ANNOUNCE_SLOTS) list.push(emptyAnnounceItem());
+  const item = { ...list[si] };
+  if (item.file) {
+    const old = path.join(ANNOUNCE_DIR, item.file);
     try {
       if (fs.existsSync(old)) fs.unlinkSync(old);
     } catch {
@@ -334,7 +413,7 @@ function saveAnnouncementFile(file) {
     }
   }
 
-  const stored = `announce-${Date.now()}${ext}`;
+  const stored = `announce-${si}-${Date.now()}${ext}`;
   const dest = path.join(ANNOUNCE_DIR, stored);
   try {
     fs.writeFileSync(dest, file.buffer);
@@ -356,7 +435,6 @@ function saveAnnouncementFile(file) {
       throw new Error('附件儲存失敗：' + (e.message || e));
     }
   }
-  // 正規化顯示檔名（multer 在部分環境會以 latin1 解中文檔名）
   let displayName = original.slice(0, 200) || stored;
   try {
     if (/[^\x00-\x7F]/.test(displayName) === false && /[\x80-\xff]/.test(displayName)) {
@@ -365,39 +443,57 @@ function saveAnnouncementFile(file) {
   } catch {
     /* keep original */
   }
-  cur.announcementFile = stored;
-  cur.announcementOriginalName = displayName;
-  cur.announcementUpdatedAt = tz.nowIso();
+  item.file = stored;
+  item.originalName = displayName;
+  item.updatedAt = new Date().toISOString();
+  list[si] = item;
+  cur.announcements = list;
+  Object.assign(cur, syncLegacyAnnounceFields(list));
   saveRaw(cur);
-  return getAnnouncementPublic();
+  return toAnnouncementPublic(item, si);
 }
 
-function clearAnnouncementFile() {
+function clearAnnouncementFile(slot = 0) {
+  const si = clampAnnounceSlot(slot);
   const cur = loadRaw();
-  if (cur.announcementFile) {
-    const old = path.join(ANNOUNCE_DIR, cur.announcementFile);
+  const list = Array.isArray(cur.announcements)
+    ? cur.announcements.map(normalizeAnnounceItem)
+    : loadAnnouncementsFromRaw(cur);
+  while (list.length < ANNOUNCE_SLOTS) list.push(emptyAnnounceItem());
+  const item = { ...list[si] };
+  if (item.file) {
+    const old = path.join(ANNOUNCE_DIR, item.file);
     try {
       if (fs.existsSync(old)) fs.unlinkSync(old);
     } catch {
       /* ignore */
     }
   }
-  cur.announcementFile = null;
-  cur.announcementOriginalName = null;
-  cur.announcementUpdatedAt = tz.nowIso();
+  item.file = null;
+  item.originalName = null;
+  item.updatedAt = new Date().toISOString();
+  list[si] = item;
+  cur.announcements = list;
+  Object.assign(cur, syncLegacyAnnounceFields(list));
   saveRaw(cur);
-  return getAnnouncementPublic();
+  return toAnnouncementPublic(item, si);
 }
 
-function getAnnouncementFilePath() {
+function getAnnouncementFilePath(slot = 0) {
+  const si = clampAnnounceSlot(slot);
   const s = loadRaw();
-  if (!s.announcementFile) return null;
-  const full = path.join(ANNOUNCE_DIR, s.announcementFile);
+  const list = Array.isArray(s.announcements)
+    ? s.announcements
+    : loadAnnouncementsFromRaw(s);
+  const item = normalizeAnnounceItem(list[si]);
+  if (!item.file) return null;
+  const full = path.join(ANNOUNCE_DIR, item.file);
   return fs.existsSync(full)
     ? {
         fullPath: full,
-        originalName: s.announcementOriginalName || s.announcementFile,
-        storedName: s.announcementFile,
+        originalName: item.originalName || item.file,
+        storedName: item.file,
+        slot: si,
       }
     : null;
 }
@@ -415,22 +511,16 @@ function logoPublicUrl(settings) {
   return DEFAULT_LOGO_URL;
 }
 
-/** 登入頁可用：公司名／Logo／版本，不含組織或簽章狀態 */
-function inferRuntimeEnv() {
-  const forced = String(process.env.APP_ENV || '').trim();
-  if (/^nas$/i.test(forced)) return 'NAS';
-  if (/^local|dev|development$/i.test(forced)) return '本機';
-  return '';
-}
-
-function getBrandingSettings() {
+function getPublicSettings() {
   const s = loadRaw();
   const ver = require('./version').getVersionInfo();
   return {
-    env: inferRuntimeEnv(),
     companyName: s.companyName,
     logoUrl: logoPublicUrl(s),
     hasCustomLogo: !!(s.logoFile && fs.existsSync(path.join(BRAND_DIR, s.logoFile))),
+    // 公開端只回「是否啟用簽章」，不回傳憑證／密碼
+    pdfSignEnabled: !!s.pdfSignEnabled,
+    // 版本宣告：主版號 + 自動建置指紋（改程式後重啟即變）
     version: ver.version,
     fullVersion: ver.fullVersion,
     versionLabel: ver.label,
@@ -440,14 +530,6 @@ function getBrandingSettings() {
     versionBuiltAt: ver.builtAt,
     versionAuto: !!ver.auto,
     updatedAt: s.updatedAt,
-  };
-}
-
-function getPublicSettings() {
-  const s = loadRaw();
-  return {
-    ...getBrandingSettings(),
-    pdfSignEnabled: !!s.pdfSignEnabled,
   };
 }
 
@@ -478,22 +560,8 @@ function getAdminSettings() {
       hasPass: backupHasPass,
       ready: !!s.backupEncryptEnabled && backupHasPass,
     },
-    backupDir: s.backupDir || '',
     announcement: getAnnouncementPublic(),
-    access: getAccessControl(s),
-  };
-}
-
-function getAccessControl(raw) {
-  const s = raw || loadRaw();
-  const configured = s.deviceBindEnabled !== false;
-  return {
-    intranetOnly: s.intranetOnly !== false,
-    loginCidrs: s.loginCidrs || DEFAULTS.loginCidrs,
-    deviceBindFeatureEnabled: DEVICE_BIND_FEATURE_ENABLED,
-    deviceBindPaused: !DEVICE_BIND_FEATURE_ENABLED,
-    deviceBindEnabled: DEVICE_BIND_FEATURE_ENABLED && configured,
-    deviceBindMax: Math.min(10, Math.max(1, Number(s.deviceBindMax) || 3)),
+    announcements: getAnnouncementsPublic(),
   };
 }
 
@@ -543,27 +611,6 @@ function updateSettings(patch = {}) {
     String(patch.backupEncryptPass) !== ''
   ) {
     cur.backupEncryptPass = String(patch.backupEncryptPass).slice(0, 200);
-  }
-  // 備份目錄：明確傳入才更新（含空字串表示恢復預設）
-  if (Object.prototype.hasOwnProperty.call(patch, 'backupDir')) {
-    const dir = String(patch.backupDir || '').trim();
-    // 安全性：禁止路徑包含 .. 向上穿越
-    if (dir && dir.includes('..')) {
-      throw new Error('備份目錄不可包含「..」路徑穿越');
-    }
-    cur.backupDir = dir.slice(0, 500);
-  }
-  if (patch.intranetOnly !== undefined) {
-    cur.intranetOnly = !!patch.intranetOnly;
-  }
-  if (patch.loginCidrs !== undefined) {
-    cur.loginCidrs = String(patch.loginCidrs || '').trim().slice(0, 500) || DEFAULTS.loginCidrs;
-  }
-  if (DEVICE_BIND_FEATURE_ENABLED && patch.deviceBindEnabled !== undefined) {
-    cur.deviceBindEnabled = !!patch.deviceBindEnabled;
-  }
-  if (DEVICE_BIND_FEATURE_ENABLED && patch.deviceBindMax !== undefined) {
-    cur.deviceBindMax = Math.min(10, Math.max(1, Number(patch.deviceBindMax) || 3));
   }
   return saveRaw(cur);
 }
@@ -827,8 +874,8 @@ function createSelfSignedPdfSignCert(body = {}) {
       organization,
       country,
       validYears,
-      notBefore: tz.nowIso(cert.validity.notBefore),
-      notAfter: tz.nowIso(cert.validity.notAfter),
+      notBefore: cert.validity.notBefore.toISOString(),
+      notAfter: cert.validity.notAfter.toISOString(),
       fileName: name,
       selfSigned: true,
     },
@@ -907,19 +954,7 @@ function getCompanyName() {
   return loadRaw().companyName || DEFAULT_COMPANY_NAME;
 }
 
-/** 取得備份根目錄絕對路徑（考慮自訂 backupDir 設定） */
-function getBackupDir() {
-  const s = loadRaw();
-  const dir = s.backupDir ? String(s.backupDir).trim() : '';
-  if (dir) {
-    // 自訂目錄：支援絕對路徑，或相對於 DATA_DIR 的路徑
-    return path.isAbsolute(dir) ? dir : path.join(DATA_DIR, dir);
-  }
-  return path.join(DATA_DIR, 'backups');
-}
-
 module.exports = {
-  getBrandingSettings,
   getPublicSettings,
   getAdminSettings,
   updateSettings,
@@ -929,18 +964,17 @@ module.exports = {
   getCompanyName,
   getPdfSignConfig,
   getAnnouncementPublic,
+  getAnnouncementsPublic,
   updateAnnouncement,
   saveAnnouncementFile,
   clearAnnouncementFile,
   getAnnouncementFilePath,
+  ANNOUNCE_SLOTS,
   getPdfSignCertPath,
   savePdfSignCert,
   clearPdfSignCert,
   createSelfSignedPdfSignCert,
   getBackupEncryptConfig,
-  getBackupDir,
-  getAccessControl,
-  DEVICE_BIND_FEATURE_ENABLED,
   DEFAULT_LOGO_URL,
   DEFAULT_COMPANY_NAME,
   BRAND_DIR,

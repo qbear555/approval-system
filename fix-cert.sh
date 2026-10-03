@@ -80,3 +80,8 @@ echo | openssl s_client -connect 127.0.0.1:3848 -servername $DOMAIN 2>/dev/null 
   | openssl x509 -noout -dates -serial
 echo
 echo "✅ 完成"
+
+# Also push the same LE cert to CATSNAS (192.168.99.250 :801 lighttpd)
+if [ -x /volume1/docker/approval-system/sync-le-to-catsnas.sh ]; then
+  sh /volume1/docker/approval-system/sync-le-to-catsnas.sh || echo "CATSNAS cert sync failed (non-fatal)"
+fi

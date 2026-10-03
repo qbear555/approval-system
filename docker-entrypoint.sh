@@ -10,7 +10,8 @@ SSL_CN="${SSL_CN:-approval-system}"
 # 逗號分隔的 SAN，例如：IP:192.168.99.220,DNS:nas.local,DNS:localhost,IP:127.0.0.1
 SSL_SAN="${SSL_SAN:-DNS:localhost,DNS:approval-system,IP:127.0.0.1,IP:192.168.99.220}"
 
-mkdir -p /app/data/uploads /app/data/backups /app/data/mail-outbox "$CERT_DIR"
+mkdir -p /app/data/uploads /app/data/backups /app/data/mail-outbox /app/data/tmp "$CERT_DIR"
+chmod 777 /app/data/tmp 2>/dev/null || true
 
 if [ "${HTTPS_ENABLED:-1}" != "0" ] && [ -n "$HTTPS_PORT" ] && [ "$HTTPS_PORT" != "0" ]; then
   if [ ! -f "$KEY_PATH" ] || [ ! -f "$CERT_PATH" ]; then

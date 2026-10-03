@@ -30,6 +30,11 @@ function mustExist(rel) {
 }
 
 const required = [
+  'server/db-adapter/index.js',
+  'server/db-adapter/dialect.js',
+  'server/db-adapter/schema.js',
+  'server/db-adapter/mysql.js',
+  'server/db-adapter/mysql-worker.js',
   'server/runtime.js',
   'server/runtime/devices.js',
   'server/runtime/perms.js',
@@ -124,26 +129,14 @@ child.stderr.on('data', (d) => process.stderr.write(d));
     }
     const home = await req('/');
     for (const name of [
-      'pages-users.js',
-      'pages-audit.js',
-      'pages-departments.js',
-      'pages-settings.js',
-      'pages-line.js',
-      'pages-system.js',
-      'pages-dashboard.js',
-      'pages-request-fields.js',
-      'pages-request-table.js',
-      'pages-request-view.js',
-      'pages-request-list.js',
-      'pages-request-new.js',
-      'pages-request-detail.js',
-      'pages-workflows.js',
-      'pages-backups.js',
+      'tw-calendar.js',
+      'rich-editor.js',
+      'ui-helpers.js',
+      'app.js',
+      'flow-editor.js',
     ]) {
       if (!home.raw.includes(name)) throw new Error('index.html 未載入 ' + name);
     }
-    if (home.raw.includes('pages-admin.js')) throw new Error('index.html 仍載入 pages-admin.js');
-    if (home.raw.includes('pages-requests.js')) throw new Error('index.html 仍載入 pages-requests.js');
     const csp = String(home.headers['content-security-policy'] || '');
     if (!csp.includes("default-src 'self'")) throw new Error('缺少 CSP');
     if (!/frame-src[^;]*blob:/.test(csp)) throw new Error('CSP frame-src 未放行 blob（PDF 預覽會被擋）');

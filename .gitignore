@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 .cache/
 dist/
 tmp-*/
@@ -9,6 +9,7 @@ data/mail-config.json
 data/mail-outbox/*.json
 !data/mail-outbox/.gitkeep
 data/uploads/*
+data/tmp/
 !data/uploads/.gitkeep
 data/backups/**
 !data/backups/.gitkeep
@@ -16,10 +17,16 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/*.pdf
+data/*.sql
+data/_*
+data/*.js
+data/*.sample.json
 data/test-*
 data/calendar/
 data/server*.log
 *.zip
+*.tar.gz
+*.bak
 fonts/*.ttf
 fonts/*.otf
 scripts/_tmp*

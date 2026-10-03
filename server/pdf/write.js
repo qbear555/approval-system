@@ -39,6 +39,36 @@ const FORM_DRAWERS = [
 ];
 
 function writeApprovalPdf(request, destStream) {
+  const pl = request.pdfLayout || {};
+  if (pl.type === 'pdf_template' && pl.templateFile) {
+    const templateRel = String(pl.templateFile).replace(/^[/\\]+/, '');
+    const templateAbs = path.join(__dirname, '..', '..', 'data', templateRel);
+    if (fs.existsSync(templateAbs)) {
+      const { renderPdfTemplate } = require('../pdf-template-engine');
+      const db = require('../db');
+      return renderPdfTemplate({
+        templateAbsPath: templateAbs,
+        fields: pl.fields || [],
+        formData: request.form_data || {},
+        actions: request.actions || [],
+        requester: {
+          id: request.requester_id,
+          name: request.requester_name,
+          username: request.requester_username,
+        },
+        request: {
+          id: request.id,
+          title: request.title,
+          created_at: request.created_at,
+          status: request.status,
+        },
+        db,
+      }).then((buf) => {
+        destStream.end(buf);
+      });
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const fontPath = getChineseFontPath();
     const margin = 40;
