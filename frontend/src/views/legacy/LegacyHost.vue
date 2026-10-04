@@ -22,10 +22,10 @@
           <img class="brand-logo brand-logo-side" :src="LOGO" alt="ARGO" width="1048" height="289" decoding="async" />
           <div class="sidebar-brand-text">
             <strong>線上簽核</strong>
-            <span class="muted company-name-sm">線上簽核系統</span>
+            <span class="muted company-name-sm">{{ companyName }}</span>
           </div>
         </div>
-        <nav class="nav">
+        <nav class="nav" @click="handleNavClick">
           <button type="button" class="nav-item" data-page="dashboard">總覽</button>
           <button type="button" class="nav-item" data-page="inbox">待我簽核 <span id="badge-pending" class="badge hidden">0</span></button>
           <button type="button" class="nav-item" data-page="mine">我的申請</button>
@@ -42,14 +42,14 @@
           <button type="button" class="nav-item hidden" data-page="system-settings">系統設定</button>
         </nav>
         <div class="sidebar-user">
-          <div class="avatar" id="user-avatar">U</div>
+          <div class="avatar" id="user-avatar">{{ userInitial }}</div>
           <div class="user-meta">
-            <div id="user-name">—</div>
-            <div class="muted" id="user-role">—</div>
+            <div id="user-name">{{ userName }}</div>
+            <div class="muted" id="user-role">{{ userRole }}</div>
           </div>
-          <button type="button" id="btn-logout" class="btn ghost sm" title="登出">登出</button>
+          <button type="button" id="btn-logout" class="btn ghost sm" title="登出" @click="handleLogout">登出</button>
         </div>
-        <div class="sidebar-version app-version" id="sidebar-version" title="系統版本">v—</div>
+        <div class="sidebar-version app-version" id="sidebar-version" :title="appVersion">{{ appVersion }}</div>
       </aside>
 
       <main class="content">
@@ -71,11 +71,13 @@
 </template>
 
 <script setup>
-import { onMounted, watch } from 'vue';
+import { computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { registerNativePages } from '@/native';
+import { useAuthStore } from '@/stores/auth';
+import { useSystemStore } from '@/stores/system';
 
-const V = '20261004_phrases';
+const V = '20261004_v2fix';
 const LOGO = '/img/argo-logo.png';
 const VUE_PAGES = new Set(['dashboard', 'inbox', 'mine', 'records']);
 
@@ -107,6 +109,39 @@ const SCRIPTS = [
 
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
+const systemStore = useSystemStore();
+
+const companyName = computed(() => systemStore.companyName || '線上簽核系統');
+const appVersion = computed(() => systemStore.version || '線上簽核');
+const userName = computed(() => authStore.userName || '—');
+const userInitial = computed(() => {
+  const n = authStore.userName;
+  return n ? n.charAt(0).toUpperCase() : 'U';
+});
+const userRole = computed(() => {
+  if (authStore.isAdmin) return '系統管理員';
+  return authStore.user?.department || '一般使用者';
+});
+
+function handleLogout() {
+  if (typeof window.logout === 'function') {
+    window.logout();
+  } else {
+    authStore.logout();
+    router.push('/login');
+  }
+}
+
+function handleNavClick(e) {
+  const btn = e.target.closest('.nav-item');
+  if (!btn || !btn.dataset.page) return;
+  e.preventDefault();
+  const page = btn.dataset.page;
+  if (typeof window.navigate === 'function') {
+    window.navigate(page);
+  }
+}
 
 function pathSegments() {
   const raw = route.params.pathMatch;
@@ -116,14 +151,13 @@ function pathSegments() {
 }
 
 function legacyTarget() {
-  if (route.meta?.legacyPage === 'detail' || route.name === 'Detail') {
-    return { page: 'detail', params: { id: Number(route.params.id) } };
-  }
-  if (route.meta?.legacyPage === 'new-request' || route.name === 'NewRequest') {
+  if (route.meta?.legacyPage) {
+    const page = route.meta.legacyPage;
     const params = { ...route.query };
+    if (page === 'detail' && route.params.id) params.id = Number(route.params.id);
     if (route.query.workflowId) params.workflowId = Number(route.query.workflowId);
     if (route.query.cloneFrom) params.cloneFrom = Number(route.query.cloneFrom);
-    return { page: 'new-request', params };
+    return { page, params };
   }
   const segs = pathSegments();
   const page = segs[0] || 'dashboard';
@@ -162,24 +196,31 @@ function vuePathFor(page, params = {}) {
 }
 
 function patchNavigate() {
-  const orig = window.navigate;
+  if (window.__navigatePatched) return;
+  const orig = window.__origNavigate || window.navigate;
+  window.__origNavigate = orig;
+  window.__navigatePatched = true;
+
   window.navigate = (page, params = {}, navOpts = {}) => {
+    // 1. Vue 3 獨立頁面直接切換路由
     if (VUE_PAGES.has(page)) {
       router.push(vuePathFor(page, params));
       return;
     }
-    if (page === 'detail' && params.id) {
-      const next = `/detail/${params.id}`;
-      if (route.path !== next) router.push(next);
-      else if (typeof orig === 'function') orig(page, params, navOpts);
-      return;
+
+    // 2. LegacyHost 承載頁面
+    const nextPath = vuePathFor(page, params);
+    const targetUrl = typeof nextPath === 'string' ? nextPath : nextPath.path;
+    const currentUrl = route.path;
+
+    // 若已經在目標路徑上，或是由 showLegacyPage() 內部呼叫（skipHashSync / fromHost），直接執行原生的 render 函式
+    if (navOpts.skipHashSync || navOpts.fromHost || currentUrl === targetUrl) {
+      if (typeof orig === 'function') {
+        return orig(page, params, navOpts);
+      }
+    } else {
+      router.push(nextPath);
     }
-    if (page === 'new-request') {
-      const next = vuePathFor(page, params);
-      router.push(next);
-      return;
-    }
-    if (typeof orig === 'function') return orig(page, params, navOpts);
   };
 }
 
@@ -199,10 +240,15 @@ async function showLegacyPage() {
   const target = legacyTarget();
   const hash = desiredHash(target);
   if (`#${String(location.hash || '').replace(/^#/, '')}` !== hash) {
-    location.hash = hash;
+    try {
+      history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
+    } catch {
+      location.hash = hash;
+    }
   }
-  if (typeof window.navigate === 'function') {
-    window.navigate(target.page, target.params, { skipHashSync: true });
+  const renderFn = window.__origNavigate || window.navigate;
+  if (typeof renderFn === 'function') {
+    renderFn(target.page, target.params, { skipHashSync: true, fromHost: true });
   }
 }
 
@@ -210,12 +256,17 @@ onMounted(async () => {
   const target = legacyTarget();
   const hash = desiredHash(target);
   if (`#${String(location.hash || '').replace(/^#/, '')}` !== hash) {
-    location.hash = hash;
+    try {
+      history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
+    } catch {
+      location.hash = hash;
+    }
   }
 
   if (window.__legacyLoaded) {
     patchNavigate();
     window.boot?.();
+    if (typeof window.applyRoleUi === 'function') window.applyRoleUi();
     showLegacyPage();
     return;
   }
@@ -227,11 +278,18 @@ onMounted(async () => {
     window.__legacyLoaded = true;
     patchNavigate();
     window.boot?.();
+    if (typeof window.applyRoleUi === 'function') window.applyRoleUi();
     showLegacyPage();
   } catch (e) {
     console.error('[legacy-host]', e);
     const body = document.getElementById('page-body');
     if (body) body.innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+});
+
+onBeforeUnmount(() => {
+  if (typeof window.__unmountNativePage === 'function') {
+    window.__unmountNativePage();
   }
 });
 

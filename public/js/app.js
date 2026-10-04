@@ -1092,19 +1092,28 @@ function applyRouteFromHash(opts = {}) {
 }
 
 function showMain(opts = {}) {
-  $('#auth-view').classList.add('hidden');
-  $('#main-view').classList.remove('hidden');
+  const av = $('#auth-view');
+  if (av) av.classList.add('hidden');
+  const mv = $('#main-view');
+  if (mv) mv.classList.remove('hidden');
   const u = state.user;
-  $('#user-name').textContent = u.name;
-  $('#user-role').textContent = u.role === 'admin' ? '系統管理員' : (u.department || '一般使用者');
-  $('#user-avatar').textContent = (u.name || 'U').slice(0, 1);
+  if (u) {
+    const un = $('#user-name');
+    if (un) un.textContent = u.name;
+    const ur = $('#user-role');
+    if (ur) ur.textContent = u.role === 'admin' ? '系統管理員' : (u.department || '一般使用者');
+    const ua = $('#user-avatar');
+    if (ua) ua.textContent = (u.name || 'U').slice(0, 1);
+  }
   applyRoleUi();
   loadSystemSettings().catch(() => {});
   // 優先網址 hash（Email／重新整理）；其次 session 記住的頁面；否則總覽
-  if (!applyRouteFromHash({ allowSession: true })) {
-    state.page = 'dashboard';
-    state.pageParams = {};
-    navigate('dashboard');
+  if (!window.__legacyManualBoot) {
+    if (!applyRouteFromHash({ allowSession: true })) {
+      state.page = 'dashboard';
+      state.pageParams = {};
+      navigate('dashboard');
+    }
   }
   // 登入期間輪詢待簽核，有新件即桌面通知
   startPendingWatcher({ requestPermission: !!opts.requestPermission });
@@ -1497,60 +1506,86 @@ async function loadDepartmentOptions() {
 }
 
 function bindAuthUI() {
-  $('#login-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    try {
-      const data = await api('/api/auth/login', {
-        method: 'POST',
-        body: { username: fd.get('username'), password: fd.get('password') },
-      });
-      setAuth(data.token, data.user);
-      // 登入手勢下請求桌面通知權限
-      showMain({ requestPermission: true });
-      toast(`歡迎，${data.user.name}`, 'success');
-    } catch (err) {
-      const el = $('#auth-error');
-      el.textContent = err.message;
-      el.classList.remove('hidden');
-    }
-  };
+  const loginForm = $('#login-form');
+  if (loginForm) {
+    loginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try {
+        const data = await api('/api/auth/login', {
+          method: 'POST',
+          body: { username: fd.get('username'), password: fd.get('password') },
+        });
+        setAuth(data.token, data.user);
+        // 登入手勢下請求桌面通知權限
+        showMain({ requestPermission: true });
+        toast(`歡迎，${data.user.name}`, 'success');
+      } catch (err) {
+        const el = $('#auth-error');
+        if (el) {
+          el.textContent = err.message;
+          el.classList.remove('hidden');
+        }
+      }
+    };
+  }
 
   $$('.nav-item').forEach((el) => {
     el.onclick = () => navigate(el.dataset.page);
   });
-  $('#btn-logout').onclick = () => logout();
-  document.addEventListener('click', (e) => {
-    if (e.target.matches('[data-close-modal]')) closeModal();
-  });
+  const logoutBtn = $('#btn-logout');
+  if (logoutBtn) {
+    logoutBtn.onclick = () => logout();
+  }
+
+  // 全域委派點擊：確保動態渲染或 Vue 宿主內的 .nav-item 永遠可以點擊導向
+  if (!window.__navDelegationBound) {
+    window.__navDelegationBound = true;
+    document.addEventListener('click', (e) => {
+      if (e.target.matches('[data-close-modal]')) closeModal();
+      const navBtn = e.target.closest('.nav-item');
+      if (navBtn && navBtn.dataset && navBtn.dataset.page) {
+        if (navBtn.tagName === 'BUTTON' || !navBtn.getAttribute('href')) {
+          e.preventDefault();
+          navigate(navBtn.dataset.page);
+        }
+      }
+    });
+  }
+
   // Email／書籤／重新整理：已登入時 hash 變更導向對應頁
-  window.addEventListener('hashchange', () => {
-    if (!state.token) return;
-    const route = parseRouteFromHash();
-    if (!route) {
-      // 空 hash 視為總覽
-      if (state.page !== 'dashboard') navigate('dashboard');
-      return;
-    }
-    if (
-      route.page === state.page &&
-      String(route.params?.id || '') === String(state.pageParams?.id || '') &&
-      String(route.params?.status || '') === String(state.pageParams?.status || '')
-    ) {
-      return;
-    }
-    navigate(route.page, route.params || {});
-  });
+  if (!window.__hashChangeBound) {
+    window.__hashChangeBound = true;
+    window.addEventListener('hashchange', () => {
+      if (!state.token) return;
+      const route = parseRouteFromHash();
+      if (!route) {
+        // 空 hash 視為總覽
+        if (state.page !== 'dashboard') navigate('dashboard');
+        return;
+      }
+      if (
+        route.page === state.page &&
+        String(route.params?.id || '') === String(state.pageParams?.id || '') &&
+        String(route.params?.status || '') === String(state.pageParams?.status || '')
+      ) {
+        return;
+      }
+      navigate(route.page, route.params || {});
+    });
+  }
 }
 
 async function boot() {
   initUserTheme();
   updateAppWatermark();
-  // 立刻顯示登入畫面，避免空白頁
-  try {
-    showAuth();
-  } catch (e) {
-    console.error('showAuth', e);
+  // 僅在無 token 且非 Vue 宿主時才主動切至 auth-view，避免覆蓋畫面或產生空白
+  if (!state.token && !window.__legacyManualBoot) {
+    try {
+      showAuth();
+    } catch (e) {
+      console.error('showAuth', e);
+    }
   }
   try {
     bindAuthUI();
@@ -1571,7 +1606,9 @@ async function boot() {
   } catch (e) {
     console.warn('auto login failed', e);
     setAuth('', null);
-    showAuth();
+    if (!window.__legacyManualBoot) {
+      showAuth();
+    }
   }
 }
 

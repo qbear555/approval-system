@@ -19,7 +19,7 @@
       <router-link to="/new-request" class="nav-item" active-class="active">新增申請</router-link>
 
       <router-link v-if="authStore.hasPerm('workflows')" to="/workflows" class="nav-item" active-class="active">簽核流程</router-link>
-      <router-link v-if="authStore.hasPerm('backups')" to="/backups" class="nav-item" active-class="active">備份資料</router-link>
+      <router-link v-if="authStore.hasPerm('backups') || authStore.hasPerm('leave_report') || authStore.hasPerm('leave_delete')" to="/backups" class="nav-item" active-class="active">備份資料</router-link>
       <router-link v-if="authStore.hasPerm('leave_report')" to="/leave-report" class="nav-item" active-class="active">請假報表</router-link>
       <router-link v-if="authStore.isBuiltinAdmin" to="/audit-logs" class="nav-item" active-class="active">稽核日誌</router-link>
       <router-link v-if="authStore.hasPerm('users_leave')" to="/users" class="nav-item" active-class="active">成員名單</router-link>
