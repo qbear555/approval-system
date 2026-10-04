@@ -64,6 +64,17 @@ function buildRequestDetailActionsHtml(detailData) {
       <button type="button" class="btn success" id="btn-submit-draft">送出申請</button>
     `);
   }
+  const isOwnReturned =
+    request.status === 'returned' &&
+    (Number(request.requester_id) === Number(state.user?.id) ||
+      Number(request.submitted_by) === Number(state.user?.id) ||
+      isAdmin());
+  if (isOwnReturned) {
+    actionsHtml.push(`
+      <button type="button" class="btn warning" id="btn-edit-returned" style="font-weight:600">✏️ 修改並重新送審</button>
+      <button type="button" class="btn danger outline" id="btn-cancel-returned">取消申請</button>
+    `);
+  }
   if (canApprove) {
     const proxyHint = actingAsProxy?.principal?.name
       ? `（代理 ${actingAsProxy.principal.name}）`
@@ -74,11 +85,11 @@ function buildRequestDetailActionsHtml(detailData) {
       <button type="button" class="btn outline" id="btn-cosign" title="臨時邀請其他同仁加簽">➕ 加簽</button>
       <button type="button" class="btn outline" id="btn-forward" title="將目前簽核關卡轉交給其他人">↗️ 轉簽</button>
     `);
-    if (canReturn && previousStep) {
+    if (canReturn) {
       actionsHtml.push(`
       <button type="button" class="btn warning" id="btn-return"
-        title="退回「${esc(previousStep.name || '上一關')}」重新簽核">
-        ↩ 退回上一位
+        title="退回給申請人修改或退回至指定關卡">
+        ↩ 退回…
       </button>
     `);
     }
@@ -142,7 +153,7 @@ function renderActivityTimelineHtml(request) {
     submit: { label: '發起申請', cls: 'submit', icon: '📝' },
     approve: { label: '核准通過', cls: 'approve', icon: '✅' },
     reject: { label: '駁回退件', cls: 'reject', icon: '❌' },
-    return: { label: '退回上一位', cls: 'return', icon: '↩️' },
+    return: { label: '退回', cls: 'return', icon: '↩️' },
     cosign: { label: '加簽', cls: 'cosign', icon: '➕' },
     forward: { label: '轉簽', cls: 'forward', icon: '↗️' },
     void: { label: '申請作廢', cls: 'reject', icon: '🚫' },
@@ -219,6 +230,20 @@ function renderActivityTimelineHtml(request) {
         </div>
         <div class="tl-comment-box" style="border-left-color:#3b82f6;color:#64748b">
           此步驟正在等候指定主管／審核人簽署，完成後將自動推進至下一步。
+        </div>
+      </div>
+    `;
+  } else if (request.status === 'returned') {
+    pendingNodeHtml = `
+      <div class="tl-item is-return">
+        <div class="tl-dot" style="background:#f59e0b;border-color:#d97706;animation:tlPulse 2s infinite"></div>
+        <div class="tl-header">
+          <span class="tl-actor" style="color:#b45309">⚠️ 待修改重新送審</span>
+          <span class="tl-action-badge return">退回修改中</span>
+          <span style="font-size:0.84rem;color:#b45309;font-weight:600">【申請人處理】</span>
+        </div>
+        <div class="tl-comment-box" style="border-left-color:#f59e0b;background:#fffbeb;color:#92400e">
+          單據已被主管退回，目前等候申請人補齊資料或修正後重新送審。
         </div>
       </div>
     `;
@@ -602,8 +627,77 @@ function buildRequestDetailMainHtml(detailData) {
       : '') ||
     (request.submitted_by ? `#${request.submitted_by}` : '');
 
+  const lastReturnAction = (request.actions || []).slice().reverse().find((a) => a.action === 'return');
+  const returnedBanner =
+    request.status === 'returned'
+      ? `<div class="card" style="background:#fffbeb;border:1.5px solid #fde68a;border-left:5px solid #d97706;margin-bottom:14px;padding:14px 16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:1.2rem">⚠️</span>
+                <strong style="color:#b45309;font-size:1.02rem">本申請單已被退回修改</strong>
+              </div>
+              <div style="margin-top:6px;color:#92400e;font-size:0.92rem;line-height:1.5">
+                ${
+                  lastReturnAction
+                    ? `退回審核人：<strong>${esc(lastReturnAction.actor_name || '審核主管')}</strong><br/>
+                       退回意見：<span style="font-weight:600;color:#78350f">「${esc(htmlToPlainText(lastReturnAction.comment) || '請修正單據資料後再重新送出')}」</span>`
+                    : '請修正申請單資料後重新送出審核。'
+                }
+              </div>
+            </div>
+            ${
+              isOwnReturned
+                ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
+                     <button type="button" class="btn warning" id="btn-edit-returned" style="font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,0.1)">✏️ 修改並重新送審</button>
+                     <button type="button" class="btn danger outline" id="btn-cancel-returned">取消申請</button>
+                   </div>`
+                : ''
+            }
+          </div>
+        </div>`
+      : '';
+
+  let leaveSummaryHtml = '';
+  const fd = request.form_data || {};
+  if (
+    fd.start_date &&
+    fd.end_date &&
+    (String(request.workflow_name || '').includes('請假') || fd.leave_type) &&
+    typeof TwCalendar !== 'undefined' &&
+    TwCalendar.calcLeaveDays
+  ) {
+    const res = TwCalendar.calcLeaveDays(String(fd.start_date), String(fd.end_date));
+    const skipWeekendCount = (res?.skippedWeekends || []).length;
+    const skipHolidayCount = (res?.skippedHolidays || []).length;
+    const isSpecial = fd.leave_type && /特休|特別休假/.test(String(fd.leave_type));
+
+    let tagsHtml = `
+      <span class="leave-breakdown-tag lunch">☕ 自動扣除午休 12:30~13:30</span>
+      <span class="leave-breakdown-tag">⏱️ 實際請假 ${res.hours} 小時</span>
+    `;
+    if (skipWeekendCount > 0) {
+      tagsHtml += `<span class="leave-breakdown-tag holiday">🏖️ 排除例假日 ${skipWeekendCount} 天</span>`;
+    }
+    if (skipHolidayCount > 0) {
+      tagsHtml += `<span class="leave-breakdown-tag holiday">🎌 排除國定假日 ${skipHolidayCount} 天</span>`;
+    }
+
+    leaveSummaryHtml = `
+      <div class="leave-breakdown-card" style="margin-bottom:14px">
+        <div class="leave-breakdown-title">
+          <span>🗓️ 請假時數智慧核算：<strong>${res.days} 天</strong>${!isSpecial ? `（共 <strong>${res.hours} 小時</strong>）` : ''}</span>
+          <span class="muted" style="font-size:0.8rem;font-weight:normal;margin-left:auto">出勤折合：${res.workdays} 工作日</span>
+        </div>
+        <div class="leave-breakdown-tags">${tagsHtml}</div>
+      </div>
+    `;
+  }
+
   return `
       ${proxyApproveBanner}
+      ${returnedBanner}
+      ${leaveSummaryHtml}
       ${voidBanner}
       ${coApproverBanner}
       ${finalNotifyBanner}
@@ -822,21 +916,18 @@ function buildRequestDetailMainHtml(detailData) {
                 <button type="button" class="btn outline" id="btn-cosign-card" title="臨時邀請其他同仁加簽">➕ 加簽</button>
                 <button type="button" class="btn outline" id="btn-forward-card" title="將目前簽核關卡轉交給其他人">↗️ 轉簽</button>
                 ${
-                  canReturn && previousStep
+                  canReturn
                     ? `<button type="button" class="btn warning" id="btn-return-card"
-                        title="退回「${esc(previousStep.name || '上一關')}」">
-                        ↩ 退回上一位（${esc(previousStep.name || '上一關')}）
+                        title="退回給申請人修改或退回至指定關卡">
+                        ↩ 退回…
                       </button>`
-                    : canApprove
-                      ? `<span class="muted" style="font-size:0.85rem">此為第一關，無法退回上一位（需退件請用「駁回」）</span>`
-                      : ''
+                    : ''
                 }
               </div>
               ${
-                canReturn && previousStep
+                canReturn
                   ? `<p class="muted" style="font-size:0.85rem;margin:10px 0 0;line-height:1.45">
-                      「退回上一位」會將單據退至 <strong>${esc(previousStep.name || '上一關')}</strong>，
-                      該關簽署人需<strong>重新簽核</strong>；歷程會留下退回紀錄。
+                      點擊「退回」可選擇退回給<strong>申請人修改補件</strong>，或退回給先前的<strong>特定簽核關卡</strong>重新審查。
                     </p>`
                   : ''
               }
@@ -1160,7 +1251,14 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
   };
   bindActionBtn('#btn-approve, #btn-approve-card', 'approve');
   bindActionBtn('#btn-reject, #btn-reject-card', 'reject');
-  bindActionBtn('#btn-return, #btn-return-card', 'return');
+  document.querySelectorAll('#btn-return, #btn-return-card').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openReturnModal(request, detailData, () => {
+        if (typeof onRefresh === 'function') onRefresh();
+        else navigate('detail', { id });
+      });
+    });
+  });
   const goDetail = () => navigate('detail', { id });
   document.querySelectorAll('#btn-cosign, #btn-cosign-card').forEach((btn) => {
     btn.addEventListener('click', () => openCosignModal(request, goDetail));
@@ -1236,6 +1334,12 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
   });
   $('#btn-edit-draft')?.addEventListener('click', () => {
     navigate('new-request', { draftId: request.id });
+  });
+  $('#btn-edit-returned')?.addEventListener('click', () => {
+    navigate('new-request', { draftId: request.id });
+  });
+  $('#btn-cancel-returned')?.addEventListener('click', () => {
+    if (confirm('確定取消此退回單據？取消後將結案。')) doAction('cancel');
   });
   $('#btn-submit-draft')?.addEventListener('click', async () => {
     if (
@@ -1641,6 +1745,117 @@ function openForwardModal(request, onDone) {
   };
 }
 
+function openReturnModal(request, detailData, onDone) {
+  const steps = detailData?.request?.steps || request?.steps || [];
+  const curStep =
+    detailData?.currentStep ||
+    steps.find((s) => Number(s.order) === Number(request.current_step));
+  const curOrder = curStep ? Number(curStep.order) : 1;
+  const requesterName =
+    detailData?.request?.requester_name ||
+    request?.requester_name ||
+    '原申請人';
+
+  // 取出先前已完成的步驟
+  const priorSteps = steps.filter((s) => Number(s.order) < curOrder);
+
+  let targetsHtml = `
+    <label class="return-target-option">
+      <input type="radio" name="return_target" value="applicant" checked />
+      <div class="return-target-info">
+        <div class="return-target-title">👤 退回給申請人（${esc(requesterName)}）修改</div>
+        <div class="return-target-desc">單據將進入「退回修改」狀態，由申請人修正補件後再送出審核。</div>
+      </div>
+    </label>
+  `;
+
+  if (priorSteps.length) {
+    const reversed = [...priorSteps].reverse();
+    reversed.forEach((s, idx) => {
+      const isPrev = idx === 0;
+      const sName = describeStepForList(s) || s.name || `步驟 ${s.order}`;
+      targetsHtml += `
+        <label class="return-target-option">
+          <input type="radio" name="return_target" value="${s.order}" />
+          <div class="return-target-info">
+            <div class="return-target-title">
+              📋 退回至步驟 ${s.order}：${esc(sName)}
+              ${isPrev ? '<span class="tag sm" style="margin-left:6px;background:#e0f2fe;color:#0369a1">上一關</span>' : ''}
+            </div>
+            <div class="return-target-desc">單據將退回該關卡簽核人，重新進行審核。</div>
+          </div>
+        </label>
+      `;
+    });
+  }
+
+  openModal(`
+    <div class="return-modal">
+      <h3>↩ 退回簽核單 #${request.id}</h3>
+      <p class="muted" style="margin-top:0">
+        請選擇退回的目標關卡，並填寫退回原因，以利後續人員理解與修正。
+      </p>
+      
+      <form id="return-form" class="form-grid">
+        <div class="field">
+          <label style="font-weight:600;margin-bottom:8px">1. 選擇退回目標 *</label>
+          <div class="return-targets-list">
+            ${targetsHtml}
+          </div>
+        </div>
+
+        <div class="field" style="margin-top:12px">
+          <label style="font-weight:600">2. 退回意見／修正說明 *</label>
+          ${typeof commentPhraseButtonsHtml === 'function' ? commentPhraseButtonsHtml('return-modal-comment') : ''}
+          <textarea id="return-modal-comment" name="comment" rows="3" required placeholder="請詳細敘述退回原因或需補充之資料（例如：請補齊採購廠商報價單、請修正金額…）"></textarea>
+        </div>
+
+        <div class="form-actions" style="margin-top:18px">
+          <button type="submit" class="btn warning">確認退回</button>
+          <button type="button" class="btn outline" data-close-modal>取消</button>
+        </div>
+      </form>
+    </div>
+  `);
+
+  const modalEl = document.querySelector('.return-modal');
+  if (modalEl && typeof bindCommentPhraseChips === 'function') {
+    bindCommentPhraseChips(modalEl);
+  }
+
+  $('#return-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const target = form.querySelector('input[name="return_target"]:checked')?.value || 'applicant';
+    const comment = form.querySelector('#return-modal-comment')?.value?.trim();
+    if (!comment) {
+      toast('請填寫退回原因', 'error');
+      return;
+    }
+
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+
+    try {
+      const res = await api(`/api/requests/${request.id}/action`, {
+        method: 'POST',
+        body: {
+          action: 'return',
+          target_step: target,
+          comment,
+        },
+      });
+      closeModal();
+      toast(res.message || '已成功退回', 'success');
+      if (typeof onDone === 'function') onDone(res);
+      else navigate('detail', { id: request.id });
+    } catch (err) {
+      toast(err.message || '退回失敗', 'error');
+      if (btn) btn.disabled = false;
+    }
+  };
+}
+
 if (typeof window !== 'undefined') {
   window.fetchRequestDetailData = fetchRequestDetailData;
   window.buildRequestDetailActionsHtml = buildRequestDetailActionsHtml;
@@ -1648,6 +1863,7 @@ if (typeof window !== 'undefined') {
   window.bindRequestDetailEvents = bindRequestDetailEvents;
   window.openCosignModal = openCosignModal;
   window.openForwardModal = openForwardModal;
+  window.openReturnModal = openReturnModal;
 }
 
 function userLabelById(id) {

@@ -861,6 +861,7 @@ function initNewRequestInteractions(body, workflows) {
       bindUsersPickChooser(formFieldsBox);
       bindAttendeePickChooser(formFieldsBox);
       bindHandlingFeeMode(formFieldsBox);
+      if (typeof bindAmountCalculators === 'function') bindAmountCalculators(formFieldsBox);
       bindWelfareLedger(formFieldsBox);
       bindFollowupTable(formFieldsBox);
       layoutWelfarePeriodRow(formFieldsBox);
@@ -1049,12 +1050,37 @@ function initNewRequestInteractions(body, workflows) {
           }
         }
         if (leaveHint) {
-          leaveHint.textContent =
-            aligned.rule?.id === 'special'
-              ? `試算：${aligned.days} 日（特休以日計算，不換算小時）`
-              : aligned.rule?.noConvert || aligned.rule?.id === 'personal'
-                ? `試算：${aligned.days} 日、${aligned.hours} 小時（事假不自動換算，可再自行修改）`
-                : `試算：${aligned.days} 日、${aligned.hours} 小時（${leaveUnitHintText(leaveType)}）`;
+          const isSpecial = aligned.rule?.id === 'special';
+          const ruleText = isSpecial
+            ? '特休假以「日」為單位'
+            : aligned.rule?.noConvert || aligned.rule?.id === 'personal'
+              ? '事假不強制換算'
+              : leaveUnitHintText(leaveType);
+
+          const result = typeof TwCalendar !== 'undefined' && TwCalendar.calcLeaveDays ? TwCalendar.calcLeaveDays(a, b) : null;
+          const skipWeekendCount = (result?.skippedWeekends || []).length;
+          const skipHolidayCount = (result?.skippedHolidays || []).length;
+
+          let tagsHtml = `
+            <span class="leave-breakdown-tag lunch">☕ 自動扣除午休 12:30~13:30</span>
+            <span class="leave-breakdown-tag">⏱️ 實際請假 ${aligned.hours} 小時</span>
+          `;
+          if (skipWeekendCount > 0) {
+            tagsHtml += `<span class="leave-breakdown-tag holiday">🏖️ 排除例假日 ${skipWeekendCount} 天</span>`;
+          }
+          if (skipHolidayCount > 0) {
+            tagsHtml += `<span class="leave-breakdown-tag holiday">🎌 排除國定假日 ${skipHolidayCount} 天</span>`;
+          }
+
+          leaveHint.innerHTML = `
+            <div class="leave-breakdown-card">
+              <div class="leave-breakdown-title">
+                <span>🗓️ 請假試算：<strong>${aligned.days} 天</strong>${!isSpecial ? `（共 <strong>${aligned.hours} 小時</strong>）` : ''}</span>
+                <span class="muted" style="font-size:0.8rem;font-weight:normal;margin-left:auto">【${esc(ruleText)}】</span>
+              </div>
+              <div class="leave-breakdown-tags">${tagsHtml}</div>
+            </div>
+          `;
         }
         syncLeaveFieldSteps();
       };
@@ -1284,8 +1310,8 @@ function initNewRequestInteractions(body, workflows) {
       try {
         const data = await api(`/api/requests/${editingDraftId}`);
         const req = data.request || data;
-        if (!req || req.status !== 'draft') {
-          toast('此單據不是草稿，無法在此編輯', 'error');
+        if (!req || (req.status !== 'draft' && req.status !== 'returned')) {
+          toast('此單據非草稿或退回狀態，無法在此編輯', 'error');
           editingDraftId = 0;
           setDraftHint('');
           return;
@@ -1442,6 +1468,7 @@ function initNewRequestInteractions(body, workflows) {
           });
           // 手續費內扣／外加勾選同步
           bindHandlingFeeMode(formEl);
+          if (typeof bindAmountCalculators === 'function') bindAmountCalculators(formEl);
           formEl.querySelectorAll('[data-welfare-table]').forEach((wrap) => {
             hydrateWelfareLedger(wrap);
           });
@@ -1465,15 +1492,22 @@ function initNewRequestInteractions(body, workflows) {
           // 顯示已上傳附件（file input 無法回填既有檔，改以列表呈現）
           draftAttachments = Array.isArray(req.attachments) ? req.attachments : [];
           renderDraftAttachmentsUi();
+          const isRet = req.status === 'returned';
           setDraftHint(
-            `編輯草稿 #${editingDraftId}${
-              draftAttachments.length ? ` · 附件 ${draftAttachments.length} 個` : ''
-            }`
+            isRet
+              ? `⚠️ 編輯退回修改單據 #${editingDraftId}（修改後送出重新簽核）${
+                  draftAttachments.length ? ` · 附件 ${draftAttachments.length} 個` : ''
+                }`
+              : `編輯草稿 #${editingDraftId}${
+                  draftAttachments.length ? ` · 附件 ${draftAttachments.length} 個` : ''
+                }`
           );
           toast(
-            draftAttachments.length
-              ? `已載入草稿（含 ${draftAttachments.length} 個附件）`
-              : '已載入草稿，可繼續填寫後送出或再存草稿',
+            isRet
+              ? '已載入退回修改單據，請修改後送出重新簽核'
+              : draftAttachments.length
+                ? `已載入草稿（含 ${draftAttachments.length} 個附件）`
+                : '已載入草稿，可繼續填寫後送出或再存草稿',
             'success'
           );
           showFormView(req.workflow_id);

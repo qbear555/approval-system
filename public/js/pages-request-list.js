@@ -436,6 +436,7 @@ async function renderRequestList(body, filter) {
   const statusOpts = [
     { v: '', t: '全部狀態' },
     { v: 'pending', t: '簽核中' },
+    { v: 'returned', t: '退回修改' },
     { v: 'approved', t: '已核准' },
     { v: 'rejected', t: '已駁回' },
     { v: 'cancelled', t: '已取消' },

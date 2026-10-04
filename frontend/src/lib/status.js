@@ -1,6 +1,7 @@
 export const REQUEST_STATUS = {
   draft: { label: '草稿', cls: 'draft' },
   pending: { label: '簽核中', cls: 'pending' },
+  returned: { label: '退回修改', cls: 'returned' },
   approved: { label: '已核准', cls: 'approved' },
   rejected: { label: '已駁回', cls: 'rejected' },
   cancelled: { label: '已取消', cls: 'cancelled' },

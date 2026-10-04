@@ -5922,9 +5922,9 @@ app.get('/api/requests/:id', authMiddleware, (req, res) => {
     }
   }
   const previousStep = getPreviousStep(steps, current);
-  // 目前簽署人可退回上一位（須有上一步；第一關不可退）
+  // 目前簽核人可退回（第一關可退回申請人修改，後續關卡可退回申請人或前置關卡）
   const canReturn =
-    canApprove && !!previousStep && detail.status === 'pending';
+    canApprove && detail.status === 'pending';
   const canAttach = canUserAttachOnStep(req.user.id, detail);
   const isFinalStep = current ? isFinalApprovalStep(detail.steps || [], current) : false;
   const approverSigned = hasApproverSigned(detail.id, detail);
@@ -6143,10 +6143,30 @@ app.get('/api/requests/:id', authMiddleware, (req, res) => {
     }
   }
 
+  const priorSteps = (steps || [])
+    .filter((s) => Number(s.order) < Number(current?.order))
+    .map((s) => ({
+      id: s.order,
+      order: s.order,
+      name: s.name || `步驟 ${s.order}`,
+      label: `步驟 ${s.order}：${s.name || `第 ${s.order} 關`}`,
+      type: 'step',
+    }));
+
+  const returnTargets = [
+    {
+      id: 'applicant',
+      label: `申請人（${detail.requester_name || '原申請人'}）- 退回修改`,
+      type: 'applicant',
+    },
+    ...priorSteps,
+  ];
+
   res.json({
     request: detail,
     canApprove,
     canReturn,
+    returnTargets,
     previousStep: previousStep
       ? {
           order: previousStep.order,
@@ -6599,15 +6619,17 @@ app.put(
       .prepare(`SELECT * FROM approval_requests WHERE id = ?`)
       .get(id);
     if (!existing) return res.status(404).json({ error: '找不到簽核單' });
-    if (existing.status !== 'draft') {
-      return res.status(400).json({ error: '僅草稿可修改或由此送出' });
+    const isDraftStatus = existing.status === 'draft';
+    const isReturnedStatus = existing.status === 'returned';
+    if (!isDraftStatus && !isReturnedStatus) {
+      return res.status(400).json({ error: '僅草稿或退回修改單據可修改或由此送出' });
     }
     const canEditDraft =
       existing.requester_id === req.user.id ||
       existing.submitted_by === req.user.id ||
       req.user.role === 'admin';
     if (!canEditDraft) {
-      return res.status(403).json({ error: '僅申請人或代申請人可編輯此草稿' });
+      return res.status(403).json({ error: '僅申請人、代申請人或管理員可編輯此單據' });
     }
 
     const wantSubmit =
@@ -6677,9 +6699,12 @@ app.put(
     );
 
     if (!asDraft) {
+      const isReturnedResubmit = existing.status === 'returned';
       const submitComment = isProxySubmit
-        ? `代理 ${requester.name} 送出簽核申請（由草稿）`
-        : '送出簽核申請（由草稿）';
+        ? `代理 ${requester.name} ${isReturnedResubmit ? '重新送出簽核申請（退回修改後）' : '送出簽核申請（由草稿）'}`
+        : isReturnedResubmit
+          ? '重新送出簽核申請（退回修改後）'
+          : '送出簽核申請（由草稿）';
       const submitStepName = isProxySubmit ? '代理申請人送出' : '申請人送出';
       db.prepare(
         `INSERT INTO approval_actions
@@ -6715,9 +6740,10 @@ app.put(
       }
     }
 
+    const wasReturned = existing.status === 'returned';
     res.json({
       request: detail,
-      message: asDraft ? '草稿已更新' : '申請已送出',
+      message: asDraft ? '單據已暫存' : wasReturned ? '單據已修正並重新送審' : '申請已送出',
       isDraft: asDraft,
     });
   }
@@ -7604,33 +7630,87 @@ app.post(
     return res.json({ request: after });
   }
 
-  // return：退回上一位（上一步），狀態維持簽核中
+  // return：退回上一位、指定關卡或退回申請人修改
   if (action === 'return') {
-    const prev = getPreviousStep(steps, step);
-    if (!prev) {
-      return res.status(400).json({
-        error: '已是第一關簽核，無法退回上一位（若需退件請使用「駁回」）',
+    const targetStepParam = req.body?.target_step;
+    const isToApplicant =
+      targetStepParam === 'applicant' ||
+      targetStepParam === 0 ||
+      targetStepParam === '0';
+
+    const actor = db.prepare(`SELECT name FROM users WHERE id = ?`).get(req.user.id);
+
+    if (isToApplicant) {
+      let note = String(comment || '').trim() || '退回申請人修改';
+      if (onBehalfOf) {
+        const pName = agents.userBrief(onBehalfOf)?.name || `#${onBehalfOf}`;
+        note = `代理 ${pName}：${note}`;
+      }
+      db.prepare(
+        `INSERT INTO approval_actions
+          (request_id, step_order, step_name, actor_id, action, comment, form_data, on_behalf_of)
+         VALUES (?, ?, ?, ?, 'return', ?, '{}', ?)`
+      ).run(id, step.order, step.name || '', req.user.id, note, onBehalfOf);
+
+      db.prepare(
+        `UPDATE approval_requests SET status = 'returned', current_step = 1, updated_at = datetime('now', 'localtime')
+         WHERE id = ?`
+      ).run(id);
+
+      const after = getRequestDetail(id);
+      fireAndForgetMail(
+        'applicant-return',
+        mail.notifyApplicant(after, 'returned', {
+          actorName: actor?.name,
+          comment: note,
+        })
+      );
+      return res.json({
+        request: after,
+        message: '已退回申請人修改，申請人修正後可重新送出',
+        returnedTo: 'applicant',
       });
     }
+
+    // 退回指定步驟
+    let targetStep = null;
+    if (targetStepParam != null && targetStepParam !== '') {
+      const tOrder = Number(targetStepParam);
+      targetStep = (steps || []).find((s) => Number(s.order) === tOrder);
+      if (!targetStep || Number(targetStep.order) >= Number(step.order)) {
+        return res.status(400).json({ error: '無效的退回目標關卡' });
+      }
+    } else {
+      // 未指定時退回上一關
+      targetStep = getPreviousStep(steps, step);
+    }
+
+    if (!targetStep) {
+      return res.status(400).json({
+        error: '已是第一關簽核，無法退回上一位（若需退件請選擇退回申請人修改，或使用「駁回」）',
+      });
+    }
+
     let note =
       String(comment || '').trim() ||
-      `退回至「${prev.name || `步驟 ${prev.order}`}」`;
+      `退回至「${targetStep.name || `步驟 ${targetStep.order}`}」`;
     if (onBehalfOf) {
       const pName = agents.userBrief(onBehalfOf)?.name || `#${onBehalfOf}`;
       note = `代理 ${pName}：${note}`;
     }
+
     db.prepare(
       `INSERT INTO approval_actions
         (request_id, step_order, step_name, actor_id, action, comment, form_data, on_behalf_of)
        VALUES (?, ?, ?, ?, 'return', ?, '{}', ?)`
     ).run(id, step.order, step.name || '', req.user.id, note, onBehalfOf);
+
     db.prepare(
       `UPDATE approval_requests SET current_step = ?, updated_at = datetime('now', 'localtime')
        WHERE id = ?`
-    ).run(prev.order, id);
+    ).run(targetStep.order, id);
 
     const after = getRequestDetail(id);
-    const actor = db.prepare(`SELECT name FROM users WHERE id = ?`).get(req.user.id);
     fireAndForgetMail(
       'applicant-return',
       mail.notifyApplicant(after, 'returned', {
@@ -7641,8 +7721,9 @@ app.post(
     notifyCurrentApprovers(after, 'step', actor?.name || '');
     return res.json({
       request: after,
-      message: `已退回「${prev.name || `步驟 ${prev.order}`}」`,
-      previousStep: { order: prev.order, name: prev.name },
+      message: `已退回「${targetStep.name || `步驟 ${targetStep.order}`}」`,
+      previousStep: { order: targetStep.order, name: targetStep.name },
+      targetStep: { order: targetStep.order, name: targetStep.name },
     });
   }
 

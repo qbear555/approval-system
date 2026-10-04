@@ -192,6 +192,7 @@ function collectLeaveUsedFromForm(fd) {
 const STATUS = {
   draft: { label: '草稿', cls: 'draft' },
   pending: { label: '簽核中', cls: 'pending' },
+  returned: { label: '退回修改', cls: 'returned' },
   approved: { label: '已核准', cls: 'approved' },
   rejected: { label: '已駁回', cls: 'rejected' },
   cancelled: { label: '已取消', cls: 'cancelled' },
@@ -937,7 +938,7 @@ const ROUTE_PAGES = [
 ];
 
 const LAST_ROUTE_KEY = 'approval-last-route';
-const REQUEST_STATUS_FILTERS = ['draft', 'pending', 'approved', 'rejected', 'cancelled', 'voided'];
+const REQUEST_STATUS_FILTERS = ['draft', 'pending', 'returned', 'approved', 'rejected', 'cancelled', 'voided'];
 
 function normalizeRequestStatus(s) {
   const v = String(s || '').trim().toLowerCase();

@@ -724,6 +724,7 @@ function renderDynamicFieldHtml(f, defaults = {}, opts = {}) {
           value="${esc(mode)}" />
       </div>
       <div class="muted field-hint">可填金額／說明，並勾選內扣或外加（二選一）</div>
+      <div class="fee-calc-summary-badge" id="handling-fee-calc-summary" style="display:none"></div>
     </div>`;
   }
   // 請假／電腦異常報修：不使用富文字／自繪表格
@@ -947,14 +948,20 @@ function renderDynamicFieldHtml(f, defaults = {}, opts = {}) {
   const extraClass = f.id === 'opening_summary' ? ' welfare-summary-field' : '';
   const isAmountFx =
     f.type === 'number' &&
-    (f.id === 'amount' || /預估金額|金額/.test(String(f.label || '')));
+    (f.id === 'amount' || f.id === 'budget' || /預估金額|金額|費用/.test(String(f.label || '')));
   const numStep = isAmountFx ? '0.0001' : type === 'number' ? 'any' : '';
   const numAttrs =
     type === 'number'
       ? ` step="${numStep}" inputmode="decimal"${isAmountFx ? ' data-amount-fx="1"' : ''}`
       : '';
   const amountHint = isAmountFx
-    ? `<div class="muted field-hint" data-amount-fx-hint>外幣可至小數 4 位</div>`
+    ? `<div class="muted field-hint" data-amount-fx-hint>外幣可至小數 4 位</div>
+       <div class="amount-cn-preview" data-amount-cn="${esc(f.id)}"></div>
+       <div class="tax-calc-toolbar" data-tax-toolbar="${esc(f.id)}">
+         <button type="button" class="tax-btn tax-btn-add" data-tax-action="add" title="以目前金額為未稅，加 5% 營業稅換算為含稅總額">🧮 ＋5% 稅 (含稅)</button>
+         <button type="button" class="tax-btn tax-btn-sub" data-tax-action="sub" title="以目前金額為含稅，反推 5% 營業稅算出未稅金額">🧮 －5% 稅 (未稅)</button>
+         <span class="tax-calc-hint" data-tax-hint="${esc(f.id)}"></span>
+       </div>`
     : '';
   return `<div class="field${extraClass}"><label>${esc(f.label)}${req}</label>
     <input type="${type}" name="${name}" data-ff="${esc(f.id)}" ${reqAttr}
@@ -970,19 +977,46 @@ function snapHalfUnit(val) {
   return String(Math.round(n * 2) / 2);
 }
 
-/** 請購手續費：內扣／外加二選一勾選 */
+/** 請購／支付手續費：內扣／外加二選一勾選與動態試算 */
 function bindHandlingFeeMode(root) {
   if (!root) return;
   root.querySelectorAll('[data-handling-fee-field]').forEach((box) => {
     const hidden = box.querySelector('[data-ff="handling_fee_mode"]');
     const boxes = [...box.querySelectorAll('[data-handling-fee-mode]')];
+    const feeInp = box.querySelector('[data-ff="handling_fee"]');
+    const summaryEl = box.querySelector('#handling-fee-calc-summary');
     if (!hidden || !boxes.length) return;
+
+    const calcSummary = () => {
+      if (!summaryEl) return;
+      const mode = String(hidden.value || '').trim();
+      const amountInp = root.querySelector('[data-ff="amount"]');
+      const amt = Number(amountInp?.value || 0);
+      const feeNum = Number(String(feeInp?.value || '').replace(/[^\d.]/g, ''));
+
+      if (amt > 0 && feeNum > 0 && (mode === '內扣' || mode === '外加')) {
+        summaryEl.style.display = 'flex';
+        if (mode === '內扣') {
+          const net = Math.max(0, amt - feeNum);
+          summaryEl.innerHTML = `💡 <strong>支付算定：</strong> 申請金額 $${amt.toLocaleString()} － 內扣手續費 $${feeNum.toLocaleString()} ＝ <strong>實付撥款 $${net.toLocaleString()}</strong>`;
+        } else {
+          const total = amt + feeNum;
+          summaryEl.innerHTML = `💡 <strong>支付算定：</strong> 受款金額 $${amt.toLocaleString()} ＋ 外加手續費 $${feeNum.toLocaleString()} ＝ <strong>公司支出總計 $${total.toLocaleString()}</strong>`;
+        }
+      } else {
+        summaryEl.style.display = 'none';
+        summaryEl.innerHTML = '';
+      }
+    };
+
     const syncFromHidden = () => {
       const v = String(hidden.value || '');
       boxes.forEach((cb) => {
         cb.checked = cb.getAttribute('data-handling-fee-mode') === v;
       });
+      calcSummary();
     };
+
     boxes.forEach((cb) => {
       cb.onchange = () => {
         if (cb.checked) {
@@ -994,8 +1028,18 @@ function bindHandlingFeeMode(root) {
           // 取消勾選＝不選
           hidden.value = '';
         }
+        calcSummary();
       };
     });
+
+    if (feeInp) feeInp.addEventListener('input', calcSummary);
+    const amountInp = root.querySelector('[data-ff="amount"]');
+    if (amountInp && !amountInp.dataset.feeBound) {
+      amountInp.dataset.feeBound = '1';
+      amountInp.addEventListener('input', calcSummary);
+    }
+    hidden.addEventListener('change', calcSummary);
+
     syncFromHidden();
   });
 }
@@ -1764,3 +1808,126 @@ function emptyFormTable(rows = 3, cols = 3) {
     cells: Array.from({ length: r }, () => Array.from({ length: c }, () => '')),
   };
 }
+
+/** 數字轉中文大寫金額（新臺幣） */
+function numberToChineseCurrency(num) {
+  const n = Number(num);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const digits = ['零', '壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖'];
+  const units = ['', '拾', '佰', '仟'];
+  const bigUnits = ['', '萬', '億', '兆'];
+
+  let integerPart = Math.floor(n);
+  if (integerPart === 0) return '零元整';
+  if (integerPart > 999999999999) return `新臺幣 ${integerPart.toLocaleString()} 元整`;
+
+  let str = '';
+  let bigIdx = 0;
+  while (integerPart > 0) {
+    const chunk = integerPart % 10000;
+    if (chunk > 0) {
+      let chunkStr = '';
+      let zero = false;
+      const cStr = String(chunk).padStart(4, '0');
+      for (let i = 0; i < 4; i++) {
+        const d = Number(cStr[i]);
+        const u = 3 - i;
+        if (d > 0) {
+          if (zero) chunkStr += '零';
+          chunkStr += digits[d] + units[u];
+          zero = false;
+        } else if (chunkStr) {
+          zero = true;
+        }
+      }
+      str = chunkStr + bigUnits[bigIdx] + str;
+    }
+    integerPart = Math.floor(integerPart / 10000);
+    bigIdx++;
+  }
+  return `新臺幣 ${str}元整`;
+}
+
+/** 綁定表單中之金額欄位：中文大寫預覽、5% 營業稅快算與單價自動換算 */
+function bindAmountCalculators(root) {
+  if (!root) return;
+  root.querySelectorAll('[data-amount-fx="1"], [data-ff="amount"]').forEach((input) => {
+    if (input.dataset.calcBound === '1') return;
+    input.dataset.calcBound = '1';
+
+    const fieldBox = input.closest('.field') || input.parentElement;
+    const previewEl = fieldBox?.querySelector('.amount-cn-preview');
+    const toolbarEl = fieldBox?.querySelector('.tax-calc-toolbar');
+    const hintEl = toolbarEl?.querySelector('.tax-calc-hint');
+
+    const updateCalc = () => {
+      const val = Number(input.value);
+      if (previewEl) {
+        if (Number.isFinite(val) && val > 0) {
+          previewEl.textContent = numberToChineseCurrency(val);
+        } else {
+          previewEl.textContent = '';
+        }
+      }
+      // 若同表單內有數量 qty，自動試算換算單價
+      const qtyInp = root.querySelector('[data-ff="qty"]');
+      if (qtyInp && hintEl) {
+        const q = Number(qtyInp.value);
+        if (q > 0 && val > 0) {
+          const unitP = Math.round((val / q) * 100) / 100;
+          hintEl.textContent = `（約單價 $${unitP.toLocaleString()} / 單位）`;
+        }
+      }
+    };
+
+    input.addEventListener('input', updateCalc);
+
+    // 數量變更連動觸發
+    const qtyInp = root.querySelector('[data-ff="qty"]');
+    if (qtyInp && !qtyInp.dataset.qtyBound) {
+      qtyInp.dataset.qtyBound = '1';
+      qtyInp.addEventListener('input', updateCalc);
+    }
+
+    if (toolbarEl) {
+      toolbarEl.querySelectorAll('[data-tax-action]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const action = btn.dataset.taxAction;
+          const curVal = Number(input.value);
+          if (!Number.isFinite(curVal) || curVal <= 0) {
+            if (hintEl) hintEl.textContent = '請先填入數值再試算';
+            return;
+          }
+          if (action === 'add') {
+            const tax = Math.round(curVal * 0.05);
+            const total = curVal + tax;
+            input.value = total;
+            if (hintEl) {
+              hintEl.textContent = `原未稅 $${curVal.toLocaleString()} ＋ 5% 營業稅 $${tax.toLocaleString()} ＝ 含稅 $${total.toLocaleString()}`;
+            }
+          } else if (action === 'sub') {
+            const untaxed = Math.round(curVal / 1.05);
+            const tax = curVal - untaxed;
+            input.value = untaxed;
+            if (hintEl) {
+              hintEl.textContent = `原含稅 $${curVal.toLocaleString()} － 5% 營業稅 $${tax.toLocaleString()} ＝ 未稅 $${untaxed.toLocaleString()}`;
+            }
+          }
+          updateCalc();
+          // 手續費連動計算
+          const feeHidden = root.querySelector('[data-ff="handling_fee_mode"]');
+          if (feeHidden) feeHidden.dispatchEvent(new Event('change'));
+        });
+      });
+    }
+
+    updateCalc();
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.numberToChineseCurrency = numberToChineseCurrency;
+  window.bindAmountCalculators = bindAmountCalculators;
+}
+
