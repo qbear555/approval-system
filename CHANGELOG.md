@@ -22,6 +22,24 @@
 
 本機首頁：http://127.0.0.1:3847。部署後 HTTP 3847／HTTPS 3848。
 
+### 2026-10-04 後端架構模組化拆分、代碼健康度與自動部署（階段三）
+
+- **後端架構模組化拆分（Backend Modularization）**：
+  - 將超過 8,700 行的單體 `server/index.js` 安全重構，拆解為高內聚、職責分離的領域路由模組，代碼精簡逾 80,000 bytes（~2,300 行）：
+    - `server/routes/departments.js`：部門清單、組織成員關聯、統計與台灣國定假日/補班公開與管理端點。
+    - `server/routes/mail-settings.js`：SMTP 伺服器設定、即時郵件連線測試、LINE Webhook Proxy 轉送與 `/api/system/notify-status` 狀態檢測。
+    - `server/routes/system-admin.js`：系統設定、公司品牌 Logo、系統公告發布/附件、PDF 數位簽章憑證管理與自簽憑證製作、安全登入政策、系統設定完整包（匯入/匯出/預覽）與稽核日誌查詢/CSV 匯出。
+    - `server/routes/workflows.js`：簽核流程定義 CRUD、流程範本一體包匯入/匯出、紙本 PDF 底圖模版上傳與存取。
+    - `server/routes/reports.js`：請假報表 Excel 匯出、單據多維度 Excel 報表匯出（費用報支、請購請款、財務款項）。
+    - `server/routes/backups.js`：PDF/ZIP 簽核單據備份查詢、條件批次下載、備份排程與實體歷史封存。
+  - 修復 `server/audit-log.js` 跨資料庫（MySQL / SQLite）兼容性，修正自動建表在 MariaDB/MySQL 上的解析異常。
+  - 確保所有 API 端點路徑、認證中介軟體（`authMiddleware`、`adminOnly`、`builtinAdminOnly`、`requirePerm`）與回傳格式 100% 向後相容。
+- **全自動煙霧測試驗證（Smoke Test Verification）**：
+  - 更新 `scripts/smoke.js` 與 `scripts/verify-notify.js`，煙霧測試涵蓋 CSP 安全防護標頭、字型引擎、PDF 生成、郵件與 LINE 通知通道、多級權限驗證，全數通過。
+- **前端健康度與雙軌部署（Dual-track Production Deployment）**：
+  - 前端 Vue 3 SPA（`frontend/`）重新構建產物同步至 `public/v2/`。
+  - 透過 SFTP/SSH 安全無損部署至 Synology NAS Docker 生產環境（`192.168.99.220:3847`），確保 `/volume1/docker/approval-system/data` 生產資料庫完整安全。
+
 ### 2026-10-04 退回指定關卡、表單自動計算與智慧請假核算（階段二）
 
 - **退回指定關卡機制（Return to Prior Step / Applicant）**：

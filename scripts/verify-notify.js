@@ -130,7 +130,11 @@ async function main() {
   if (mailFail || lineFail) process.exitCode = 1;
 }
 
-main().catch((e) => {
-  console.error(e.message || e);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(process.exitCode || 0);
+  })
+  .catch((e) => {
+    console.error(e.message || e);
+    process.exit(1);
+  });

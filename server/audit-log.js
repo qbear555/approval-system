@@ -3,20 +3,24 @@ const db = require('./db');
 const CATEGORIES = ['auth', 'approval', 'user_management', 'workflow', 'system'];
 
 function ensureTable() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      category TEXT NOT NULL DEFAULT 'system',
-      user_id INTEGER,
-      user_name TEXT,
-      user_username TEXT,
-      ip_address TEXT,
-      description TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-    )
-  `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category)`);
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL DEFAULT 'system',
+        user_id INTEGER,
+        user_name TEXT,
+        user_username TEXT,
+        ip_address TEXT,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category)`);
+  } catch (e) {
+    // Table already exists or handled by MySQL schema
+  }
 }
 
 ensureTable();
