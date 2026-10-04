@@ -83,6 +83,7 @@ const SCRIPTS = [
   '/js/tw-calendar.js',
   '/js/rich-editor.js',
   '/js/ui-helpers.js',
+  '/js/shared-helpers.js',
   '/js/pdf-form-designer.js',
   '/js/flow-editor.js',
   '/js/app.js',
@@ -263,6 +264,7 @@ onMounted(async () => {
 
   registerNativePages();
   window.__hostManualBoot = true;
+  window.__legacyManualBoot = true;
   try {
     for (const src of SCRIPTS) await loadScript(src);
     window.__hostLoaded = true;

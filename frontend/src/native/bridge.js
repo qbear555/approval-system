@@ -10,9 +10,40 @@ export const L = new Proxy(
     get state() {
       return window.appState || window.state;
     },
+    async loadUsers() {
+      if (typeof window.loadUsers === 'function') {
+        return window.loadUsers();
+      }
+      const token = localStorage.getItem('approval_token') || '';
+      const res = await fetch('/api/users', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      const list = data.users || [];
+      if (window.appState) window.appState.users = list;
+      if (window.state) window.state.users = list;
+      return list;
+    },
+    async loadWorkflows(all = false) {
+      if (typeof window.loadWorkflows === 'function') {
+        return window.loadWorkflows(all);
+      }
+      const token = localStorage.getItem('approval_token') || '';
+      const res = await fetch(`/api/workflows${all ? '?all=1' : ''}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      const list = data.workflows || [];
+      if (window.appState) window.appState.workflows = list;
+      if (window.state) window.state.workflows = list;
+      return list;
+    },
   },
   {
     get(target, prop) {
+      if (typeof window !== 'undefined' && typeof window[prop] === 'function') {
+        return window[prop];
+      }
       if (prop in target) return target[prop];
       if (prop === 'state') return window.appState || window.state;
       return window[prop];

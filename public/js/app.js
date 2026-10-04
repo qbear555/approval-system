@@ -2,7 +2,13 @@
 const API = '';
 const state = {
   token: localStorage.getItem('approval_token') || '',
-  user: null,
+  user: (() => {
+    try {
+      return JSON.parse(localStorage.getItem('approval_user') || 'null');
+    } catch {
+      return null;
+    }
+  })(),
   page: 'dashboard',
   users: [],
   workflows: [],
@@ -382,10 +388,27 @@ function setAuth(token, user) {
   else localStorage.removeItem('approval_token');
 }
 
+async function loadUsers() {
+  const { users } = await api('/api/users');
+  state.users = users;
+  return users;
+}
+if (typeof window !== 'undefined') window.loadUsers = loadUsers;
+
+async function loadWorkflows(all = false) {
+  if (all && typeof hasPerm === 'function' && !hasPerm('workflows')) {
+    throw new Error('您沒有管理簽核流程的權限');
+  }
+  const { workflows } = await api(`/api/workflows${all ? '?all=1' : ''}`);
+  state.workflows = workflows;
+  return workflows;
+}
+if (typeof window !== 'undefined') window.loadWorkflows = loadWorkflows;
+
 function isVueV2Host() {
   try {
     return (
-      Boolean(window.__legacyManualBoot) ||
+      Boolean(window.__hostManualBoot || window.__legacyManualBoot) ||
       String(location.pathname || '').indexOf('/v2') === 0
     );
   } catch {
@@ -1155,7 +1178,7 @@ function showMain(opts = {}) {
   applyRoleUi();
   loadSystemSettings().catch(() => {});
   // 優先網址 hash（Email／重新整理）；其次 session 記住的頁面；否則總覽
-  if (!window.__legacyManualBoot) {
+  if (!window.__hostManualBoot && !window.__legacyManualBoot) {
     if (!applyRouteFromHash({ allowSession: true })) {
       state.page = 'dashboard';
       state.pageParams = {};
@@ -1371,21 +1394,38 @@ async function navigate(page, params = {}, navOpts = {}) {
   body.innerHTML = '<div class="muted">載入中…</div>';
   const nativeRender = window.__nativePages && window.__nativePages[page];
   try {
-    if (nativeRender) await nativeRender(body, params, page);
-    else if (page === 'dashboard') await renderDashboard(body);
-    else if (page === 'inbox') await renderRequestList(body, 'pending_me');
-    else if (page === 'mine') await renderRequestList(body, 'mine');
-    else if (page === 'records') await renderRequestList(body, 'related');
-    else if (page === 'new-request') await renderNewRequest(body);
-    else if (page === 'workflows') await renderWorkflows(body);
-    else if (page === 'backups') await renderBackups(body);
-    else if (page === 'leave-report') await renderLeaveReport(body);
-    else if (page === 'audit-logs') await renderAuditLogs(body);
-    else if (page === 'users') await renderUsers(body);
-    else if (page === 'departments') await renderDepartments(body);
-    else if (page === 'settings') await renderSettings(body);
-    else if (page === 'system-settings') await renderSystemSettings(body);
-    else if (page === 'detail') await renderDetail(body, params.id);
+    if (nativeRender) {
+      await nativeRender(body, params, page);
+    } else if (page === 'dashboard') {
+      if (typeof renderDashboard === 'function') await renderDashboard(body);
+      else if (typeof window.__v2Navigate === 'function') window.__v2Navigate('dashboard');
+    } else if (page === 'inbox' || page === 'mine' || page === 'records') {
+      if (typeof renderRequestList === 'function') {
+        await renderRequestList(body, page === 'inbox' ? 'pending_me' : page === 'mine' ? 'mine' : 'related');
+      } else if (typeof window.__v2Navigate === 'function') {
+        window.__v2Navigate(page, params);
+      }
+    } else if (page === 'new-request' && typeof renderNewRequest === 'function') {
+      await renderNewRequest(body);
+    } else if (page === 'workflows' && typeof renderWorkflows === 'function') {
+      await renderWorkflows(body);
+    } else if (page === 'backups' && typeof renderBackups === 'function') {
+      await renderBackups(body);
+    } else if (page === 'leave-report' && typeof renderLeaveReport === 'function') {
+      await renderLeaveReport(body);
+    } else if (page === 'audit-logs' && typeof renderAuditLogs === 'function') {
+      await renderAuditLogs(body);
+    } else if (page === 'users' && typeof renderUsers === 'function') {
+      await renderUsers(body);
+    } else if (page === 'departments' && typeof renderDepartments === 'function') {
+      await renderDepartments(body);
+    } else if (page === 'settings' && typeof renderSettings === 'function') {
+      await renderSettings(body);
+    } else if (page === 'system-settings' && typeof renderSystemSettings === 'function') {
+      await renderSystemSettings(body);
+    } else if (page === 'detail' && typeof renderDetail === 'function') {
+      await renderDetail(body, params.id);
+    }
   } catch (e) {
     body.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`;
   }
@@ -1673,7 +1713,7 @@ async function boot() {
   initUserTheme();
   updateAppWatermark();
   // 僅在無 token 且非 Vue 宿主時才主動切至 auth-view，避免覆蓋畫面或產生空白
-  if (!state.token && !window.__legacyManualBoot) {
+  if (!state.token && !window.__hostManualBoot && !window.__legacyManualBoot) {
     try {
       showAuth();
     } catch (e) {
@@ -1699,7 +1739,7 @@ async function boot() {
   } catch (e) {
     console.warn('auto login failed', e);
     setAuth('', null);
-    if (!window.__legacyManualBoot) {
+    if (!window.__hostManualBoot && !window.__legacyManualBoot) {
       showAuth();
     }
   }
@@ -1707,7 +1747,7 @@ async function boot() {
 
 // 同步先亮登入畫面
 try {
-  if (document.getElementById('auth-view') && !window.__legacyManualBoot) {
+  if (document.getElementById('auth-view') && !window.__hostManualBoot && !window.__legacyManualBoot) {
     document.getElementById('auth-view').classList.remove('hidden');
   }
 } catch (_) {
@@ -1715,7 +1755,7 @@ try {
 }
 window.boot = boot;
 window.appState = state; // 供 v2 Vue 頁面存取全域狀態
-if (window.__legacyManualBoot) {
+if (window.__hostManualBoot || window.__legacyManualBoot) {
   /* v2 宿主會在所有 pages-*.js 載入後自行呼叫 boot() */
 } else if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
