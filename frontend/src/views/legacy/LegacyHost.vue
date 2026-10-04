@@ -78,7 +78,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
 import { performVueLogout } from '@/lib/session';
 
-const V = '20261004_split_act';
+const V = '20261004_paper_drag';
 const LOGO = '/img/argo-logo.png';
 const VUE_PAGES = new Set(['dashboard', 'inbox', 'mine', 'records']);
 

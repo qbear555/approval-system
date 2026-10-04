@@ -1,6 +1,7 @@
 /**
  * 紙本 PDF 模版畫布表單設計器與電子紙填報檢視模組 (PDF Form Canvas Designer & Viewer)
  * 零前端建置依賴，純原生 DOM + Canvas + Mozilla PDF.js
+ * 支援全方位滑鼠拖曳移動、8 方向控點縮放調整、精確座標數值即時連動與鍵盤微調
  */
 
 (function (window) {
@@ -23,7 +24,7 @@
    * @param {string} fileUrl - PDF 或圖片之 URL
    * @param {HTMLCanvasElement} canvas - 目標 Canvas
    * @param {number} [pageNumber=1] - 頁碼
-   * @returns {Promise<{ width: number, height: number, pageCount: number }>}
+   * @returns {Promise<{ width: number, height: number, pageCount: number, pageNumber: number }>}
    */
   async function loadTemplateToCanvas(fileUrl, canvas, pageNumber = 1) {
     initPdfJs();
@@ -75,7 +76,7 @@
             pageNumber: 1,
           });
         };
-        img.onerror = (err) => reject(new Error('底圖載入失敗'));
+        img.onerror = () => reject(new Error('底圖載入失敗'));
         img.src = authedUrl;
       });
     }
@@ -83,25 +84,28 @@
 
   /**
    * 在容器內渲染 PDF 模版與表單填寫/檢視圖層
-   * @param {Object} options
-   * @param {HTMLElement} options.container - 放置 Canvas 與圖層的 DOM
-   * @param {string} options.templateFile - 模版路徑（如 templates/xxx.pdf）
-   * @param {Array} options.fields - 欄位設定陣列 [{ id, name, type, rx, ry, rw, rh, ... }]
-   * @param {Object} options.formData - 表單填寫值
-   * @param {string} [options.mode='view'] - 'view' | 'fill'
-   * @param {Function} [options.onFieldChange] - 填寫變更回呼 (fieldId, value) => {}
-   * @param {Array} [options.actions] - 簽核紀錄（用於審核印章渲染）
+   * 支援 (container, options) 與 ({ container, ...options }) 兩種傳參方式
    */
-  async function renderPdfFormViewer({
-    container,
-    templateFile,
-    fields = [],
-    formData = {},
-    mode = 'view',
-    onFieldChange = null,
-    actions = [],
-    requester = null,
-  }) {
+  async function renderPdfFormViewer(arg1, arg2) {
+    let opts = {};
+    if (arg1 instanceof HTMLElement || (arg1 && arg1.nodeType === 1)) {
+      opts = { ...(arg2 || {}), container: arg1 };
+    } else {
+      opts = arg1 || {};
+    }
+
+    const {
+      container,
+      templateFile,
+      fields = [],
+      formData = {},
+      mode = 'view',
+      onFieldChange = null,
+      actions = [],
+      requester = null,
+      pageNumber = 1,
+    } = opts;
+
     if (!container) return;
     container.innerHTML = `
       <div class="pdf-viewer-wrap" style="position:relative;margin:0 auto;display:inline-block;box-shadow:0 4px 15px rgba(0,0,0,0.1);border-radius:4px;overflow:hidden;background:#fff;">
@@ -117,14 +121,16 @@
       : `/api/${templateFile}`;
 
     try {
-      await loadTemplateToCanvas(fileUrl, canvas, 1);
+      await loadTemplateToCanvas(fileUrl, canvas, pageNumber);
     } catch (err) {
       container.innerHTML = `<div class="error-msg" style="padding:20px;text-align:center;">底圖模版載入失敗：${err.message}</div>`;
       return;
     }
 
-    // 渲染各欄位方框
-    fields.forEach((f) => {
+    // 渲染各欄位方框（篩選對應頁碼，未標註 page 者預設第 1 頁）
+    const targetFields = fields.filter((f) => (Number(f.page) || 1) === pageNumber);
+
+    targetFields.forEach((f) => {
       const fieldBox = document.createElement('div');
       fieldBox.className = `pdf-view-field-box pdf-type-${f.type || 'text'}`;
       fieldBox.style.position = 'absolute';
@@ -199,8 +205,8 @@
           inputEl.style.margin = 'auto';
         } else if (f.type === 'select') {
           inputEl = document.createElement('select');
-          const opts = Array.isArray(f.options) ? f.options : [];
-          inputEl.innerHTML = `<option value="">請選擇…</option>` + opts.map(o => `<option value="${o}">${o}</option>`).join('');
+          const optsArr = Array.isArray(f.options) ? f.options : [];
+          inputEl.innerHTML = `<option value="">請選擇…</option>` + optsArr.map(o => `<option value="${o}">${o}</option>`).join('');
           inputEl.value = val;
         } else {
           inputEl = document.createElement('input');
@@ -220,12 +226,14 @@
           if (f.required) inputEl.required = true;
         }
 
-        inputEl.oninput = () => {
+        const handleValChange = () => {
           const currentVal = f.type === 'checkbox' ? inputEl.checked : inputEl.value;
           if (typeof onFieldChange === 'function') {
             onFieldChange(f.id, currentVal);
           }
         };
+        inputEl.oninput = handleValChange;
+        inputEl.onchange = handleValChange;
 
         fieldBox.appendChild(inputEl);
       } else {
@@ -250,116 +258,284 @@
     });
   }
 
+  // 確保全域樣式注入
+  function ensureDesignerStyles() {
+    if (document.getElementById('pdf-designer-injected-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'pdf-designer-injected-styles';
+    style.textContent = `
+      .designer-field-box {
+        position: absolute;
+        box-sizing: border-box;
+        user-select: none;
+        touch-action: none;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      .designer-field-box:hover {
+        border-color: #38bdf8 !important;
+      }
+      .designer-field-box.is-selected {
+        border: 2px solid #38bdf8 !important;
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.4), 0 8px 24px rgba(0,0,0,0.45) !important;
+        z-index: 50 !important;
+      }
+      .designer-handles {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      .resize-handle {
+        position: absolute;
+        width: 9px;
+        height: 9px;
+        background: #38bdf8;
+        border: 1.5px solid #ffffff;
+        border-radius: 2px;
+        box-sizing: border-box;
+        pointer-events: auto;
+        z-index: 60;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        transition: transform 0.1s ease, background 0.1s ease;
+      }
+      .resize-handle:hover {
+        transform: scale(1.35);
+        background: #0284c7;
+      }
+      .field-title-badge {
+        position: absolute;
+        top: -21px;
+        left: -1px;
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 500;
+        padding: 2px 6px;
+        border-radius: 3px 3px 0 0;
+        white-space: nowrap;
+        pointer-events: none;
+        line-height: 1.2;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-family: inherit;
+      }
+      .prop-input {
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 5px;
+        border: 1px solid #475569;
+        background: #0f172a;
+        color: #f8fafc;
+        font-size: 0.82rem;
+        box-sizing: border-box;
+      }
+      .prop-input:focus {
+        border-color: #38bdf8;
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+      }
+      .quick-btn {
+        background: #334155;
+        color: #f8fafc;
+        border: 1px solid #475569;
+        padding: 6px 8px;
+        border-radius: 5px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+        text-align: left;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .quick-btn:hover {
+        background: #475569;
+        border-color: #94a3b8;
+      }
+      .align-btn {
+        background: #1e293b;
+        color: #cbd5e1;
+        border: 1px solid #334155;
+        padding: 5px 8px;
+        border-radius: 4px;
+        font-size: 0.76rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        transition: all 0.15s;
+      }
+      .align-btn:hover {
+        background: #334155;
+        color: #38bdf8;
+        border-color: #38bdf8;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   /**
-   * 開啟全功能「紙本 PDF 模版畫布設計器」彈窗
+   * 開啟全功能「紙本 PDF 模版畫布設計器」全螢幕視窗
    * @param {Object} options
    * @param {Object} options.workflow - 流程資料
    * @param {Object} [options.initialPdfLayout] - 既有 pdfLayout 設定
    * @param {Function} options.onSave - 儲存回呼 ({ pdfLayout, formFields }) => {}
    */
   function openPdfFormDesignerModal({ workflow, initialPdfLayout, onSave }) {
+    ensureDesignerStyles();
+
     const layout = JSON.parse(JSON.stringify(initialPdfLayout || { type: 'pdf_template', fields: [] }));
     let templateFile = layout.templateFile || '';
     let fields = Array.isArray(layout.fields) ? layout.fields : [];
     let selectedFieldId = null;
+    let curPage = 1;
+    let totalPages = 1;
+    let zoomLevel = 1.0;
     let isDrawing = false;
     let drawStartX = 0;
     let drawStartY = 0;
-    let curPage = 1;
-    let totalPages = 1;
 
-    // 建立獨立的畫布設計器全螢幕浮層
+    // 建立畫布設計器全螢幕浮層
     const modalEl = document.createElement('div');
     modalEl.id = 'pdf-designer-modal';
+    modalEl.tabIndex = -1;
     modalEl.style.position = 'fixed';
     modalEl.style.top = '0';
     modalEl.style.left = '0';
     modalEl.style.width = '100vw';
     modalEl.style.height = '100vh';
-    modalEl.style.backgroundColor = '#0f172a';
-    modalEl.style.zIndex = '9999';
+    modalEl.style.backgroundColor = '#0b0f19';
+    modalEl.style.zIndex = '99999';
     modalEl.style.display = 'flex';
     modalEl.style.flexDirection = 'column';
     modalEl.style.color = '#f8fafc';
-    modalEl.style.fontFamily = 'var(--font, sans-serif)';
+    modalEl.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif';
 
     modalEl.innerHTML = `
       <!-- 頂部工具列 -->
-      <div style="height:54px;background:#1e293b;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex-shrink:0;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <strong style="font-size:1.05rem;color:#38bdf8;">紙本表單畫布設計器</strong>
-          <span style="color:#94a3b8;font-size:0.85rem;">${workflow?.name ? `流程：${workflow.name}` : ''}</span>
-          <label class="btn sm" style="background:#0284c7;color:#fff;cursor:pointer;margin:0;padding:5px 12px;border-radius:6px;font-size:0.82rem;">
-            📁 上傳紙本底圖 (PDF/圖片)
+      <div style="height:56px;background:#1e293b;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.3);z-index:20;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:1.2rem;">📄</span>
+            <strong style="font-size:1.05rem;color:#38bdf8;letter-spacing:0.5px;">紙本表單畫布設計器</strong>
+          </div>
+          <span style="color:#94a3b8;font-size:0.85rem;background:#0f172a;padding:3px 8px;border-radius:4px;border:1px solid #334155;">
+            ${workflow?.name ? `流程：${workflow.name}` : '自訂紙本表單流程'}
+          </span>
+          <label class="btn sm" style="background:#0284c7;color:#fff;cursor:pointer;margin:0;padding:5px 12px;border-radius:6px;font-size:0.82rem;font-weight:600;display:inline-flex;align-items:center;gap:5px;box-shadow:0 1px 3px rgba(0,0,0,0.3);">
+            <span>📁</span> 上傳紙本底圖 (PDF/圖片)
             <input type="file" id="pdf-designer-upload-input" accept=".pdf,.png,.jpg,.jpeg" style="display:none;" />
           </label>
-          <span id="pdf-designer-filename" style="font-size:0.82rem;color:#cbd5e1;">${layout.templateMeta?.originalName || templateFile || '尚未上傳底圖'}</span>
+          <span id="pdf-designer-filename" style="font-size:0.82rem;color:#94a3b8;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${layout.templateMeta?.originalName || templateFile || '尚未上傳底圖'}
+          </span>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="display:flex;align-items:center;gap:4px;background:#0f172a;padding:3px 8px;border-radius:6px;font-size:0.85rem;">
-            <button type="button" class="btn sm ghost" id="pdf-prev-page" style="color:#fff;padding:2px 8px;">◀</button>
-            <span id="pdf-page-indicator">第 1 / 1 頁</span>
-            <button type="button" class="btn sm ghost" id="pdf-next-page" style="color:#fff;padding:2px 8px;">▶</button>
+
+        <div style="display:flex;align-items:center;gap:12px;">
+          <!-- 縮放工具列 -->
+          <div style="display:flex;align-items:center;gap:3px;background:#0f172a;padding:2px 6px;border-radius:6px;border:1px solid #334155;font-size:0.82rem;">
+            <button type="button" class="btn sm ghost" id="pdf-zoom-out" style="color:#cbd5e1;padding:2px 8px;font-weight:bold;" title="縮小 (Ctrl + -)">−</button>
+            <span id="pdf-zoom-level" style="min-width:44px;text-align:center;color:#38bdf8;font-weight:600;font-variant-numeric:tabular-nums;">100%</span>
+            <button type="button" class="btn sm ghost" id="pdf-zoom-in" style="color:#cbd5e1;padding:2px 8px;font-weight:bold;" title="放大 (Ctrl + +)">＋</button>
+            <button type="button" class="btn sm ghost" id="pdf-zoom-reset" style="color:#94a3b8;padding:2px 6px;font-size:0.75rem;" title="還原 100%">重設</button>
+            <button type="button" class="btn sm ghost" id="pdf-zoom-fit" style="color:#94a3b8;padding:2px 6px;font-size:0.75rem;" title="配合視窗寬度">適應</button>
           </div>
-          <button type="button" class="btn sm" id="pdf-designer-save-btn" style="background:#059669;color:#fff;font-weight:600;padding:6px 16px;">✓ 儲存並套用</button>
-          <button type="button" class="btn sm" id="pdf-designer-close-btn" style="background:#475569;color:#fff;">關閉</button>
+
+          <!-- 分頁工具列 -->
+          <div style="display:flex;align-items:center;gap:4px;background:#0f172a;padding:2px 6px;border-radius:6px;border:1px solid #334155;font-size:0.82rem;">
+            <button type="button" class="btn sm ghost" id="pdf-prev-page" style="color:#cbd5e1;padding:2px 8px;" title="上一頁">◀</button>
+            <span id="pdf-page-indicator" style="color:#f8fafc;font-weight:500;padding:0 4px;">第 1 / 1 頁</span>
+            <button type="button" class="btn sm ghost" id="pdf-next-page" style="color:#cbd5e1;padding:2px 8px;" title="下一頁">▶</button>
+          </div>
+
+          <button type="button" class="btn sm" id="pdf-designer-save-btn" style="background:#059669;color:#fff;font-weight:600;padding:6px 18px;border-radius:6px;box-shadow:0 2px 6px rgba(5,150,105,0.4);">
+            ✓ 儲存並套用
+          </button>
+          <button type="button" class="btn sm" id="pdf-designer-close-btn" style="background:#475569;color:#fff;border-radius:6px;padding:6px 12px;">
+            關閉
+          </button>
         </div>
       </div>
 
       <!-- 主工作區：左側畫布 + 右側屬性面板 -->
       <div style="flex:1;display:flex;overflow:hidden;position:relative;">
         <!-- 畫布滾動區 -->
-        <div id="pdf-designer-canvas-scroll" style="flex:1;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:30px;background:#090d16;">
-          <div id="pdf-designer-wrapper" style="position:relative;background:#fff;box-shadow:0 10px 30px rgba(0,0,0,0.5);display:none;">
+        <div id="pdf-designer-canvas-scroll" style="flex:1;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:36px;background:#080c14;background-image:radial-gradient(rgba(255,255,255,0.06) 1px, transparent 0);background-size:24px 24px;">
+          <div id="pdf-designer-wrapper" style="position:relative;background:#fff;box-shadow:0 12px 36px rgba(0,0,0,0.6);display:none;transform-origin:top center;transition:transform 0.05s ease-out;">
             <canvas id="pdf-designer-canvas" style="display:block;"></canvas>
             <div id="pdf-designer-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;"></div>
           </div>
-          <div id="pdf-designer-empty-hint" style="margin-top:100px;text-align:center;color:#64748b;">
-            <div style="font-size:3rem;margin-bottom:10px;">📄</div>
-            <div style="font-size:1.1rem;font-weight:600;color:#94a3b8;">尚未載入底圖範本</div>
-            <div style="font-size:0.85rem;margin-top:6px;">請點擊左上方「上傳紙本底圖」選取原紙本 PDF 或掃描圖檔</div>
+
+          <div id="pdf-designer-empty-hint" style="margin-top:120px;text-align:center;color:#64748b;background:#0f172a;padding:40px 60px;border-radius:12px;border:1px dashed #334155;box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+            <div style="font-size:3.5rem;margin-bottom:14px;">📄</div>
+            <div style="font-size:1.15rem;font-weight:600;color:#94a3b8;">尚未載入底圖範本</div>
+            <div style="font-size:0.88rem;margin-top:8px;color:#64748b;line-height:1.6;">
+              請點擊左上方「上傳紙本底圖」選取原紙本 PDF、掃描圖檔 (PNG, JPG)<br/>
+              底圖載入後，即可點選新增欄位或直接在底圖上拖拉框選！
+            </div>
           </div>
         </div>
 
         <!-- 右側欄位與屬性設定面板 -->
-        <div style="width:320px;background:#1e293b;border-left:1px solid #334155;display:flex;flex-direction:column;flex-shrink:0;">
+        <div style="width:340px;background:#1e293b;border-left:1px solid #334155;display:flex;flex-direction:column;flex-shrink:0;box-shadow:-2px 0 10px rgba(0,0,0,0.25);">
           <!-- 快速新增按鈕列 -->
-          <div style="padding:12px;border-bottom:1px solid #334155;">
-            <div style="font-size:0.8rem;color:#94a3b8;margin-bottom:8px;font-weight:600;">＋ 點擊在畫布中央新增欄位</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-              <button type="button" class="btn sm" data-add-type="text" style="background:#334155;color:#f8fafc;font-size:0.8rem;">＋ 文字方塊</button>
-              <button type="button" class="btn sm" data-add-type="number" style="background:#334155;color:#f8fafc;font-size:0.8rem;">＋ 金額/數值</button>
-              <button type="button" class="btn sm" data-add-type="date" style="background:#334155;color:#f8fafc;font-size:0.8rem;">＋ 日期欄位</button>
-              <button type="button" class="btn sm" data-add-type="textarea" style="background:#334155;color:#f8fafc;font-size:0.8rem;">＋ 多行說明</button>
-              <button type="button" class="btn sm" data-add-type="checkbox" style="background:#334155;color:#f8fafc;font-size:0.8rem;">＋ 核取方塊</button>
-              <button type="button" class="btn sm" data-add-type="signature" style="background:#b45309;color:#fff;font-size:0.8rem;">＋ 審核簽章格</button>
+          <div style="padding:14px 16px;border-bottom:1px solid #334155;background:#172033;">
+            <div style="font-size:0.82rem;color:#38bdf8;margin-bottom:10px;font-weight:700;display:flex;align-items:center;gap:6px;">
+              <span>＋</span> 點擊新增表單欄位至中央
             </div>
-            <div style="font-size:0.75rem;color:#64748b;margin-top:6px;">💡 或直接在底圖上用滑鼠按住拖曳拉出方框</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+              <button type="button" class="quick-btn" data-add-type="text"><span>📝</span> 單行文字</button>
+              <button type="button" class="quick-btn" data-add-type="number"><span>💲</span> 金額/數值</button>
+              <button type="button" class="quick-btn" data-add-type="date"><span>📅</span> 日期欄位</button>
+              <button type="button" class="quick-btn" data-add-type="textarea"><span>📄</span> 多行說明</button>
+              <button type="button" class="quick-btn" data-add-type="select"><span>🔽</span> 下拉選單</button>
+              <button type="button" class="quick-btn" data-add-type="checkbox"><span>☑️</span> 核取方塊</button>
+              <button type="button" class="quick-btn" data-add-type="signature" style="grid-column:1/-1;background:#92400e;border-color:#b45309;font-weight:600;justify-content:center;">
+                <span>🖋️</span> ＋ 新增審核簽章格
+              </button>
+            </div>
+            <div style="font-size:0.75rem;color:#94a3b8;margin-top:8px;line-height:1.4;">
+              💡 提示：亦可直接在底圖空白處按住滑鼠左鍵拖曳拉出方框！
+            </div>
           </div>
 
           <!-- 選定欄位屬性編輯 -->
-          <div id="pdf-designer-prop-panel" style="flex:1;overflow-y:auto;padding:14px;">
-            <div id="pdf-prop-empty" style="color:#64748b;text-align:center;margin-top:40px;font-size:0.85rem;">
-              點擊畫布上的欄位方框<br/>以編輯該欄位屬性
+          <div id="pdf-designer-prop-panel" style="flex:1;overflow-y:auto;padding:16px;">
+            <div id="pdf-prop-empty" style="color:#64748b;text-align:center;margin-top:50px;font-size:0.85rem;line-height:1.6;">
+              <div style="font-size:2rem;margin-bottom:8px;">🖱️</div>
+              點擊畫布上的欄位方框<br/>
+              以編輯該欄位屬性與位置尺寸
             </div>
+
             <div id="pdf-prop-form" style="display:none;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-                <strong style="color:#38bdf8;font-size:0.95rem;">欄位屬性設定</strong>
-                <button type="button" id="pdf-del-field-btn" class="btn sm" style="background:#dc2626;color:#fff;padding:2px 8px;font-size:0.75rem;">刪除此欄位</button>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #334155;">
+                <strong style="color:#38bdf8;font-size:0.95rem;display:flex;align-items:center;gap:6px;">
+                  <span>⚙️</span> 欄位屬性設定
+                </strong>
+                <button type="button" id="pdf-del-field-btn" class="btn sm" style="background:#dc2626;color:#fff;padding:2px 8px;font-size:0.75rem;border-radius:4px;">
+                  刪除此欄位
+                </button>
               </div>
 
-              <div style="display:flex;flex-direction:column;gap:10px;font-size:0.85rem;">
+              <div style="display:flex;flex-direction:column;gap:12px;font-size:0.84rem;">
+                <!-- 基本資訊 -->
                 <div>
-                  <label style="display:block;color:#94a3b8;margin-bottom:4px;">欄位名稱（標籤） *</label>
-                  <input type="text" id="prop-name" style="width:100%;padding:6px;border-radius:4px;border:1px solid #475569;background:#0f172a;color:#fff;" />
+                  <label style="display:block;color:#94a3b8;margin-bottom:4px;font-weight:500;">欄位名稱（標籤） *</label>
+                  <input type="text" id="prop-name" class="prop-input" placeholder="例如：申請人姓名、申請金額" />
                 </div>
+
                 <div>
-                  <label style="display:block;color:#94a3b8;margin-bottom:4px;">欄位代碼 (Key ID) *</label>
-                  <input type="text" id="prop-id" style="width:100%;padding:6px;border-radius:4px;border:1px solid #475569;background:#0f172a;color:#fff;" />
+                  <label style="display:block;color:#94a3b8;margin-bottom:4px;font-weight:500;">欄位代碼 (Key ID) *</label>
+                  <input type="text" id="prop-id" class="prop-input" placeholder="例如：applicant_name, amount" />
                 </div>
+
                 <div>
-                  <label style="display:block;color:#94a3b8;margin-bottom:4px;">欄位類型</label>
-                  <select id="prop-type" style="width:100%;padding:6px;border-radius:4px;border:1px solid #475569;background:#0f172a;color:#fff;">
+                  <label style="display:block;color:#94a3b8;margin-bottom:4px;font-weight:500;">欄位類型</label>
+                  <select id="prop-type" class="prop-input">
                     <option value="text">單行文字 (Text)</option>
                     <option value="number">數值/金額 (Number)</option>
                     <option value="date">日期 (Date)</option>
@@ -371,35 +547,80 @@
                 </div>
 
                 <!-- 簽章專用設定 -->
-                <div id="prop-signature-box" style="display:none;background:#0f172a;padding:8px;border-radius:6px;border:1px solid #334155;">
-                  <label style="display:block;color:#f59e0b;margin-bottom:4px;font-weight:600;">簽章綁定對象</label>
-                  <select id="prop-step-order" style="width:100%;padding:6px;border-radius:4px;border:1px solid #475569;background:#1e293b;color:#fff;">
-                    <option value="requester">申請人簽章</option>
-                    ${(workflow?.steps || []).map((s, i) => `<option value="${s.order != null ? s.order : i + 1}">關卡 ${s.order != null ? s.order : i + 1}：${s.name || '審核人'}</option>`).join('')}
+                <div id="prop-signature-box" style="display:none;background:#0f172a;padding:10px;border-radius:6px;border:1px solid #b45309;">
+                  <label style="display:block;color:#f59e0b;margin-bottom:6px;font-weight:600;">簽章綁定對象</label>
+                  <select id="prop-step-order" class="prop-input" style="background:#1e293b;">
+                    <option value="requester">申請人本人簽章</option>
+                    ${(workflow?.steps || []).map((s, i) => `<option value="${s.order != null ? s.order : i + 1}">關卡 ${s.order != null ? s.order : i + 1}：${s.name || '審核主管'}</option>`).join('')}
                   </select>
+                </div>
+
+                <!-- 下拉選單專用設定 -->
+                <div id="prop-select-box" style="display:none;background:#0f172a;padding:10px;border-radius:6px;border:1px solid #6366f1;">
+                  <label style="display:block;color:#a5b4fc;margin-bottom:4px;font-weight:600;">選項清單 (每行一個選項)</label>
+                  <textarea id="prop-options" class="prop-input" rows="3" placeholder="選項 1&#10;選項 2&#10;選項 3"></textarea>
                 </div>
 
                 <!-- 文字排版設定 -->
                 <div id="prop-text-style-box" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                   <div>
                     <label style="display:block;color:#94a3b8;margin-bottom:4px;">字級 (px)</label>
-                    <input type="number" id="prop-fontsize" min="8" max="48" value="12" style="width:100%;padding:6px;border-radius:4px;border:1px solid #475569;background:#0f172a;color:#fff;" />
+                    <input type="number" id="prop-fontsize" min="8" max="48" value="12" class="prop-input" />
                   </div>
                   <div>
-                    <label style="display:block;color:#94a3b8;margin-bottom:4px;">對齊</label>
-                    <select id="prop-align" style="width:100%;padding:6px;border-radius:4px;border:1px solid #475569;background:#0f172a;color:#fff;">
-                      <option value="left">靠左</option>
-                      <option value="center">置中</option>
-                      <option value="right">靠右</option>
+                    <label style="display:block;color:#94a3b8;margin-bottom:4px;">對齊方式</label>
+                    <select id="prop-align" class="prop-input">
+                      <option value="left">靠左對齊</option>
+                      <option value="center">置中對齊</option>
+                      <option value="right">靠右對齊</option>
                     </select>
                   </div>
                 </div>
 
-                <div style="margin-top:4px;">
-                  <label style="display:inline-flex;align-items:center;gap:6px;color:#cbd5e1;cursor:pointer;">
-                    <input type="checkbox" id="prop-required" />
-                    必填欄位
+                <div>
+                  <label style="display:inline-flex;align-items:center;gap:6px;color:#cbd5e1;cursor:pointer;font-weight:500;">
+                    <input type="checkbox" id="prop-required" style="width:16px;height:16px;cursor:pointer;" />
+                    設為必填欄位
                   </label>
+                </div>
+
+                <!-- 精確位置與尺寸（可手動輸入，亦即時連動滑鼠拖曳與縮放） -->
+                <div style="background:#0f172a;padding:10px;border-radius:6px;border:1px solid #334155;margin-top:4px;">
+                  <div style="font-size:0.8rem;color:#38bdf8;font-weight:600;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
+                    <span>📐 座標與尺寸 (畫布比例 %)</span>
+                    <span style="font-size:0.72rem;color:#64748b;">即時同步</span>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <div>
+                      <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:2px;">水平位置 (X %)</label>
+                      <input type="number" id="prop-rx" step="0.1" min="0" max="100" class="prop-input" style="padding:4px 6px;" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:2px;">垂直位置 (Y %)</label>
+                      <input type="number" id="prop-ry" step="0.1" min="0" max="100" class="prop-input" style="padding:4px 6px;" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:2px;">寬度 (W %)</label>
+                      <input type="number" id="prop-rw" step="0.1" min="1" max="100" class="prop-input" style="padding:4px 6px;" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:2px;">高度 (H %)</label>
+                      <input type="number" id="prop-rh" step="0.1" min="1" max="100" class="prop-input" style="padding:4px 6px;" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 快捷對齊與複製工具 -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px;">
+                  <button type="button" class="align-btn" id="btn-align-center-x">↔ 水平置中</button>
+                  <button type="button" class="align-btn" id="btn-align-center-y">↕ 垂直置中</button>
+                  <button type="button" class="align-btn" id="btn-clone-field">❐ 複製此欄位</button>
+                  <button type="button" class="align-btn" id="btn-delete-field-quick" style="color:#f87171;">🗑 刪除欄位</button>
+                </div>
+
+                <!-- 鍵盤捷徑提示 -->
+                <div style="font-size:0.74rem;color:#64748b;margin-top:6px;background:#090d16;padding:8px;border-radius:4px;border:1px solid #1e293b;line-height:1.4;">
+                  💡 快捷鍵：點選方框後可用方向鍵微調位置；<kbd style="background:#1e293b;color:#cbd5e1;padding:1px 4px;border-radius:2px;">Shift</kbd>＋方向鍵加速；<kbd style="background:#1e293b;color:#cbd5e1;padding:1px 4px;border-radius:2px;">Del</kbd> 刪除。
                 </div>
               </div>
             </div>
@@ -413,6 +634,7 @@
     // DOM 快取
     const uploadInput = modalEl.querySelector('#pdf-designer-upload-input');
     const filenameEl = modalEl.querySelector('#pdf-designer-filename');
+    const scrollContainer = modalEl.querySelector('#pdf-designer-canvas-scroll');
     const wrapper = modalEl.querySelector('#pdf-designer-wrapper');
     const canvas = modalEl.querySelector('#pdf-designer-canvas');
     const overlay = modalEl.querySelector('#pdf-designer-overlay');
@@ -420,6 +642,11 @@
     const pageIndicator = modalEl.querySelector('#pdf-page-indicator');
     const prevPageBtn = modalEl.querySelector('#pdf-prev-page');
     const nextPageBtn = modalEl.querySelector('#pdf-next-page');
+    const zoomLevelEl = modalEl.querySelector('#pdf-zoom-level');
+    const zoomInBtn = modalEl.querySelector('#pdf-zoom-in');
+    const zoomOutBtn = modalEl.querySelector('#pdf-zoom-out');
+    const zoomResetBtn = modalEl.querySelector('#pdf-zoom-reset');
+    const zoomFitBtn = modalEl.querySelector('#pdf-zoom-fit');
     const closeBtn = modalEl.querySelector('#pdf-designer-close-btn');
     const saveBtn = modalEl.querySelector('#pdf-designer-save-btn');
     const propEmpty = modalEl.querySelector('#pdf-prop-empty');
@@ -428,38 +655,175 @@
     // 關閉設計器
     closeBtn.onclick = () => modalEl.remove();
 
-    // 重新渲染畫布上的所有欄位方框
+    // 縮放控制函式
+    function setZoom(newZoom) {
+      zoomLevel = Math.max(0.4, Math.min(2.5, Math.round(newZoom * 100) / 100));
+      wrapper.style.transform = `scale(${zoomLevel})`;
+      zoomLevelEl.textContent = `${Math.round(zoomLevel * 100)}%`;
+    }
+
+    zoomInBtn.onclick = () => setZoom(zoomLevel + 0.15);
+    zoomOutBtn.onclick = () => setZoom(zoomLevel - 0.15);
+    zoomResetBtn.onclick = () => setZoom(1.0);
+    zoomFitBtn.onclick = () => {
+      if (canvas.width > 0) {
+        const availableW = scrollContainer.clientWidth - 80;
+        const fitRatio = availableW / canvas.width;
+        setZoom(fitRatio);
+      }
+    };
+
+    // 取得欄位顏色樣式配置
+    function getFieldVisuals(type) {
+      switch (type) {
+        case 'signature':
+          return {
+            border: '#f59e0b',
+            bg: 'rgba(245, 158, 11, 0.22)',
+            badgeBg: '#b45309',
+            icon: '🖋️',
+            label: '簽章格',
+          };
+        case 'number':
+          return {
+            border: '#0891b2',
+            bg: 'rgba(6, 182, 212, 0.2)',
+            badgeBg: '#0e7490',
+            icon: '💲',
+            label: '數值',
+          };
+        case 'date':
+          return {
+            border: '#0d9488',
+            bg: 'rgba(20, 184, 166, 0.2)',
+            badgeBg: '#0f766e',
+            icon: '📅',
+            label: '日期',
+          };
+        case 'textarea':
+          return {
+            border: '#6366f1',
+            bg: 'rgba(99, 102, 241, 0.2)',
+            badgeBg: '#4f46e5',
+            icon: '📄',
+            label: '多行',
+          };
+        case 'select':
+          return {
+            border: '#8b5cf6',
+            bg: 'rgba(139, 92, 246, 0.2)',
+            badgeBg: '#7c3aed',
+            icon: '🔽',
+            label: '選單',
+          };
+        case 'checkbox':
+          return {
+            border: '#10b981',
+            bg: 'rgba(16, 185, 129, 0.2)',
+            badgeBg: '#059669',
+            icon: '☑️',
+            label: '核取',
+          };
+        case 'text':
+        default:
+          return {
+            border: '#0284c7',
+            bg: 'rgba(14, 165, 233, 0.2)',
+            badgeBg: '#0369a1',
+            icon: '📝',
+            label: '文字',
+          };
+      }
+    }
+
+    // 浮動即時提示（在拖拉或縮放時顯示精準數值）
+    function showLiveTip(boxEl, text) {
+      let tip = overlay.querySelector('#pdf-live-drag-tip');
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'pdf-live-drag-tip';
+        tip.style.position = 'absolute';
+        tip.style.padding = '3px 8px';
+        tip.style.background = '#0f172a';
+        tip.style.border = '1px solid #38bdf8';
+        tip.style.color = '#38bdf8';
+        tip.style.fontSize = '11px';
+        tip.style.fontFamily = 'monospace';
+        tip.style.borderRadius = '4px';
+        tip.style.pointerEvents = 'none';
+        tip.style.zIndex = '999';
+        tip.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
+        tip.style.whiteSpace = 'nowrap';
+        overlay.appendChild(tip);
+      }
+      tip.textContent = text;
+      tip.style.display = 'block';
+
+      const boxTop = parseFloat(boxEl.style.top) || 0;
+      const boxLeft = parseFloat(boxEl.style.left) || 0;
+      tip.style.left = `${boxLeft}%`;
+      tip.style.top = `${Math.max(0, boxTop - 3.5)}%`;
+    }
+
+    function hideLiveTip() {
+      const tip = overlay.querySelector('#pdf-live-drag-tip');
+      if (tip) tip.style.display = 'none';
+    }
+
+    // 重新渲染畫布上的所有欄位 DOM 方框（僅在欄位增刪、切換頁面或切換底圖時執行）
     function renderOverlayBoxes() {
       overlay.innerHTML = '';
-      fields.forEach((f) => {
+
+      // 僅渲染目前頁面的欄位
+      const curPageFields = fields.filter((f) => (Number(f.page) || 1) === curPage);
+
+      curPageFields.forEach((f) => {
+        const visuals = getFieldVisuals(f.type);
+        const isSelected = f.id === selectedFieldId;
+
         const box = document.createElement('div');
-        box.className = 'designer-field-box';
+        box.className = `designer-field-box ${isSelected ? 'is-selected' : ''}`;
         box.dataset.id = f.id;
-        box.style.position = 'absolute';
+        box.dataset.type = f.type || 'text';
         box.style.left = `${(f.rx * 100).toFixed(3)}%`;
         box.style.top = `${(f.ry * 100).toFixed(3)}%`;
         box.style.width = `${(f.rw * 100).toFixed(3)}%`;
         box.style.height = `${(f.rh * 100).toFixed(3)}%`;
-        box.style.border = f.id === selectedFieldId ? '2px solid #38bdf8' : '1.5px solid #2563eb';
-        box.style.backgroundColor = f.type === 'signature' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(56, 189, 248, 0.2)';
+        box.style.border = isSelected ? '2px solid #38bdf8' : `1.5px solid ${visuals.border}`;
+        box.style.backgroundColor = visuals.bg;
         box.style.borderRadius = '3px';
-        box.style.boxSizing = 'border-box';
         box.style.cursor = 'move';
-        box.style.userSelect = 'none';
+        box.style.zIndex = isSelected ? '50' : '10';
 
-        // 欄位標籤提示
         box.innerHTML = `
-          <div style="position:absolute;top:-18px;left:0;background:${f.type === 'signature' ? '#b45309' : '#0284c7'};color:#fff;font-size:10px;padding:1px 5px;border-radius:3px 3px 0 0;white-space:nowrap;pointer-events:none;line-height:1.2;">
-            ${f.name || f.id}
+          <!-- 頂部標籤 Badge -->
+          <div class="field-title-badge" style="background:${visuals.badgeBg};">
+            <span>${visuals.icon}</span>
+            <span class="badge-text">${f.name || f.id}</span>
+            ${f.required ? '<span style="color:#f87171;font-weight:bold;">*</span>' : ''}
           </div>
-          <div class="resize-handle" style="position:absolute;bottom:-3px;right:-3px;width:10px;height:10px;background:#38bdf8;border-radius:2px;cursor:nwse-resize;"></div>
+
+          <!-- 8 點縮放手柄 (僅在選定狀態時顯示並響應滑鼠) -->
+          <div class="designer-handles" style="display:${isSelected ? 'block' : 'none'};">
+            <div class="resize-handle" data-dir="nw" style="top:-4.5px;left:-4.5px;cursor:nwse-resize;" title="縮放 (左上)"></div>
+            <div class="resize-handle" data-dir="n" style="top:-4.5px;left:calc(50% - 4.5px);cursor:ns-resize;" title="縮放 (上邊)"></div>
+            <div class="resize-handle" data-dir="ne" style="top:-4.5px;right:-4.5px;cursor:nesw-resize;" title="縮放 (右上)"></div>
+            <div class="resize-handle" data-dir="e" style="top:calc(50% - 4.5px);right:-4.5px;cursor:ew-resize;" title="縮放 (右邊)"></div>
+            <div class="resize-handle" data-dir="se" style="bottom:-4.5px;right:-4.5px;cursor:nwse-resize;" title="縮放 (右下)"></div>
+            <div class="resize-handle" data-dir="s" style="bottom:-4.5px;left:calc(50% - 4.5px);cursor:ns-resize;" title="縮放 (下邊)"></div>
+            <div class="resize-handle" data-dir="sw" style="bottom:-4.5px;left:-4.5px;cursor:nesw-resize;" title="縮放 (左下)"></div>
+            <div class="resize-handle" data-dir="w" style="top:calc(50% - 4.5px);left:-4.5px;cursor:ew-resize;" title="縮放 (左邊)"></div>
+          </div>
         `;
 
-        // 點選與移動處理
+        // 綁定方框滑鼠拖曳移動 (Move / Drag)
         box.onmousedown = (e) => {
-          if (e.target.classList.contains('resize-handle')) return; // 由縮放手柄處理
+          if (e.target.classList.contains('resize-handle')) return; // 由縮放手柄單獨處理
+          e.preventDefault();
           e.stopPropagation();
-          selectField(f.id);
+
+          // 切換選定，但絕對不重建 DOM，保持當前節點活躍！
+          selectField(f.id, false);
 
           const startClientX = e.clientX;
           const startClientY = e.clientY;
@@ -467,68 +831,177 @@
           const startRx = f.rx;
           const startRy = f.ry;
 
+          document.body.style.cursor = 'grabbing';
+          box.style.cursor = 'grabbing';
+          overlay.style.cursor = 'grabbing';
+
+          showLiveTip(box, `X: ${(f.rx * 100).toFixed(1)}%  Y: ${(f.ry * 100).toFixed(1)}%`);
+
           function onMouseMove(moveEv) {
-            const dx = (moveEv.clientX - startClientX) / rect.width;
-            const dy = (moveEv.clientY - startClientY) / rect.height;
+            moveEv.preventDefault();
+            const curRect = overlay.getBoundingClientRect();
+            const w = curRect.width || 1;
+            const h = curRect.height || 1;
+            const dx = (moveEv.clientX - startClientX) / w;
+            const dy = (moveEv.clientY - startClientY) / h;
+
+            // 邊界嚴格限制在畫布 [0, 1] 內
             f.rx = Math.max(0, Math.min(1 - f.rw, startRx + dx));
             f.ry = Math.max(0, Math.min(1 - f.rh, startRy + dy));
+
             box.style.left = `${(f.rx * 100).toFixed(3)}%`;
             box.style.top = `${(f.ry * 100).toFixed(3)}%`;
+
+            syncPropCoords(f);
+            showLiveTip(box, `X: ${(f.rx * 100).toFixed(1)}%  Y: ${(f.ry * 100).toFixed(1)}%`);
           }
 
           function onMouseUp() {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+            document.body.style.cursor = '';
+            box.style.cursor = 'move';
+            overlay.style.cursor = 'crosshair';
+            hideLiveTip();
+            syncPropCoords(f);
           }
 
-          document.addEventListener('mousemove', onMouseMove);
-          document.addEventListener('mouseup', onMouseUp);
+          window.addEventListener('mousemove', onMouseMove);
+          window.addEventListener('mouseup', onMouseUp);
         };
 
-        // 右下角縮放把手處理
-        const handle = box.querySelector('.resize-handle');
-        handle.onmousedown = (e) => {
-          e.stopPropagation();
-          selectField(f.id);
+        // 綁定 8 點縮放手柄處理 (8-Direction Resize Handles)
+        box.querySelectorAll('.resize-handle').forEach((handleEl) => {
+          handleEl.onmousedown = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
 
-          const startClientX = e.clientX;
-          const startClientY = e.clientY;
-          const rect = overlay.getBoundingClientRect();
-          const startRw = f.rw;
-          const startRh = f.rh;
+            selectField(f.id, false);
 
-          function onResizeMove(moveEv) {
-            const dx = (moveEv.clientX - startClientX) / rect.width;
-            const dy = (moveEv.clientY - startClientY) / rect.height;
-            f.rw = Math.max(0.02, Math.min(1 - f.rx, startRw + dx));
-            f.rh = Math.max(0.015, Math.min(1 - f.ry, startRh + dy));
-            box.style.width = `${(f.rw * 100).toFixed(3)}%`;
-            box.style.height = `${(f.rh * 100).toFixed(3)}%`;
-          }
+            const dir = handleEl.dataset.dir;
+            const startClientX = e.clientX;
+            const startClientY = e.clientY;
+            const startRx = f.rx;
+            const startRy = f.ry;
+            const startRw = f.rw;
+            const startRh = f.rh;
 
-          function onResizeUp() {
-            document.removeEventListener('mousemove', onResizeMove);
-            document.removeEventListener('mouseup', onResizeUp);
-          }
+            const handleCursor = window.getComputedStyle(handleEl).cursor;
+            document.body.style.cursor = handleCursor;
+            overlay.style.cursor = handleCursor;
 
-          document.addEventListener('mousemove', onResizeMove);
-          document.addEventListener('mouseup', onResizeUp);
-        };
+            // 最小寬度與高度限制 (寬度 min 1.5%，高度 min 1%)
+            const MIN_W = 0.015;
+            const MIN_H = 0.01;
+
+            showLiveTip(box, `寬: ${(f.rw * 100).toFixed(1)}%  高: ${(f.rh * 100).toFixed(1)}%`);
+
+            function onResizeMove(moveEv) {
+              moveEv.preventDefault();
+              const curRect = overlay.getBoundingClientRect();
+              const w = curRect.width || 1;
+              const h = curRect.height || 1;
+              const dx = (moveEv.clientX - startClientX) / w;
+              const dy = (moveEv.clientY - startClientY) / h;
+
+              let rx = startRx;
+              let ry = startRy;
+              let rw = startRw;
+              let rh = startRh;
+
+              // 水平調整 (e: 向右擴展, w: 向左擴展)
+              if (dir.includes('e')) {
+                rw = Math.max(MIN_W, Math.min(1 - startRx, startRw + dx));
+              } else if (dir.includes('w')) {
+                const maxRight = startRx + startRw;
+                rx = Math.min(maxRight - MIN_W, Math.max(0, startRx + dx));
+                rw = maxRight - rx;
+              }
+
+              // 垂直調整 (s: 向下擴展, n: 向上擴展)
+              if (dir.includes('s')) {
+                rh = Math.max(MIN_H, Math.min(1 - startRy, startRh + dy));
+              } else if (dir.includes('n')) {
+                const maxBottom = startRy + startRh;
+                ry = Math.min(maxBottom - MIN_H, Math.max(0, startRy + dy));
+                rh = maxBottom - ry;
+              }
+
+              f.rx = rx;
+              f.ry = ry;
+              f.rw = rw;
+              f.rh = rh;
+
+              box.style.left = `${(f.rx * 100).toFixed(3)}%`;
+              box.style.top = `${(f.ry * 100).toFixed(3)}%`;
+              box.style.width = `${(f.rw * 100).toFixed(3)}%`;
+              box.style.height = `${(f.rh * 100).toFixed(3)}%`;
+
+              syncPropCoords(f);
+              showLiveTip(box, `寬: ${(f.rw * 100).toFixed(1)}%  高: ${(f.rh * 100).toFixed(1)}%`);
+            }
+
+            function onResizeUp() {
+              window.removeEventListener('mousemove', onResizeMove);
+              window.removeEventListener('mouseup', onResizeUp);
+              document.body.style.cursor = '';
+              overlay.style.cursor = 'crosshair';
+              hideLiveTip();
+              syncPropCoords(f);
+            }
+
+            window.addEventListener('mousemove', onResizeMove);
+            window.addEventListener('mouseup', onResizeUp);
+          };
+        });
 
         overlay.appendChild(box);
       });
     }
 
-    // 選取欄位並在右側屬性面板顯示
-    function selectField(id) {
+    // 更新右側面板座標數值（不干擾使用者當前輸入焦點）
+    function syncPropCoords(f) {
+      if (!f) return;
+      const rxInp = modalEl.querySelector('#prop-rx');
+      const ryInp = modalEl.querySelector('#prop-ry');
+      const rwInp = modalEl.querySelector('#prop-rw');
+      const rhInp = modalEl.querySelector('#prop-rh');
+
+      if (document.activeElement !== rxInp && rxInp) rxInp.value = (f.rx * 100).toFixed(1);
+      if (document.activeElement !== ryInp && ryInp) ryInp.value = (f.ry * 100).toFixed(1);
+      if (document.activeElement !== rwInp && rwInp) rwInp.value = (f.rw * 100).toFixed(1);
+      if (document.activeElement !== rhInp && rhInp) rhInp.value = (f.rh * 100).toFixed(1);
+    }
+
+    // 選取欄位並更新高亮與右側面板 (不重建 DOM！)
+    function selectField(id, forceRerender = false) {
       selectedFieldId = id;
-      renderOverlayBoxes();
+
+      if (forceRerender) {
+        renderOverlayBoxes();
+      } else {
+        // 直接更新 DOM class 與縮放手柄顯示狀態
+        overlay.querySelectorAll('.designer-field-box').forEach((boxEl) => {
+          const isSel = boxEl.dataset.id === selectedFieldId;
+          boxEl.classList.toggle('is-selected', isSel);
+          const visuals = getFieldVisuals(boxEl.dataset.type);
+          boxEl.style.border = isSel ? '2px solid #38bdf8' : `1.5px solid ${visuals.border}`;
+          boxEl.style.zIndex = isSel ? '50' : '10';
+
+          const handles = boxEl.querySelector('.designer-handles');
+          if (handles) {
+            handles.style.display = isSel ? 'block' : 'none';
+          }
+        });
+      }
+
       const f = fields.find((x) => x.id === id);
       if (!f) {
         propEmpty.style.display = 'block';
         propForm.style.display = 'none';
         return;
       }
+
       propEmpty.style.display = 'none';
       propForm.style.display = 'block';
 
@@ -539,6 +1012,7 @@
       modalEl.querySelector('#prop-align').value = f.align || 'left';
       modalEl.querySelector('#prop-required').checked = !!f.required;
 
+      // 簽章專用設定
       const sigBox = modalEl.querySelector('#prop-signature-box');
       if (f.type === 'signature') {
         sigBox.style.display = 'block';
@@ -546,25 +1020,58 @@
       } else {
         sigBox.style.display = 'none';
       }
+
+      // 下拉選單專用設定
+      const selBox = modalEl.querySelector('#prop-select-box');
+      if (f.type === 'select') {
+        selBox.style.display = 'block';
+        modalEl.querySelector('#prop-options').value = Array.isArray(f.options) ? f.options.join('\n') : '';
+      } else {
+        selBox.style.display = 'none';
+      }
+
+      syncPropCoords(f);
     }
 
-    // 綁定屬性面板表單變更
+    // 屬性面板變更事件連動
     modalEl.querySelector('#prop-name').oninput = (e) => {
       const f = fields.find((x) => x.id === selectedFieldId);
-      if (f) { f.name = e.target.value; renderOverlayBoxes(); }
+      if (f) {
+        f.name = e.target.value;
+        const box = overlay.querySelector(`.designer-field-box[data-id="${f.id}"]`);
+        if (box) {
+          const badgeText = box.querySelector('.badge-text');
+          if (badgeText) badgeText.textContent = f.name || f.id;
+        }
+      }
     };
+
     modalEl.querySelector('#prop-id').oninput = (e) => {
       const f = fields.find((x) => x.id === selectedFieldId);
-      if (f) { f.id = e.target.value; }
+      if (f) {
+        f.id = e.target.value;
+        const box = overlay.querySelector(`.designer-field-box[data-id="${f.id}"]`);
+        if (box && !f.name) {
+          const badgeText = box.querySelector('.badge-text');
+          if (badgeText) badgeText.textContent = f.id;
+        }
+      }
     };
+
     modalEl.querySelector('#prop-type').onchange = (e) => {
       const f = fields.find((x) => x.id === selectedFieldId);
       if (f) {
         f.type = e.target.value;
         f.isStamp = f.type === 'signature';
-        selectField(f.id);
+        if (f.type === 'signature') {
+          f.role = f.role || 'approver';
+          f.stepOrder = f.stepOrder || 1;
+        }
+        renderOverlayBoxes();
+        selectField(f.id, false);
       }
     };
+
     modalEl.querySelector('#prop-step-order').onchange = (e) => {
       const f = fields.find((x) => x.id === selectedFieldId);
       if (f) {
@@ -577,57 +1084,201 @@
         }
       }
     };
+
+    modalEl.querySelector('#prop-options').oninput = (e) => {
+      const f = fields.find((x) => x.id === selectedFieldId);
+      if (f) {
+        f.options = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      }
+    };
+
     modalEl.querySelector('#prop-fontsize').oninput = (e) => {
       const f = fields.find((x) => x.id === selectedFieldId);
       if (f) { f.fontSize = Number(e.target.value) || 12; }
     };
+
     modalEl.querySelector('#prop-align').onchange = (e) => {
       const f = fields.find((x) => x.id === selectedFieldId);
       if (f) { f.align = e.target.value; }
     };
+
     modalEl.querySelector('#prop-required').onchange = (e) => {
       const f = fields.find((x) => x.id === selectedFieldId);
-      if (f) { f.required = e.target.checked; }
+      if (f) {
+        f.required = e.target.checked;
+        renderOverlayBoxes();
+        selectField(f.id, false);
+      }
     };
 
-    // 刪除欄位按鈕
-    modalEl.querySelector('#pdf-del-field-btn').onclick = () => {
+    // 數值輸入座標微調 (X, Y, W, H)
+    function bindCoordInput(elemId, propKey, isSize = false) {
+      modalEl.querySelector(elemId).oninput = (e) => {
+        const f = fields.find((x) => x.id === selectedFieldId);
+        if (!f) return;
+        const val = parseFloat(e.target.value);
+        if (isNaN(val)) return;
+
+        const ratio = Math.max(0, Math.min(100, val)) / 100;
+        if (isSize) {
+          f[propKey] = Math.max(0.01, ratio);
+        } else {
+          f[propKey] = ratio;
+        }
+
+        const box = overlay.querySelector(`.designer-field-box[data-id="${f.id}"]`);
+        if (box) {
+          box.style.left = `${(f.rx * 100).toFixed(3)}%`;
+          box.style.top = `${(f.ry * 100).toFixed(3)}%`;
+          box.style.width = `${(f.rw * 100).toFixed(3)}%`;
+          box.style.height = `${(f.rh * 100).toFixed(3)}%`;
+        }
+      };
+    }
+
+    bindCoordInput('#prop-rx', 'rx', false);
+    bindCoordInput('#prop-ry', 'ry', false);
+    bindCoordInput('#prop-rw', 'rw', true);
+    bindCoordInput('#prop-rh', 'rh', true);
+
+    // 水平置中按鈕
+    modalEl.querySelector('#btn-align-center-x').onclick = () => {
+      const f = fields.find((x) => x.id === selectedFieldId);
+      if (f) {
+        f.rx = Math.max(0, Math.round(((1 - f.rw) / 2) * 1000) / 1000);
+        const box = overlay.querySelector(`.designer-field-box[data-id="${f.id}"]`);
+        if (box) box.style.left = `${(f.rx * 100).toFixed(3)}%`;
+        syncPropCoords(f);
+      }
+    };
+
+    // 垂直置中按鈕
+    modalEl.querySelector('#btn-align-center-y').onclick = () => {
+      const f = fields.find((x) => x.id === selectedFieldId);
+      if (f) {
+        f.ry = Math.max(0, Math.round(((1 - f.rh) / 2) * 1000) / 1000);
+        const box = overlay.querySelector(`.designer-field-box[data-id="${f.id}"]`);
+        if (box) box.style.top = `${(f.ry * 100).toFixed(3)}%`;
+        syncPropCoords(f);
+      }
+    };
+
+    // 複製欄位
+    modalEl.querySelector('#btn-clone-field').onclick = () => {
+      const f = fields.find((x) => x.id === selectedFieldId);
+      if (!f) return;
+      const clone = JSON.parse(JSON.stringify(f));
+      clone.id = genFieldId(clone.type === 'signature' ? 'stamp' : 'f');
+      clone.name = `${clone.name || '欄位'} (副本)`;
+      clone.rx = Math.min(1 - clone.rw, clone.rx + 0.025);
+      clone.ry = Math.min(1 - clone.rh, clone.ry + 0.025);
+      fields.push(clone);
+      renderOverlayBoxes();
+      selectField(clone.id, false);
+    };
+
+    // 刪除欄位
+    const deleteSelectedField = () => {
+      if (!selectedFieldId) return;
       fields = fields.filter((x) => x.id !== selectedFieldId);
+      renderOverlayBoxes();
       selectField(null);
     };
 
-    // 快速新增欄位按鈕列
+    modalEl.querySelector('#pdf-del-field-btn').onclick = deleteSelectedField;
+    modalEl.querySelector('#btn-delete-field-quick').onclick = deleteSelectedField;
+
+    // 鍵盤捷徑 (方向鍵移動、Shift 加速、Alt 微調、Delete 刪除)
+    modalEl.addEventListener('keydown', (e) => {
+      const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+      if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') return;
+
+      if (!selectedFieldId) return;
+      const f = fields.find((x) => x.id === selectedFieldId);
+      if (!f) return;
+
+      const box = overlay.querySelector(`.designer-field-box[data-id="${f.id}"]`);
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        deleteSelectedField();
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        selectField(null);
+        return;
+      }
+
+      const step = e.altKey ? 0.001 : e.shiftKey ? 0.02 : 0.005; // 0.1%, 2%, or 0.5%
+      let moved = false;
+
+      if (e.key === 'ArrowLeft') {
+        f.rx = Math.max(0, f.rx - step);
+        moved = true;
+      } else if (e.key === 'ArrowRight') {
+        f.rx = Math.min(1 - f.rw, f.rx + step);
+        moved = true;
+      } else if (e.key === 'ArrowUp') {
+        f.ry = Math.max(0, f.ry - step);
+        moved = true;
+      } else if (e.key === 'ArrowDown') {
+        f.ry = Math.min(1 - f.rh, f.ry + step);
+        moved = true;
+      }
+
+      if (moved) {
+        e.preventDefault();
+        if (box) {
+          box.style.left = `${(f.rx * 100).toFixed(3)}%`;
+          box.style.top = `${(f.ry * 100).toFixed(3)}%`;
+        }
+        syncPropCoords(f);
+      }
+    });
+
+    // 快速新增欄位按鈕列 (置於畫布中央視野)
     modalEl.querySelectorAll('[data-add-type]').forEach((btn) => {
       btn.onclick = () => {
         const type = btn.dataset.addType;
         const newField = {
           id: genFieldId(type === 'signature' ? 'stamp' : 'f'),
-          name: type === 'signature' ? '審核人簽章' : type === 'number' ? '金額' : type === 'date' ? '日期' : '新欄位',
+          name: type === 'signature' ? '審核人簽章' : type === 'number' ? '金額' : type === 'date' ? '日期' : type === 'select' ? '選單欄位' : '新欄位',
           type,
           page: curPage,
           rx: 0.35,
-          ry: 0.4,
-          rw: type === 'signature' ? 0.18 : 0.25,
-          rh: type === 'signature' ? 0.08 : 0.04,
+          ry: 0.38,
+          rw: type === 'signature' ? 0.2 : type === 'textarea' ? 0.35 : 0.25,
+          rh: type === 'signature' ? 0.08 : type === 'textarea' ? 0.1 : 0.045,
           fontSize: 12,
           align: 'left',
           required: false,
           isStamp: type === 'signature',
           role: type === 'signature' ? 'approver' : undefined,
           stepOrder: type === 'signature' ? 1 : undefined,
+          options: type === 'select' ? ['選項 A', '選項 B'] : undefined,
         };
         fields.push(newField);
-        selectField(newField.id);
+        renderOverlayBoxes();
+        selectField(newField.id, false);
       };
     });
 
-    // 滑鼠在空白處框選拖曳出新欄位
+    // 滑鼠在空白處框選拖曳出新欄位 (Drag-to-create)
     overlay.onmousedown = (e) => {
       if (e.target !== overlay) return;
+      e.preventDefault();
+
+      // 取消目前選定
+      selectField(null);
+
       isDrawing = true;
       const rect = overlay.getBoundingClientRect();
-      drawStartX = (e.clientX - rect.left) / rect.width;
-      drawStartY = (e.clientY - rect.top) / rect.height;
+      const w = rect.width || 1;
+      const h = rect.height || 1;
+      drawStartX = (e.clientX - rect.left) / w;
+      drawStartY = (e.clientY - rect.top) / h;
 
       const drawBox = document.createElement('div');
       drawBox.id = 'designer-temp-drawing-box';
@@ -635,12 +1286,17 @@
       drawBox.style.border = '2px dashed #38bdf8';
       drawBox.style.background = 'rgba(56, 189, 248, 0.25)';
       drawBox.style.pointerEvents = 'none';
+      drawBox.style.borderRadius = '3px';
+      drawBox.style.zIndex = '999';
       overlay.appendChild(drawBox);
 
       function onDrawMove(moveEv) {
         if (!isDrawing) return;
-        const curX = Math.max(0, Math.min(1, (moveEv.clientX - rect.left) / rect.width));
-        const curY = Math.max(0, Math.min(1, (moveEv.clientY - rect.top) / rect.height));
+        const curRect = overlay.getBoundingClientRect();
+        const cw = curRect.width || 1;
+        const ch = curRect.height || 1;
+        const curX = Math.max(0, Math.min(1, (moveEv.clientX - curRect.left) / cw));
+        const curY = Math.max(0, Math.min(1, (moveEv.clientY - curRect.top) / ch));
         const rx = Math.min(drawStartX, curX);
         const ry = Math.min(drawStartY, curY);
         const rw = Math.abs(curX - drawStartX);
@@ -656,11 +1312,14 @@
         if (!isDrawing) return;
         isDrawing = false;
         drawBox.remove();
-        document.removeEventListener('mousemove', onDrawMove);
-        document.removeEventListener('mouseup', onDrawUp);
+        window.removeEventListener('mousemove', onDrawMove);
+        window.removeEventListener('mouseup', onDrawUp);
 
-        const curX = Math.max(0, Math.min(1, (upEv.clientX - rect.left) / rect.width));
-        const curY = Math.max(0, Math.min(1, (upEv.clientY - rect.top) / rect.height));
+        const curRect = overlay.getBoundingClientRect();
+        const cw = curRect.width || 1;
+        const ch = curRect.height || 1;
+        const curX = Math.max(0, Math.min(1, (upEv.clientX - curRect.left) / cw));
+        const curY = Math.max(0, Math.min(1, (upEv.clientY - curRect.top) / ch));
         const rx = Math.min(drawStartX, curX);
         const ry = Math.min(drawStartY, curY);
         const rw = Math.abs(curX - drawStartX);
@@ -681,14 +1340,13 @@
             required: false,
           };
           fields.push(newField);
-          selectField(newField.id);
-        } else {
-          selectField(null);
+          renderOverlayBoxes();
+          selectField(newField.id, false);
         }
       }
 
-      document.addEventListener('mousemove', onDrawMove);
-      document.addEventListener('mouseup', onDrawUp);
+      window.addEventListener('mousemove', onDrawMove);
+      window.addEventListener('mouseup', onDrawUp);
     };
 
     // 載入底圖顯示
@@ -718,13 +1376,19 @@
 
     // 換頁按鈕
     prevPageBtn.onclick = () => {
-      if (curPage > 1) { curPage--; loadTemplate(); }
+      if (curPage > 1) {
+        curPage--;
+        loadTemplate();
+      }
     };
     nextPageBtn.onclick = () => {
-      if (curPage < totalPages) { curPage++; loadTemplate(); }
+      if (curPage < totalPages) {
+        curPage++;
+        loadTemplate();
+      }
     };
 
-    // 上傳檔案處理
+    // 上傳底圖檔案處理
     uploadInput.onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -760,7 +1424,7 @@
     // 儲存並套用
     saveBtn.onclick = () => {
       if (!templateFile) {
-        alert('請先上傳底圖檔案！');
+        alert('請先上傳紙本底圖檔案！');
         return;
       }
 

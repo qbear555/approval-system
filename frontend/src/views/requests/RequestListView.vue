@@ -300,7 +300,7 @@ const SCRIPTS = [
   '/js/pages-system.js',
 ];
 
-const V = '20261004_split_act';
+const V = '20261004_paper_drag';
 function loadLegacyScript(src) {
   return new Promise((resolve, reject) => {
     const wanted = `${src}?v=${V}`;

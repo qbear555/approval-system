@@ -1134,6 +1134,11 @@ async function openWorkflowEditor(workflow = null) {
               const exist = formFields.find((f) => f.id === cf.id);
               if (!exist) {
                 formFields.push(cf);
+              } else {
+                exist.label = cf.label || exist.label;
+                exist.type = cf.type || exist.type;
+                exist.required = !!cf.required;
+                if (cf.options) exist.options = cf.options;
               }
             });
             renderFormFields();
