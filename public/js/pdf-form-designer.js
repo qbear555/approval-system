@@ -1423,8 +1423,8 @@
 
     // 儲存並套用
     saveBtn.onclick = () => {
-      if (!templateFile) {
-        alert('請先上傳紙本底圖檔案！');
+      if (!templateFile && fields.length === 0) {
+        alert('請先上傳紙本底圖檔案或點擊右側按鈕新增表單欄位！');
         return;
       }
 

@@ -14,6 +14,7 @@ function bindWorkflowsActions(hostEl, onRefresh) {
   if (btnNewPaper) {
     btnNewPaper.onclick = () => {
       openWorkflowEditor({
+        name: '紙本表單簽核流程',
         pdfLayout: { type: 'pdf_template', fields: [] },
         _autoOpenDesigner: true,
       });
@@ -357,17 +358,9 @@ async function openWorkflowEditor(workflow = null) {
       }))
     : [
         {
-          name: '代理人',
-          assignType: 'form_user',
-          formFieldId: 'agent',
-          department: '',
-          approverIds: [],
-          mode: 'any',
-        },
-        {
           name: '部門主管',
           assignType: 'dept_head',
-          formFieldId: 'agent',
+          formFieldId: '',
           department: '',
           approverIds: [],
           mode: 'any',
@@ -1391,10 +1384,21 @@ async function openWorkflowEditor(workflow = null) {
         return;
       }
       if (s.assignType === 'form_user') {
-        const ff = formFields.find((f) => f.id === s.formFieldId);
-        if (!ff || ff.type !== 'user') {
-          toast(`步驟「${s.name}」需要對應「人員選擇」表單欄位（例如代理人）`, 'error');
-          return;
+        let ff = formFields.find((f) => f.id === s.formFieldId);
+        if (!ff) {
+          const targetId = s.formFieldId || 'agent';
+          const targetLabel = s.name || '指定人員';
+          ff = {
+            id: targetId,
+            label: targetLabel,
+            type: 'user',
+            required: false,
+            placeholder: `請選擇${targetLabel}`,
+            options: [],
+          };
+          formFields.push(ff);
+        } else if (ff.type !== 'user') {
+          ff.type = 'user';
         }
       }
     }

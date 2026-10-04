@@ -236,16 +236,19 @@ module.exports = function registerWorkflowRoutes(app, ctx) {
     }
     for (const s of parsed) {
       if (s.assignType === 'form_user') {
-        const ff = fields.find((f) => f.id === s.formFieldId);
+        let ff = fields.find((f) => f.id === s.formFieldId);
         if (!ff) {
-          return res.status(400).json({
-            error: `步驟「${s.name}」的表單欄位「${s.formFieldId}」不存在，請先新增「人員選擇」欄位`,
-          });
-        }
-        if (ff.type !== 'user') {
-          return res.status(400).json({
-            error: `步驟「${s.name}」對應欄位「${ff.label}」類型須為「人員選擇」`,
-          });
+          const fieldId = s.formFieldId || 'agent';
+          const fieldLabel = s.name || '指定人員';
+          ff = {
+            id: fieldId,
+            label: fieldLabel,
+            type: 'user',
+            required: false,
+          };
+          fields.push(ff);
+        } else if (ff.type !== 'user') {
+          ff.type = 'user';
         }
       }
     }
@@ -315,16 +318,21 @@ module.exports = function registerWorkflowRoutes(app, ctx) {
       const fields = typeof parseFormFields === 'function' ? parseFormFields(fieldsJson) : [];
       for (const s of parsed) {
         if (s.assignType === 'form_user') {
-          const ff = fields.find((f) => f.id === s.formFieldId);
+          let ff = fields.find((f) => f.id === s.formFieldId);
           if (!ff) {
-            return res.status(400).json({
-              error: `步驟「${s.name}」的表單欄位「${s.formFieldId}」不存在，請先新增「人員選擇」欄位`,
-            });
-          }
-          if (ff.type !== 'user') {
-            return res.status(400).json({
-              error: `步驟「${s.name}」對應欄位「${ff.label}」類型須為「人員選擇」`,
-            });
+            const fieldId = s.formFieldId || 'agent';
+            const fieldLabel = s.name || '指定人員';
+            ff = {
+              id: fieldId,
+              label: fieldLabel,
+              type: 'user',
+              required: false,
+            };
+            fields.push(ff);
+            fieldsJson = JSON.stringify(fields);
+          } else if (ff.type !== 'user') {
+            ff.type = 'user';
+            fieldsJson = JSON.stringify(fields);
           }
         }
       }
