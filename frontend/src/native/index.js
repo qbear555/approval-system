@@ -1,6 +1,6 @@
 /**
- * 已改寫為 Vue 的頁面清單（供 LegacyHost 內的經典 navigate 使用）。
- * 總覽／待我簽核／我的申請／簽核紀錄已改為獨立 Vue 路由，不再由此掛載。
+ * 原生 Vue 頁面清單（由 AppHost 調度掛載）。
+ * 總覽／待我簽核／我的申請／簽核紀錄已為獨立 Vue 路由。
  */
 import { mountNative, unmountNativePage } from './bridge';
 import LeaveReportPage from './pages/LeaveReportPage.vue';

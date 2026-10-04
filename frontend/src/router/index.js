@@ -6,7 +6,7 @@ const AppLayout = () => import('@/components/layout/AppLayout.vue');
 const LoginView = () => import('@/views/auth/LoginView.vue');
 const DashboardView = () => import('@/views/dashboard/DashboardView.vue');
 const RequestListView = () => import('@/views/requests/RequestListView.vue');
-const LegacyHost = () => import('@/views/legacy/LegacyHost.vue');
+const AppHost = () => import('@/views/host/AppHost.vue');
 
 const router = createRouter({
   history: createWebHistory('/'),
@@ -52,73 +52,73 @@ const router = createRouter({
     {
       path: '/detail/:id',
       name: 'Detail',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '簽核詳情', legacyPage: 'detail' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '簽核詳情', hostPage: 'detail' },
     },
     {
       path: '/new-request',
       name: 'NewRequest',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '新增申請', legacyPage: 'new-request' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '新增申請', hostPage: 'new-request' },
     },
     {
       path: '/workflows',
       name: 'Workflows',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '簽核流程', legacyPage: 'workflows' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '簽核流程', hostPage: 'workflows' },
     },
     {
       path: '/backups',
       name: 'Backups',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '備份資料', legacyPage: 'backups' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '備份資料', hostPage: 'backups' },
     },
     {
       path: '/leave-report',
       name: 'LeaveReport',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '請假報表', legacyPage: 'leave-report' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '請假報表', hostPage: 'leave-report' },
     },
     {
       path: '/audit-logs',
       name: 'AuditLogs',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '稽核日誌', legacyPage: 'audit-logs' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '稽核日誌', hostPage: 'audit-logs' },
     },
     {
       path: '/users',
       name: 'Users',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '成員名單', legacyPage: 'users' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '成員名單', hostPage: 'users' },
     },
     {
       path: '/departments',
       name: 'Departments',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '部門', legacyPage: 'departments' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '部門', hostPage: 'departments' },
     },
     {
       path: '/settings',
       name: 'Settings',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '帳號設定', legacyPage: 'settings' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '帳號設定', hostPage: 'settings' },
     },
     {
       path: '/line-settings',
       name: 'LineSettings',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: 'LINE 通知', legacyPage: 'line-settings' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: 'LINE 通知', hostPage: 'line-settings' },
     },
     {
       path: '/system-settings',
       name: 'SystemSettings',
-      component: LegacyHost,
-      meta: { requiresAuth: true, title: '系統設定', legacyPage: 'system-settings' },
+      component: AppHost,
+      meta: { requiresAuth: true, title: '系統設定', hostPage: 'system-settings' },
     },
     {
       path: '/:pathMatch(.*)*',
-      name: 'Legacy',
-      component: LegacyHost,
+      name: 'AppHostFallback',
+      component: AppHost,
       meta: { requiresAuth: true, title: '線上簽核' },
     },
   ],

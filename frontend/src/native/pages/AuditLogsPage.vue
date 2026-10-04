@@ -93,7 +93,7 @@ const form = reactive({
 });
 const data = ref({ logs: [], totalCount: 0, totalPages: 1 });
 
-/** 目前套用中的篩選（與經典版相同，存在全域 state，切頁後仍保留） */
+/** 目前套用中的篩選（存在全域 state，切頁後仍保留） */
 function currentParams() {
   const q = L.state.auditListQuery || {};
   const p = new URLSearchParams({ page: Number(q.page) || 1, limit: 30 });

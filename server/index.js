@@ -1096,7 +1096,7 @@ app.get(['/favicon.ico', '/favicon.png'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'img', 'argo-logo.png'));
 });
 
-// 舊 v2 路徑自動轉址至根路徑（全面採用現代化 Vue 3 前端，淘汰舊獨立經典版）
+// 舊版 /v2 路徑自動轉址至根路徑
 app.get(['/v2', '/v2/*'], (req, res) => {
   const subPath = req.path.replace(/^\/v2/, '') || '/';
   const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';

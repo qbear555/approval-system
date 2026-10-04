@@ -256,10 +256,9 @@ async function runAudit() {
     }
   }
 
-  // 4. 前端雙軌架構驗證 (Classic & Vue 3 Dual-Track)
-  console.log('\n[4/5] 檢查前端雙軌產物與相容架構 (Classic & Vue 3)...');
-  // 經典版
-  const classicScripts = [
+  // 4. 前端單一 Vue 3 架構與核心模組驗證
+  console.log('\n[4/5] 檢查前端統一 Vue 3 產物與核心計算模組...');
+  const coreScripts = [
     'vendor/pdfjs/pdf.min.js',
     'js/tw-calendar.js',
     'js/rich-editor.js',
@@ -267,11 +266,9 @@ async function runAudit() {
     'js/pdf-form-designer.js',
     'js/flow-editor.js',
     'js/app.js',
-    'js/pages-dashboard.js',
     'js/pages-request-fields.js',
     'js/pages-request-table.js',
     'js/pages-request-view.js',
-    'js/pages-request-list.js',
     'js/pages-request-new.js',
     'js/pages-request-detail.js',
     'js/pages-workflows.js',
@@ -286,27 +283,27 @@ async function runAudit() {
   ];
 
   let missingScriptCount = 0;
-  for (const s of classicScripts) {
+  for (const s of coreScripts) {
     if (!fs.existsSync(path.join(ROOT, 'public', s))) {
       missingScriptCount++;
-      console.log(`  ❌ 經典版缺少腳本: public/${s}`);
+      console.log(`  ❌ 缺少核心模組: public/${s}`);
     }
   }
   if (missingScriptCount === 0) {
-    console.log(`  ✓ 經典版 (${classicScripts.length}/${classicScripts.length}) 所有靜態 JS 檔案存在`);
+    console.log(`  ✓ 核心模組 (${coreScripts.length}/${coreScripts.length}) 所有靜態 JS 檔案存在`);
     results.frontend.checks.push({
-      name: '經典前端靜態檔完整性',
+      name: '核心計算模組完整性',
       status: 'PASS',
-      message: `${classicScripts.length} 支前端模組齊全`,
+      message: `${coreScripts.length} 支核心模組齊全`,
     });
   }
 
-  // Vue 3 版
-  const v2Index = path.join(ROOT, 'public', 'v2', 'index.html');
-  const v2AssetsDir = path.join(ROOT, 'public', 'v2', 'assets');
-  if (fs.existsSync(v2Index) && fs.existsSync(v2AssetsDir)) {
-    const assets = fs.readdirSync(v2AssetsDir);
-    console.log(`  ✓ Vue 3 (v2) 建置產物齊全 (index.html 及 ${assets.length} 個打包 chunk)`);
+  // Vue 3 SPA 產物
+  const appIndex = path.join(ROOT, 'public', 'index.html');
+  const appAssetsDir = path.join(ROOT, 'public', 'assets');
+  if (fs.existsSync(appIndex) && fs.existsSync(appAssetsDir)) {
+    const assets = fs.readdirSync(appAssetsDir);
+    console.log(`  ✓ Vue 3 主建置產物齊全 (index.html 及 ${assets.length} 個打包 chunk)`);
     results.frontend.checks.push({
       name: 'Vue 3 打包產物完整性',
       status: 'PASS',
@@ -317,7 +314,7 @@ async function runAudit() {
     results.frontend.checks.push({
       name: 'Vue 3 打包產物完整性',
       status: 'FAIL',
-      message: 'public/v2 尚未建置',
+      message: 'public/index.html 或 public/assets 尚未建置',
     });
   }
 

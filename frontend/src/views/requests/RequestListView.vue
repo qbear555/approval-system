@@ -282,11 +282,9 @@ const SCRIPTS = [
   '/js/pdf-form-designer.js',
   '/js/flow-editor.js',
   '/js/app.js',
-  '/js/pages-dashboard.js',
   '/js/pages-request-fields.js',
   '/js/pages-request-table.js',
   '/js/pages-request-view.js',
-  '/js/pages-request-list.js',
   '/js/pages-request-new.js',
   '/js/pages-request-detail.js',
   '/js/pages-workflows.js',
@@ -301,11 +299,11 @@ const SCRIPTS = [
 ];
 
 const V = '20261004_paper_drag';
-function loadLegacyScript(src) {
+function loadCoreScript(src) {
   return new Promise((resolve, reject) => {
     const wanted = `${src}?v=${V}`;
     const existing =
-      document.querySelector(`script[data-legacy-src="${src}"]`) ||
+      document.querySelector(`script[data-core-src="${src}"]`) ||
       document.querySelector(`script[src^="${src}"]`);
     if (existing) {
       const cur = existing.getAttribute('src') || '';
@@ -315,8 +313,8 @@ function loadLegacyScript(src) {
     const s = document.createElement('script');
     s.src = wanted;
     s.async = false;
-    s.dataset.legacy = '1';
-    s.dataset.legacySrc = src;
+    s.dataset.host = '1';
+    s.dataset.coreSrc = src;
     s.onload = resolve;
     s.onerror = () => reject(new Error(`載入失敗：${src}`));
     document.body.appendChild(s);
@@ -325,21 +323,21 @@ function loadLegacyScript(src) {
 
 let scriptsLoadingPromise = null;
 async function ensureDetailScripts() {
-  if (!window.__legacyLoaded) {
+  if (!window.__hostLoaded && !window.__legacyLoaded) {
     if (!scriptsLoadingPromise) {
       scriptsLoadingPromise = (async () => {
         registerNativePages();
-        window.__legacyManualBoot = true; // 不自動 boot，避免經典程式覆蓋 Vue 畫面
+        window.__hostManualBoot = true;
         for (const src of SCRIPTS) {
-          await loadLegacyScript(src);
+          await loadCoreScript(src);
         }
-        window.__legacyLoaded = true;
+        window.__hostLoaded = true;
         return true;
       })();
     }
     await scriptsLoadingPromise;
   }
-  // 內嵌詳情需要經典全域狀態（使用者／權限／token）
+  // 內嵌詳情需要全域狀態（使用者／權限／token）
   const st = window.appState;
   if (st) {
     st.token = authStore.token;

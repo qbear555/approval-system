@@ -72,6 +72,6 @@ a.nav-item {
   text-decoration: none;
 }
 .nav-item.router-link-active {
-  /* 沿用經典 .nav-item.active */
+  /* active state handled via css theme */
 }
 </style>

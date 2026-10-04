@@ -1,7 +1,7 @@
 /**
- * 經典前端 ↔ Vue 頁面橋接。
- * - 經典 app.js 以全域 function/const 提供 api、toast、state…；Vue 模組透過這裡取用。
- * - 已改寫為 Vue 的頁面註冊在 window.__nativePages，由經典 navigate() 呼叫掛載。
+ * 原生核心引擎 ↔ Vue 頁面橋接。
+ * - app.js 與核心計算模組以全域方式提供 api、toast、state、PDF 設計器；Vue 模組透過此代理存取。
+ * - 頁面組件註冊在 window.__nativePages，由 AppHost 掛載調度。
  */
 import { createApp, h, Suspense } from 'vue';
 

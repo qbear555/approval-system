@@ -1,6 +1,5 @@
-/** Vue /v2 登出：清 token 並回到真正的登入頁，不走經典 auth-view stub。 */
-
-export function clearClassicSession() {
+/** 登出處理：清除 Token 與全域使用者狀態並導向登入頁面 */
+export function clearGlobalSession() {
   try {
     if (typeof window.stopPendingWatcher === 'function') window.stopPendingWatcher();
   } catch {
@@ -32,6 +31,6 @@ export function goToVueLogin(router) {
 export function performVueLogout(authStore, router) {
   if (authStore && typeof authStore.logout === 'function') authStore.logout();
   else localStorage.removeItem('approval_token');
-  clearClassicSession();
+  clearGlobalSession();
   goToVueLogin(router);
 }

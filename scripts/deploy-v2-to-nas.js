@@ -90,9 +90,19 @@ async function main() {
   });
 
   console.log('  正在解壓檔案至正式環境目錄...');
+  const cleanupCmd = [
+    `rm -rf ${REMOTE_DIR}/public/v2`,
+    `rm -rf ${REMOTE_DIR}/docs/legacy-backup`,
+    `rm -f ${REMOTE_DIR}/public/js/pages-dashboard.js`,
+    `rm -f ${REMOTE_DIR}/public/js/pages-request-list.js`,
+    `rm -f ${REMOTE_DIR}/public/js/app.js.monolith.bak`,
+    `rm -f ${REMOTE_DIR}/scripts/test-all-classic.js`,
+    `rm -f ${REMOTE_DIR}/scripts/debug-legacy-host.js`,
+    `rm -f ${REMOTE_DIR}/temp_deploy_nas.tar.gz`,
+  ].join(' && ');
   const unpackRes = await execRemote(
     conn,
-    `tar -xzf ${REMOTE_DIR}/temp_deploy_nas.tar.gz -C ${REMOTE_DIR} && rm -rf ${REMOTE_DIR}/public/v2 ${REMOTE_DIR}/temp_deploy_nas.tar.gz`,
+    `tar -xzf ${REMOTE_DIR}/temp_deploy_nas.tar.gz -C ${REMOTE_DIR} && ${cleanupCmd}`,
     true
   );
   if (unpackRes.c !== 0) {

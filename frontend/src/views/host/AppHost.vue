@@ -1,9 +1,5 @@
 <template>
-  <!--
-    尚未改寫為 Vue 的功能（詳情、新增申請、流程、設定…）仍由經典 pages-*.js 承載。
-    總覽／待我簽核／我的申請／簽核紀錄已改走獨立 Vue 路由。
-  -->
-  <div v-once id="legacy-root">
+  <div v-once id="app-host-root">
     <div id="auth-view" class="auth-wrap hidden">
       <div class="auth-card">
         <div class="auth-brand">
@@ -90,11 +86,9 @@ const SCRIPTS = [
   '/js/pdf-form-designer.js',
   '/js/flow-editor.js',
   '/js/app.js',
-  '/js/pages-dashboard.js',
   '/js/pages-request-fields.js',
   '/js/pages-request-table.js',
   '/js/pages-request-view.js',
-  '/js/pages-request-list.js',
   '/js/pages-request-new.js',
   '/js/pages-request-detail.js',
   '/js/pages-workflows.js',
@@ -146,9 +140,9 @@ function pathSegments() {
   return [];
 }
 
-function legacyTarget() {
-  if (route.meta?.legacyPage) {
-    const page = route.meta.legacyPage;
+function hostTarget() {
+  if (route.meta?.hostPage || route.meta?.legacyPage) {
+    const page = route.meta.hostPage || route.meta.legacyPage;
     const params = { ...route.query };
     if (page === 'detail' && route.params.id) params.id = Number(route.params.id);
     if (route.query.workflowId) params.workflowId = Number(route.query.workflowId);
@@ -205,12 +199,11 @@ function patchNavigate() {
       return;
     }
 
-    // 2. LegacyHost 承載頁面
+    // 2. AppHost 承載頁面
     const nextPath = vuePathFor(page, params);
     const targetUrl = typeof nextPath === 'string' ? nextPath : nextPath.path;
     const currentUrl = route.path;
 
-    // 若已經在目標路徑上，或是由 showLegacyPage() 內部呼叫（skipHashSync / fromHost），直接執行原生的 render 函式
     if (navOpts.skipHashSync || navOpts.fromHost || currentUrl === targetUrl) {
       if (typeof orig === 'function') {
         return orig(page, params, navOpts);
@@ -226,15 +219,15 @@ function loadScript(src) {
     const s = document.createElement('script');
     s.src = `${src}?v=${V}`;
     s.async = false;
-    s.dataset.legacy = '1';
+    s.dataset.host = '1';
     s.onload = resolve;
     s.onerror = () => reject(new Error(`載入失敗：${src}`));
     document.body.appendChild(s);
   });
 }
 
-async function showLegacyPage() {
-  const target = legacyTarget();
+async function showHostPage() {
+  const target = hostTarget();
   const hash = desiredHash(target);
   if (`#${String(location.hash || '').replace(/^#/, '')}` !== hash) {
     try {
@@ -250,7 +243,7 @@ async function showLegacyPage() {
 }
 
 onMounted(async () => {
-  const target = legacyTarget();
+  const target = hostTarget();
   const hash = desiredHash(target);
   if (`#${String(location.hash || '').replace(/^#/, '')}` !== hash) {
     try {
@@ -260,25 +253,25 @@ onMounted(async () => {
     }
   }
 
-  if (window.__legacyLoaded) {
+  if (window.__hostLoaded) {
     patchNavigate();
     window.boot?.();
     if (typeof window.applyRoleUi === 'function') window.applyRoleUi();
-    showLegacyPage();
+    showHostPage();
     return;
   }
 
   registerNativePages();
-  window.__legacyManualBoot = true;
+  window.__hostManualBoot = true;
   try {
     for (const src of SCRIPTS) await loadScript(src);
-    window.__legacyLoaded = true;
+    window.__hostLoaded = true;
     patchNavigate();
     window.boot?.();
     if (typeof window.applyRoleUi === 'function') window.applyRoleUi();
-    showLegacyPage();
+    showHostPage();
   } catch (e) {
-    console.error('[legacy-host]', e);
+    console.error('[app-host]', e);
     const body = document.getElementById('page-body');
     if (body) body.innerHTML = `<div class="error-msg">${e.message}</div>`;
   }
@@ -293,7 +286,7 @@ onBeforeUnmount(() => {
 watch(
   () => route.fullPath,
   () => {
-    if (window.__legacyLoaded) showLegacyPage();
+    if (window.__hostLoaded) showHostPage();
   }
 );
 </script>
