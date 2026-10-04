@@ -1,0 +1,125 @@
+{
+  "database": {
+    "status": "PASS",
+    "tables": {
+      "users": 94,
+      "workflows": 31,
+      "approval_requests": 303,
+      "approval_actions": 1343,
+      "departments": 13,
+      "backup_files": 303,
+      "user_departments": 88,
+      "request_attachments": 262,
+      "final_notify_receipts": 36,
+      "user_delegations": 0,
+      "system_audit_logs": 223,
+      "request_node_states": 0,
+      "user_devices": 8
+    },
+    "checks": [
+      {
+        "name": "資料表完整性",
+        "status": "PASS",
+        "message": "13 張核心資料表全數齊全"
+      },
+      {
+        "name": "外鍵/外聯一致性 (Referential Integrity)",
+        "status": "PASS",
+        "message": "無任何孤立殘留記錄"
+      },
+      {
+        "name": "系統稽核日誌運作 (Audit Logging)",
+        "status": "PASS",
+        "message": "最近日誌 #223 (login at 2026-09-18 19:27:54)"
+      }
+    ]
+  },
+  "backend": {
+    "status": "PASS",
+    "routes": [],
+    "checks": [
+      {
+        "name": "後端模組化結構 (Server Modularity)",
+        "status": "PASS",
+        "message": "21/21 模組檔案完備"
+      }
+    ]
+  },
+  "frontend": {
+    "status": "PENDING",
+    "classic": [],
+    "v2": [],
+    "checks": [
+      {
+        "name": "經典前端靜態檔完整性",
+        "status": "PASS",
+        "message": "23 支前端模組齊全"
+      },
+      {
+        "name": "Vue 3 打包產物完整性",
+        "status": "PASS",
+        "message": "已編譯完成，含 10 個 asset chunks"
+      }
+    ]
+  },
+  "storage": {
+    "status": "PENDING",
+    "checks": [
+      {
+        "name": "外接 USB 30 天自動備份機制",
+        "status": "WARN",
+        "message": "具備掛載檢查、30天節流、180天保留與SHA256驗證"
+      }
+    ]
+  },
+  "nas": {
+    "status": "PENDING",
+    "checks": [
+      {
+        "name": "健康探針 (/api/health)",
+        "status": "PASS",
+        "code": 200
+      },
+      {
+        "name": "公開系統設定 (/api/system/settings)",
+        "status": "PASS",
+        "code": 200
+      },
+      {
+        "name": "品牌資訊 (/api/system/branding)",
+        "status": "PASS",
+        "code": 200
+      },
+      {
+        "name": "系統 Logo 讀取 (/api/system/logo)",
+        "status": "PASS",
+        "code": 200
+      },
+      {
+        "name": "部門選單公開 API (/api/departments)",
+        "status": "PASS",
+        "code": 200
+      },
+      {
+        "name": "台灣假勤行事曆 (/api/tw-calendar)",
+        "status": "PASS",
+        "code": 200
+      },
+      {
+        "name": "LINE 機器人 Webhook 探活 (/line/webhook)",
+        "status": "PASS",
+        "code": 200
+      },
+      {
+        "name": "未驗證存取鑑權防護 (/api/auth/me -> 401)",
+        "status": "PASS",
+        "code": 401
+      },
+      {
+        "name": "未驗證統計資訊鑑權防護 (/api/stats -> 401)",
+        "status": "PASS",
+        "code": 401
+      }
+    ]
+  }
+}
