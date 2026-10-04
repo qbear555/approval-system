@@ -1614,7 +1614,8 @@ async function renderDetailEmbedded(container, id, opts = {}) {
       </div>
     `;
     container.querySelector('#btn-split-popout')?.addEventListener('click', () => {
-      navigate('detail', { id });
+      if (typeof opts.onPopout === 'function') opts.onPopout(id);
+      else navigate('detail', { id });
     });
     bindRequestDetailEvents(container, detailData, () => {
       if (typeof opts.onActionCompleted === 'function') {

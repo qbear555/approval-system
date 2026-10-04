@@ -77,7 +77,7 @@ import { registerNativePages } from '@/native';
 import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
 
-const V = '20261004_v2fix';
+const V = '20261004_fix2';
 const LOGO = '/img/argo-logo.png';
 const VUE_PAGES = new Set(['dashboard', 'inbox', 'mine', 'records']);
 

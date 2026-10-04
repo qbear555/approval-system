@@ -230,7 +230,8 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import { registerNativePages } from '@/native';
 import { apiRequest } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
@@ -253,6 +254,7 @@ const statusOpts = [
 ];
 
 const route = useRoute();
+const router = useRouter();
 const authStore = useAuthStore();
 const systemStore = useSystemStore();
 const toast = useToastStore();
@@ -300,7 +302,7 @@ const SCRIPTS = [
   '/js/pages-system.js',
 ];
 
-const V = '20261004_split';
+const V = '20261004_fix2';
 function loadLegacyScript(src) {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src^="${src}"]`)) return resolve();
@@ -316,16 +318,27 @@ function loadLegacyScript(src) {
 
 let scriptsLoadingPromise = null;
 async function ensureDetailScripts() {
-  if (window.renderDetailEmbedded) return true;
-  if (!scriptsLoadingPromise) {
-    scriptsLoadingPromise = (async () => {
-      for (const src of SCRIPTS) {
-        await loadLegacyScript(src);
-      }
-      return true;
-    })();
+  if (!window.__legacyLoaded) {
+    if (!scriptsLoadingPromise) {
+      scriptsLoadingPromise = (async () => {
+        registerNativePages();
+        window.__legacyManualBoot = true; // 不自動 boot，避免經典程式覆蓋 Vue 畫面
+        for (const src of SCRIPTS) {
+          await loadLegacyScript(src);
+        }
+        window.__legacyLoaded = true;
+        return true;
+      })();
+    }
+    await scriptsLoadingPromise;
   }
-  return scriptsLoadingPromise;
+  // 內嵌詳情需要經典全域狀態（使用者／權限／token）
+  const st = window.appState;
+  if (st) {
+    st.token = authStore.token;
+    st.user = authStore.user;
+  }
+  return true;
 }
 
 const filteredPendingRequests = computed(() => {
@@ -372,6 +385,7 @@ async function mountSelectedDetail(id) {
   await ensureDetailScripts();
   if (typeof window.renderDetailEmbedded === 'function') {
     window.renderDetailEmbedded(splitDetailHost.value, id, {
+      onPopout: (reqId) => router.push(`/detail/${reqId}`),
       onActionCompleted: (actedReq) => {
         toast.success(`單據 #${actedReq.id} 已完成簽核！`);
         allRequests.value = allRequests.value.filter((r) => r.id !== actedReq.id);

@@ -1,1 +1,0 @@
-const n=["同意","核可","准予備查","依規定辦理","請檢附單據正本","依規定核銷"];function o(t){const e=(t&&Array.isArray(t.comment_phrases)?t.comment_phrases:[]).map(s=>String(s||"").trim()).filter(Boolean);return e.length?e:n.slice()}export{n as D,o as r};
