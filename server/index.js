@@ -1096,14 +1096,11 @@ app.get(['/favicon.ico', '/favicon.png'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'img', 'argo-logo.png'));
 });
 
-// v2 現代組件化前端 (Vue 3 / Vite) - 雙軌並存，隨時可進
-app.use('/v2', express.static(path.join(__dirname, '..', 'public', 'v2')));
-app.get('/v2/*', (req, res, next) => {
-  const v2Index = path.join(__dirname, '..', 'public', 'v2', 'index.html');
-  if (fs.existsSync(v2Index)) {
-    return res.sendFile(v2Index);
-  }
-  next();
+// 舊 v2 路徑自動轉址至根路徑（全面採用現代化 Vue 3 前端，淘汰舊獨立經典版）
+app.get(['/v2', '/v2/*'], (req, res) => {
+  const subPath = req.path.replace(/^\/v2/, '') || '/';
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect(301, subPath + query);
 });
 
 app.use(express.static(path.join(__dirname, '..', 'public')));

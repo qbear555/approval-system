@@ -31,12 +31,12 @@ function execRemote(conn, cmd, sudo = false) {
 }
 
 async function main() {
-  console.log('=== 1/5 檢查本地 v2 構建產物 ===');
-  const v2Index = path.join(ROOT, 'public', 'v2', 'index.html');
-  if (!fs.existsSync(v2Index)) {
-    throw new Error('未找到 public/v2/index.html，請先執行 npm run build');
+  console.log('=== 1/5 檢查本地 Vue 3 構建產物 ===');
+  const appIndex = path.join(ROOT, 'public', 'index.html');
+  if (!fs.existsSync(appIndex)) {
+    throw new Error('未找到 public/index.html，請先執行 npm run build:frontend');
   }
-  console.log('  v2 產物存在：', v2Index);
+  console.log('  Vue 3 主產物存在：', appIndex);
 
   console.log('=== 2/5 打包更新檔案（排除 data/、node_modules） ===');
   const filesToPack = [
@@ -92,7 +92,7 @@ async function main() {
   console.log('  正在解壓檔案至正式環境目錄...');
   const unpackRes = await execRemote(
     conn,
-    `tar -xzf ${REMOTE_DIR}/temp_deploy_nas.tar.gz -C ${REMOTE_DIR} && rm -f ${REMOTE_DIR}/temp_deploy_nas.tar.gz`,
+    `tar -xzf ${REMOTE_DIR}/temp_deploy_nas.tar.gz -C ${REMOTE_DIR} && rm -rf ${REMOTE_DIR}/public/v2 ${REMOTE_DIR}/temp_deploy_nas.tar.gz`,
     true
   );
   if (unpackRes.c !== 0) {
@@ -117,9 +117,8 @@ async function main() {
 
   conn.end();
   console.log('\n========================================');
-  console.log('🎉 NAS 正式環境雙軌升級成功！');
-  console.log(`  經典版：http://${HOST}:3847/`);
-  console.log(`  Vue 3 版：http://${HOST}:3847/v2/`);
+  console.log('🎉 NAS 正式環境升級成功（已全面切換至 Vue 3 現代版）！');
+  console.log(`  系統入口網址：http://${HOST}:3847/`);
   console.log('========================================');
 }
 

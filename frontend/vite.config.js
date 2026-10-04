@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue';
 import path from 'path';
 
 export default defineConfig({
-  base: '/v2/',
+  base: '/',
   plugins: [vue()],
   resolve: {
     alias: {
@@ -40,7 +40,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, '../public/v2'),
-    emptyOutDir: true,
+    outDir: path.resolve(__dirname, '../public'),
+    emptyOutDir: false,
   },
 });

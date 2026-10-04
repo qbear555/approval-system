@@ -9,7 +9,7 @@ const RequestListView = () => import('@/views/requests/RequestListView.vue');
 const LegacyHost = () => import('@/views/legacy/LegacyHost.vue');
 
 const router = createRouter({
-  history: createWebHistory('/v2/'),
+  history: createWebHistory('/'),
   routes: [
     {
       path: '/login',

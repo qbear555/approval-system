@@ -19,14 +19,14 @@ export function clearClassicSession() {
 
 export function goToVueLogin(router) {
   const path = String(window.location.pathname || '');
-  if (path.startsWith('/v2/login') || path === '/login') return;
+  if (path === '/login') return;
   if (router) {
     router.replace('/login').catch(() => {
-      window.location.assign('/v2/login');
+      window.location.assign('/login');
     });
     return;
   }
-  window.location.assign('/v2/login');
+  window.location.assign('/login');
 }
 
 export function performVueLogout(authStore, router) {

@@ -3,7 +3,7 @@
  * - 自動注入 JWT Token
  * - 統一錯誤處理與 401 攔截
  */
-const LOGIN_PATH = '/v2/login';
+const LOGIN_PATH = '/login';
 
 export async function apiRequest(endpoint, options = {}) {
   const token = localStorage.getItem('approval_token');
