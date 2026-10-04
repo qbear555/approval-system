@@ -58,6 +58,8 @@
         height: viewport.height,
         pageCount: numPages,
         pageNumber: targetPage,
+        pdfPage: page,
+        viewport,
       };
     } else {
       // 圖片格式底圖 (PNG, JPG)
@@ -74,6 +76,8 @@
             height: canvas.height,
             pageCount: 1,
             pageNumber: 1,
+            pdfPage: null,
+            viewport: null,
           });
         };
         img.onerror = () => reject(new Error('底圖載入失敗'));
@@ -379,6 +383,356 @@
   }
 
   /**
+   * 影像幾何分析：自 Canvas 掃描水平與垂直格線並推斷候選表格儲存格
+   */
+  function detectGridBoxesFromCanvas(canvas) {
+    const w = canvas.width;
+    const h = canvas.height;
+    if (!w || !h) return [];
+
+    const scale = Math.min(1.0, 600 / w);
+    const sw = Math.round(w * scale);
+    const sh = Math.round(h * scale);
+
+    const off = document.createElement('canvas');
+    off.width = sw;
+    off.height = sh;
+    const octx = off.getContext('2d');
+    octx.drawImage(canvas, 0, 0, sw, sh);
+
+    const imgData = octx.getImageData(0, 0, sw, sh);
+    const data = imgData.data;
+
+    const isDark = (x, y) => {
+      const idx = (y * sw + x) * 4;
+      return data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114 < 145;
+    };
+
+    const hLines = [];
+    for (let y = 15; y < sh - 15; y += 3) {
+      let run = 0;
+      let startX = 0;
+      for (let x = 0; x < sw; x++) {
+        if (isDark(x, y)) {
+          if (run === 0) startX = x;
+          run++;
+        } else {
+          if (run > sw * 0.18) {
+            hLines.push({ y, x1: startX, x2: startX + run });
+          }
+          run = 0;
+        }
+      }
+      if (run > sw * 0.18) {
+        hLines.push({ y, x1: startX, x2: startX + run });
+      }
+    }
+
+    const uniqueY = [];
+    for (const hl of hLines) {
+      if (!uniqueY.some((y) => Math.abs(y - hl.y) < 12)) {
+        uniqueY.push(hl.y);
+      }
+    }
+    uniqueY.sort((a, b) => a - b);
+
+    const boxes = [];
+    for (let i = 0; i < uniqueY.length - 1; i++) {
+      const y1 = uniqueY[i];
+      const y2 = uniqueY[i + 1];
+      const boxH = y2 - y1;
+      if (boxH >= 16 && boxH <= 140) {
+        const rx = 0.32;
+        const ry = (y1 + 2) / sh;
+        const rw = 0.58;
+        const rh = Math.max(0.03, (boxH - 4) / sh);
+        boxes.push({
+          name: `填寫欄位 ${boxes.length + 1}`,
+          type: boxH > 55 ? 'textarea' : 'text',
+          rx: Math.round(rx * 1000) / 1000,
+          ry: Math.round(ry * 1000) / 1000,
+          rw: Math.round(rw * 1000) / 1000,
+          rh: Math.round(rh * 1000) / 1000,
+        });
+      }
+    }
+    return boxes;
+  }
+
+  /**
+   * 智慧掃描底圖內容並自動推導表單欄位與座標
+   * 結合 PDF.js 原生文字層、關鍵字錨點計算、AcroForm 既有欄位與格線幾何分析
+   */
+  async function autoDetectFormFields({ canvas, templateInfo, curPage, workflow }) {
+    const detected = [];
+    const pageNumber = curPage || 1;
+    const viewport = templateInfo?.viewport;
+    const page = templateInfo?.pdfPage;
+
+    // 關鍵字模式與欄位類型對照表
+    const FIELD_PATTERNS = [
+      {
+        pattern: /(審核主管|單位主管|部門主管|審批主管|主管簽名|主管簽核|簽核主管|審核人|簽章|審批|核准|核決|簽核|經理|處長|協理|總經理|會辦|signature|approved by|manager|supervisor)/i,
+        type: 'signature',
+      },
+      {
+        pattern: /(申請日期|填表日期|填單日期|簽署日期|核准日期|日期|起訖時間|請假期間|加班時間|出差期間|有效期限|date|time)/i,
+        type: 'date',
+      },
+      {
+        pattern: /(申請金額|預算金額|預估費用|金額|總計|小計|合計|單價|數量|費用|新台幣|NT\$|amount|price|qty|total|fee)/i,
+        type: 'number',
+      },
+      {
+        pattern: /(申請事由|請假事由|用途說明|事由|說明|備註|內容|原因|意見|描述|工作內容|詳細說明|reason|description|remark|comment)/i,
+        type: 'textarea',
+      },
+      {
+        pattern: /(假別|請假類別|簽核類別|類別|形式|項目|category|type)/i,
+        type: 'select',
+        options: ['事假', '病假', '特休', '公假', '婚假', '喪假', '其他'],
+      },
+      {
+        pattern: /(確認|同意|是否|檢附|check|agree)/i,
+        type: 'checkbox',
+      },
+      {
+        pattern: /(申請人|填表人|填單人|員工姓名|同仁姓名|申請同仁|申請者|姓名|立書人|受文者|聯絡人|applicant|name|employee)/i,
+        type: 'text',
+      },
+      {
+        pattern: /(所屬部門|服務部門|部門|單位|處室|組別|department|dept|unit)/i,
+        type: 'text',
+      },
+      {
+        pattern: /(職務代理人|工作代理人|代理人|協辦人|agent|proxy)/i,
+        type: 'text',
+      },
+      {
+        pattern: /(分機|電話|聯絡電話|手機|extension|phone|mobile)/i,
+        type: 'text',
+      },
+      {
+        pattern: /(工號|員工編號|員工代號|學號|emp id|employee id)/i,
+        type: 'text',
+      },
+    ];
+
+    // 排除標題的模式
+    const TITLE_EXCLUDE_PATTERNS = /(通用簽核申請表|請假申請單|採購申請單|費用報銷單|簽核單|申請單|申請表|結案報告|報告書|聲明書|通知書|合約書|證明書|辦法|規程|股份有限公司|有限公司|公司)$/i;
+
+    // --- 第一層：若為 PDF 且有 PDF.js page ---
+    if (page && viewport) {
+      try {
+        // 1. 優先檢查 AcroForm 既有互動表單 Annotations
+        const annotations = await page.getAnnotations();
+        if (Array.isArray(annotations) && annotations.length > 0) {
+          const formAnnotations = annotations.filter(
+            (a) => a.subtype === 'Widget' || a.fieldType
+          );
+          if (formAnnotations.length > 0) {
+            for (const a of formAnnotations) {
+              const rect = a.rect;
+              if (rect && rect.length === 4) {
+                const pt1 = viewport.convertToViewportPoint(rect[0], rect[3]);
+                const pt2 = viewport.convertToViewportPoint(rect[2], rect[1]);
+                const bx = Math.min(pt1[0], pt2[0]);
+                const by = Math.min(pt1[1], pt2[1]);
+                const bw = Math.abs(pt2[0] - pt1[0]);
+                const bh = Math.abs(pt2[1] - pt1[1]);
+
+                let aType = 'text';
+                if (a.fieldType === 'Sig') aType = 'signature';
+                else if (a.fieldType === 'Btn') aType = 'checkbox';
+                else if (a.fieldType === 'Ch') aType = 'select';
+
+                detected.push({
+                  id: genFieldId(aType === 'signature' ? 'stamp' : 'f'),
+                  name: a.alternativeText || a.fieldName || `欄位 ${detected.length + 1}`,
+                  type: aType,
+                  isStamp: aType === 'signature',
+                  role: aType === 'signature' ? 'approver' : undefined,
+                  page: pageNumber,
+                  rx: Math.max(0, Math.round((bx / viewport.width) * 1000) / 1000),
+                  ry: Math.max(0, Math.round((by / viewport.height) * 1000) / 1000),
+                  rw: Math.max(0.04, Math.round((bw / viewport.width) * 1000) / 1000),
+                  rh: Math.max(0.02, Math.round((bh / viewport.height) * 1000) / 1000),
+                  fontSize: 12,
+                  align: 'left',
+                  required: false,
+                });
+              }
+            }
+            if (detected.length > 0) return detected;
+          }
+        }
+
+        // 2. 文字層抽取與關鍵字錨點分析
+        const textContent = await page.getTextContent();
+        const rawItems = (textContent.items || []).filter((it) => it.str && it.str.trim());
+
+        const converted = rawItems.map((it) => {
+          const pt = viewport.convertToViewportPoint(it.transform[4], it.transform[5]);
+          const scale = viewport.scale || 1.5;
+          return {
+            str: it.str.trim(),
+            x: pt[0],
+            y: pt[1],
+            w: (it.width || 12) * scale,
+            h: (it.height || 12) * scale,
+          };
+        });
+
+        converted.sort((a, b) => {
+          if (Math.abs(a.y - b.y) > 8) return a.y - b.y;
+          return a.x - b.x;
+        });
+
+        // 合併同一行相鄰文字
+        const mergedItems = [];
+        for (const it of converted) {
+          if (!mergedItems.length) {
+            mergedItems.push({ ...it });
+            continue;
+          }
+          const prev = mergedItems[mergedItems.length - 1];
+          if (
+            Math.abs(it.y - prev.y) <= 8 &&
+            it.x - (prev.x + prev.w) <= 18 &&
+            it.x - (prev.x + prev.w) >= -6
+          ) {
+            prev.str += it.str;
+            prev.w = it.x + it.w - prev.x;
+            prev.h = Math.max(prev.h, it.h);
+          } else {
+            mergedItems.push({ ...it });
+          }
+        }
+
+        let signerStepCounter = 1;
+
+        for (let i = 0; i < mergedItems.length; i++) {
+          const it = mergedItems[i];
+          const text = it.str;
+
+          // 排除頁首大標題
+          if (
+            it.y < viewport.height * 0.12 &&
+            (TITLE_EXCLUDE_PATTERNS.test(text) || it.h >= 24)
+          ) {
+            continue;
+          }
+          if (text.length > 15) continue;
+
+          const matched = FIELD_PATTERNS.find((p) => p.pattern.test(text));
+          if (!matched) continue;
+
+          const cleanName = text.replace(/[:：_＿\(\)（）]/g, '').trim();
+          if (!cleanName) continue;
+
+          let nextRightX = null;
+          for (let j = 0; j < mergedItems.length; j++) {
+            if (j === i) continue;
+            const other = mergedItems[j];
+            if (Math.abs(other.y - it.y) <= 16 && other.x > it.x + it.w + 10) {
+              if (nextRightX === null || other.x < nextRightX) {
+                nextRightX = other.x;
+              }
+            }
+          }
+
+          let fieldRx, fieldRy, fieldRw, fieldRh;
+
+          if (matched.type === 'textarea') {
+            fieldRx = Math.max(0.06, it.x / viewport.width);
+            fieldRy = (it.y + it.h + 8) / viewport.height;
+            fieldRw = Math.min(0.86, Math.max(0.48, 0.94 - fieldRx));
+            fieldRh = 0.088;
+          } else if (matched.type === 'signature') {
+            fieldRx = Math.max(0.06, it.x / viewport.width);
+            fieldRy = (it.y + it.h + 6) / viewport.height;
+            fieldRw = 0.18;
+            fieldRh = 0.065;
+          } else {
+            fieldRx = (it.x + it.w + 10) / viewport.width;
+            fieldRy = Math.max(0, (it.y - it.h - 4) / viewport.height);
+            if (nextRightX !== null) {
+              const availableW = (nextRightX - (it.x + it.w + 24)) / viewport.width;
+              fieldRw = Math.max(0.12, Math.min(0.34, availableW));
+            } else {
+              fieldRw = Math.min(0.34, Math.max(0.18, 0.94 - fieldRx));
+            }
+            fieldRh = 0.034;
+          }
+
+          fieldRx = Math.max(0.02, Math.min(0.95 - fieldRw, fieldRx));
+          fieldRy = Math.max(0.02, Math.min(0.95 - fieldRh, fieldRy));
+
+          const fieldObj = {
+            id: genFieldId(matched.type === 'signature' ? 'stamp' : 'f'),
+            name: cleanName,
+            type: matched.type,
+            page: pageNumber,
+            rx: Math.round(fieldRx * 1000) / 1000,
+            ry: Math.round(fieldRy * 1000) / 1000,
+            rw: Math.round(fieldRw * 1000) / 1000,
+            rh: Math.round(fieldRh * 1000) / 1000,
+            fontSize: 12,
+            align: 'left',
+            required: false,
+          };
+
+          if (matched.type === 'signature') {
+            fieldObj.isStamp = true;
+            fieldObj.role = 'approver';
+            fieldObj.stepOrder = signerStepCounter++;
+          }
+          if (matched.type === 'select' && matched.options) {
+            fieldObj.options = [...matched.options];
+          }
+
+          const isDupe = detected.some(
+            (d) =>
+              Math.abs(d.rx - fieldObj.rx) < 0.04 &&
+              Math.abs(d.ry - fieldObj.ry) < 0.03
+          );
+          if (!isDupe) {
+            detected.push(fieldObj);
+          }
+        }
+      } catch (err) {
+        console.warn('[pdf-designer] PDF.js 文字層分析失敗，切換視覺幾何分析:', err);
+      }
+    }
+
+    // --- 第二層：若文字層未偵測到任何欄位，進行 Canvas 格線影像幾何分析 ---
+    if (detected.length === 0 && canvas) {
+      try {
+        const gridBoxes = detectGridBoxesFromCanvas(canvas);
+        gridBoxes.forEach((gb) => {
+          detected.push({
+            id: genFieldId('f'),
+            name: gb.name,
+            type: gb.type,
+            page: pageNumber,
+            rx: gb.rx,
+            ry: gb.ry,
+            rw: gb.rw,
+            rh: gb.rh,
+            fontSize: 12,
+            align: 'left',
+            required: false,
+          });
+        });
+      } catch (err) {
+        console.warn('[pdf-designer] 視覺格線分析失敗:', err);
+      }
+    }
+
+    return detected;
+  }
+
+  /**
    * 開啟全功能「紙本 PDF 模版畫布設計器」全螢幕視窗
    * @param {Object} options
    * @param {Object} options.workflow - 流程資料
@@ -398,6 +752,8 @@
     let isDrawing = false;
     let drawStartX = 0;
     let drawStartY = 0;
+    let currentTemplateInfo = null;
+    let loadTemplatePromise = null;
 
     // 建立畫布設計器全螢幕浮層
     const modalEl = document.createElement('div');
@@ -430,6 +786,9 @@
             <span>📁</span> 上傳紙本底圖 (PDF/圖片)
             <input type="file" id="pdf-designer-upload-input" accept=".pdf,.png,.jpg,.jpeg" style="display:none;" />
           </label>
+          <button type="button" class="btn sm" id="pdf-auto-detect-btn" style="background:linear-gradient(135deg, #7c3aed, #4f46e5);color:#fff;cursor:pointer;margin:0;padding:5px 12px;border-radius:6px;font-size:0.82rem;font-weight:600;display:inline-flex;align-items:center;gap:5px;box-shadow:0 1px 3px rgba(0,0,0,0.3);border:none;" title="智慧掃描底圖內容，自動偵測表格欄位與簽章格">
+            <span>✨</span> 智慧掃描自動建欄位
+          </button>
           <span id="pdf-designer-filename" style="font-size:0.82rem;color:#94a3b8;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             ${layout.templateMeta?.originalName || templateFile || '尚未上傳底圖'}
           </span>
@@ -498,6 +857,9 @@
                 <span>🖋️</span> ＋ 新增審核簽章格
               </button>
             </div>
+            <button type="button" id="btn-quick-auto-detect" class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg, #7c3aed, #4f46e5);color:#fff;border:none;padding:8px 12px;border-radius:6px;font-weight:600;font-size:0.84rem;display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:0 2px 6px rgba(124,58,237,0.35);cursor:pointer;">
+              <span>✨</span> 掃描底圖自動產生欄位
+            </button>
             <div style="font-size:0.75rem;color:#94a3b8;margin-top:8px;line-height:1.4;">
               💡 提示：亦可直接在底圖空白處按住滑鼠左鍵拖曳拉出方框！
             </div>
@@ -649,6 +1011,8 @@
     const zoomFitBtn = modalEl.querySelector('#pdf-zoom-fit');
     const closeBtn = modalEl.querySelector('#pdf-designer-close-btn');
     const saveBtn = modalEl.querySelector('#pdf-designer-save-btn');
+    const autoDetectBtn = modalEl.querySelector('#pdf-auto-detect-btn');
+    const quickAutoDetectBtn = modalEl.querySelector('#btn-quick-auto-detect');
     const propEmpty = modalEl.querySelector('#pdf-prop-empty');
     const propForm = modalEl.querySelector('#pdf-prop-form');
 
@@ -1354,10 +1718,12 @@
       if (!templateFile) {
         wrapper.style.display = 'none';
         emptyHint.style.display = 'block';
-        return;
+        modalEl.dataset.templateLoaded = 'false';
+        return null;
       }
       emptyHint.style.display = 'none';
       wrapper.style.display = 'block';
+      modalEl.dataset.templateLoaded = 'loading';
 
       const fileUrl = templateFile.startsWith('/') || templateFile.startsWith('http')
         ? templateFile
@@ -1365,14 +1731,125 @@
 
       try {
         const info = await loadTemplateToCanvas(fileUrl, canvas, curPage);
+        currentTemplateInfo = info;
         totalPages = info.pageCount || 1;
         curPage = info.pageNumber || 1;
         pageIndicator.textContent = `第 ${curPage} / ${totalPages} 頁`;
+        modalEl.dataset.templateLoaded = 'true';
         renderOverlayBoxes();
+        return info;
       } catch (e) {
+        modalEl.dataset.templateLoaded = 'error';
         alert('載入底圖失敗：' + e.message);
+        throw e;
       }
     }
+
+    // 提示訊息浮層 (Toast)
+    function showDesignerToast(msg) {
+      const toast = document.createElement('div');
+      toast.style.position = 'fixed';
+      toast.style.bottom = '24px';
+      toast.style.left = '50%';
+      toast.style.transform = 'translateX(-50%)';
+      toast.style.backgroundColor = '#059669';
+      toast.style.color = '#ffffff';
+      toast.style.padding = '10px 20px';
+      toast.style.borderRadius = '8px';
+      toast.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+      toast.style.fontSize = '0.9rem';
+      toast.style.fontWeight = '600';
+      toast.style.zIndex = '100005';
+      toast.style.display = 'flex';
+      toast.style.alignItems = 'center';
+      toast.style.gap = '8px';
+      toast.style.transition = 'all 0.3s ease';
+      toast.innerHTML = msg;
+      modalEl.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(10px)';
+        setTimeout(() => toast.remove(), 350);
+      }, 3500);
+    }
+
+    // 執行智慧掃描辨識底圖內容並自動建立欄位
+    async function handleAutoDetect() {
+      if (loadTemplatePromise) {
+        try {
+          await loadTemplatePromise;
+        } catch (_) {}
+      }
+
+      if (!templateFile || !currentTemplateInfo) {
+        alert('請先上傳紙本底圖 (PDF 或圖片)，才能進行內容掃描與自動辨識！');
+        return;
+      }
+
+      const setBtnLoading = (loading) => {
+        if (autoDetectBtn) {
+          autoDetectBtn.disabled = loading;
+          autoDetectBtn.innerHTML = loading ? '<span>⏳</span> 正在掃描分析中…' : '<span>✨</span> 智慧掃描自動建欄位';
+        }
+        if (quickAutoDetectBtn) {
+          quickAutoDetectBtn.disabled = loading;
+          quickAutoDetectBtn.innerHTML = loading ? '<span>⏳</span> 正在分析底圖…' : '<span>✨</span> 掃描底圖自動產生欄位';
+        }
+      };
+
+      let replaceExisting = false;
+      if (fields.length > 0) {
+        const userChoice = confirm(
+          `目前畫布上已有 ${fields.length} 個欄位。\n\n` +
+          `按「確定」：【取代/清空】現有欄位，套用全新掃描結果。\n` +
+          `按「取消」：【保留現有欄位】，追加掃描到的新欄位。`
+        );
+        replaceExisting = userChoice;
+      }
+
+      setBtnLoading(true);
+      try {
+        const detectedFields = await autoDetectFormFields({
+          canvas,
+          templateInfo: currentTemplateInfo,
+          curPage,
+          workflow,
+        });
+
+        if (!detectedFields || detectedFields.length === 0) {
+          alert('未能在目前頁面偵測到明確的表格標籤或輸入欄位。\n建議您：\n1. 使用右側欄位按鈕手動新增\n2. 直接在畫布空白處按住滑鼠左鍵拖曳框選欄位');
+          return;
+        }
+
+        if (replaceExisting) {
+          fields = detectedFields;
+        } else {
+          const newToAdd = detectedFields.filter((nf) => {
+            return !fields.some((ef) =>
+              ef.page === nf.page &&
+              Math.abs(ef.rx - nf.rx) < 0.05 &&
+              Math.abs(ef.ry - nf.ry) < 0.04
+            );
+          });
+          fields = fields.concat(newToAdd);
+        }
+
+        renderOverlayBoxes();
+        if (fields.length > 0) {
+          selectField(fields[fields.length - 1].id, false);
+        }
+
+        showDesignerToast(`✨ 成功自動掃描並建立 ${detectedFields.length} 個表單欄位與簽章格！`);
+      } catch (err) {
+        console.error('[pdf-designer] 自動辨識失敗:', err);
+        alert('自動掃描辨識失敗：' + (err.message || err));
+      } finally {
+        setBtnLoading(false);
+      }
+    }
+
+    if (autoDetectBtn) autoDetectBtn.onclick = handleAutoDetect;
+    if (quickAutoDetectBtn) quickAutoDetectBtn.onclick = handleAutoDetect;
 
     // 換頁按鈕
     prevPageBtn.onclick = () => {
@@ -1460,8 +1937,11 @@
 
     // 若原本已有底圖，立即載入
     if (templateFile) {
-      loadTemplate();
+      loadTemplatePromise = loadTemplate();
+      modalEl._loadTemplatePromise = loadTemplatePromise;
     }
+
+    return modalEl;
   }
 
   // 掛載到全域 window 物件
@@ -1469,5 +1949,7 @@
     loadTemplateToCanvas,
     renderPdfFormViewer,
     openPdfFormDesignerModal,
+    autoDetectFormFields,
+    detectGridBoxesFromCanvas,
   };
 })(window);

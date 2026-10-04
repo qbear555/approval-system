@@ -24,6 +24,9 @@ async function run() {
     `--remote-debugging-port=${port}`,
     '--user-data-dir=' + os.tmpdir() + '\\edge_test_' + Date.now(),
     '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-sync',
+    '--disable-extensions',
     'about:blank',
   ]);
 
@@ -31,7 +34,7 @@ async function run() {
 
   try {
     const list = await fetchJson(`http://127.0.0.1:${port}/json/list`);
-    const page = list[0];
+    const page = list.find(p => p.type === 'page' && !p.url.startsWith('edge://')) || list.find(p => p.type === 'page') || list[0];
     const ws = new WebSocket(page.webSocketDebuggerUrl);
 
     await new Promise((resolve, reject) => {
@@ -67,7 +70,16 @@ async function run() {
     const evalRes = await send('Runtime.evaluate', {
       expression: `
         (async () => {
-          if (!window.PdfFormDesigner) return { error: 'window.PdfFormDesigner not found' };
+          if (!window.PdfFormDesigner) {
+            await new Promise((resolve, reject) => {
+              const s = document.createElement('script');
+              s.src = '/js/pdf-form-designer.js';
+              s.onload = resolve;
+              s.onerror = reject;
+              document.head.appendChild(s);
+            });
+          }
+          if (!window.PdfFormDesigner) return { error: 'window.PdfFormDesigner still not found after injection' };
           
           let savedResult = null;
           let testWorkflow = {
