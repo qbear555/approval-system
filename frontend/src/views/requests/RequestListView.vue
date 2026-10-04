@@ -229,7 +229,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { registerNativePages } from '@/native';
+import { ensureCoreScriptsLoaded } from '@/lib/core-scripts';
 import { apiRequest } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
@@ -274,78 +274,6 @@ const splitSelectedId = ref(0);
 const splitSearch = ref('');
 const inboxViewMode = ref(localStorage.getItem('approval_inbox_view') || 'table');
 
-const SCRIPTS = [
-  '/vendor/pdfjs/pdf.min.js',
-  '/js/tw-calendar.js',
-  '/js/rich-editor.js',
-  '/js/ui-helpers.js',
-  '/js/pdf-form-designer.js',
-  '/js/flow-editor.js',
-  '/js/app.js',
-  '/js/pages-request-fields.js',
-  '/js/pages-request-table.js',
-  '/js/pages-request-view.js',
-  '/js/pages-request-new.js',
-  '/js/pages-request-detail.js',
-  '/js/pages-workflows.js',
-  '/js/pages-backups.js',
-  '/js/pages-leave-report.js',
-  '/js/pages-users.js',
-  '/js/pages-departments.js',
-  '/js/pages-audit.js',
-  '/js/pages-settings.js',
-  '/js/pages-line.js',
-  '/js/pages-system.js',
-];
-
-const V = '20261004_paper_drag';
-function loadCoreScript(src) {
-  return new Promise((resolve, reject) => {
-    const wanted = `${src}?v=${V}`;
-    const existing =
-      document.querySelector(`script[data-core-src="${src}"]`) ||
-      document.querySelector(`script[src^="${src}"]`);
-    if (existing) {
-      const cur = existing.getAttribute('src') || '';
-      if (cur.includes(`v=${V}`)) return resolve();
-      existing.remove();
-    }
-    const s = document.createElement('script');
-    s.src = wanted;
-    s.async = false;
-    s.dataset.host = '1';
-    s.dataset.coreSrc = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error(`載入失敗：${src}`));
-    document.body.appendChild(s);
-  });
-}
-
-let scriptsLoadingPromise = null;
-async function ensureDetailScripts() {
-  if (!window.__hostLoaded && !window.__legacyLoaded) {
-    if (!scriptsLoadingPromise) {
-      scriptsLoadingPromise = (async () => {
-        registerNativePages();
-        window.__hostManualBoot = true;
-        for (const src of SCRIPTS) {
-          await loadCoreScript(src);
-        }
-        window.__hostLoaded = true;
-        return true;
-      })();
-    }
-    await scriptsLoadingPromise;
-  }
-  // 內嵌詳情需要全域狀態（使用者／權限／token）
-  const st = window.appState;
-  if (st) {
-    st.token = authStore.token;
-    st.user = authStore.user;
-  }
-  return true;
-}
-
 const filteredPendingRequests = computed(() => {
   if (filterType.value !== 'inbox') return [];
   const list = allRequests.value;
@@ -387,7 +315,7 @@ async function mountSelectedDetail(id) {
   splitSelectedId.value = id;
   if (!id || !splitDetailHost.value) return;
   splitDetailHost.value.innerHTML = '<div class="muted" style="padding:40px;text-align:center">正在載入單據詳情…</div>';
-  await ensureDetailScripts();
+  await ensureCoreScriptsLoaded(authStore);
   if (typeof window.renderDetailEmbedded === 'function') {
     window.renderDetailEmbedded(splitDetailHost.value, id, {
       onPopout: (reqId) => router.push(`/detail/${reqId}`),

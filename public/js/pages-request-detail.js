@@ -310,12 +310,18 @@ function buildRequestDetailMainHtml(detailData) {
     const u = (state.users || []).find((x) => x.id === Number(id));
     return u ? u.name : `#${id}`;
   };
-  const progress = flowChartHtml(steps, {
-    request,
-    userName,
-    showLegend: true,
-    flow: request.flow || null,
-  });
+  const chartRenderer =
+    (typeof flowChartHtml === 'function' && flowChartHtml) ||
+    (typeof window !== 'undefined' && typeof window.flowChartHtml === 'function' && window.flowChartHtml) ||
+    null;
+  const progress = chartRenderer
+    ? chartRenderer(steps, {
+        request,
+        userName,
+        showLegend: true,
+        flow: request.flow || null,
+      })
+    : '';
 
   const voidAction = [...(request.actions || [])]
     .reverse()

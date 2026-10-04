@@ -1094,9 +1094,13 @@ async function bindVoidTargetPicker(root, previewEl, workflow) {
     try {
       const p = await api(`/api/requests/${id}/void-preview`);
       const steps = p.steps || [];
+      const chartRenderer =
+        (typeof flowChartHtml === 'function' && flowChartHtml) ||
+        (typeof window !== 'undefined' && typeof window.flowChartHtml === 'function' && window.flowChartHtml) ||
+        null;
       const html = `
         <div class="muted" style="margin-bottom:6px">此作廢申請將由原單簽核人依序核准：</div>
-        ${flowChartHtml(steps, { showLegend: false })}
+        ${chartRenderer ? chartRenderer(steps, { showLegend: false }) : ''}
         <div class="muted" style="margin-top:6px">${esc(voidStepsPathText(steps))}</div>`;
       if (box) box.innerHTML = html;
       if (previewEl) previewEl.innerHTML = html;

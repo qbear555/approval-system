@@ -637,7 +637,11 @@ async function openWorkflowEditor(workflow = null) {
     const preview = document.querySelector('#flow-path-preview');
     if (descEl) descEl.value = path;
     if (preview) {
-      preview.innerHTML = `${flowChartHtml(steps, { showLegend: false })}
+      const chartRenderer =
+        (typeof flowChartHtml === 'function' && flowChartHtml) ||
+        (typeof window !== 'undefined' && typeof window.flowChartHtml === 'function' && window.flowChartHtml) ||
+        null;
+      preview.innerHTML = `${chartRenderer ? chartRenderer(steps, { showLegend: false }) : ''}
         <div class="muted" style="margin-top:6px">${esc(path)}</div>`;
     }
     if (nameEl) {
@@ -869,7 +873,12 @@ async function openWorkflowEditor(workflow = null) {
       <div class="field" style="grid-column:1/-1">
         <label>目前簽核路徑</label>
         <div id="flow-path-preview" style="padding:6px 12px 10px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;color:#1e3a5f;line-height:1.5">
-          ${flowChartHtml(workflow?.steps || [], { showLegend: false, flow: workflow?.flow || null })}
+          ${(() => {
+            const r = (typeof flowChartHtml === 'function' && flowChartHtml) ||
+              (typeof window !== 'undefined' && typeof window.flowChartHtml === 'function' && window.flowChartHtml) ||
+              null;
+            return r ? r(workflow?.steps || [], { showLegend: false, flow: workflow?.flow || null }) : '';
+          })()}
           <div class="muted" style="margin-top:6px">${esc(workflow?.description || '申請人')}</div>
         </div>
       </div>

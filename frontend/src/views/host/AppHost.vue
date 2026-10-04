@@ -69,39 +69,13 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { registerNativePages } from '@/native';
+import { ensureCoreScriptsLoaded } from '@/lib/core-scripts';
 import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
 import { performVueLogout } from '@/lib/session';
 
-const V = '20261004_paper_drag';
 const LOGO = '/img/argo-logo.png';
 const VUE_PAGES = new Set(['dashboard', 'inbox', 'mine', 'records']);
-
-const SCRIPTS = [
-  '/vendor/pdfjs/pdf.min.js',
-  '/js/tw-calendar.js',
-  '/js/rich-editor.js',
-  '/js/ui-helpers.js',
-  '/js/shared-helpers.js',
-  '/js/pdf-form-designer.js',
-  '/js/flow-editor.js',
-  '/js/app.js',
-  '/js/pages-request-fields.js',
-  '/js/pages-request-table.js',
-  '/js/pages-request-view.js',
-  '/js/pages-request-new.js',
-  '/js/pages-request-detail.js',
-  '/js/pages-workflows.js',
-  '/js/pages-backups.js',
-  '/js/pages-leave-report.js',
-  '/js/pages-users.js',
-  '/js/pages-departments.js',
-  '/js/pages-audit.js',
-  '/js/pages-settings.js',
-  '/js/pages-line.js',
-  '/js/pages-system.js',
-];
 
 const route = useRoute();
 const router = useRouter();
@@ -215,18 +189,6 @@ function patchNavigate() {
   };
 }
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = `${src}?v=${V}`;
-    s.async = false;
-    s.dataset.host = '1';
-    s.onload = resolve;
-    s.onerror = () => reject(new Error(`載入失敗：${src}`));
-    document.body.appendChild(s);
-  });
-}
-
 async function showHostPage() {
   const target = hostTarget();
   const hash = desiredHash(target);
@@ -254,20 +216,8 @@ onMounted(async () => {
     }
   }
 
-  if (window.__hostLoaded) {
-    patchNavigate();
-    window.boot?.();
-    if (typeof window.applyRoleUi === 'function') window.applyRoleUi();
-    showHostPage();
-    return;
-  }
-
-  registerNativePages();
-  window.__hostManualBoot = true;
-  window.__legacyManualBoot = true;
   try {
-    for (const src of SCRIPTS) await loadScript(src);
-    window.__hostLoaded = true;
+    await ensureCoreScriptsLoaded(authStore);
     patchNavigate();
     window.boot?.();
     if (typeof window.applyRoleUi === 'function') window.applyRoleUi();

@@ -3,6 +3,21 @@
  * 提供使用者載入、流程載入、時間解析、圖表渲染、批次核准等核心共用函式
  */
 
+function safeEsc(s) {
+  if (typeof window !== 'undefined' && typeof window.esc === 'function') {
+    return window.esc(s);
+  }
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+if (typeof esc === 'undefined' && typeof window !== 'undefined') {
+  window.esc = safeEsc;
+}
+
 function openBulkApproveModal({ selectedRequests = [], onCompleted = null } = {}) {
   if (!selectedRequests || !selectedRequests.length) return;
   const count = selectedRequests.length;
@@ -887,6 +902,9 @@ function flowChartHtml(steps, opts = {}) {
     });
   }
   return flowChartLinearHtml(steps, opts);
+}
+if (typeof window !== 'undefined') {
+  window.flowChartHtml = flowChartHtml;
 }
 
 function flowChartLinearHtml(steps, opts = {}) {

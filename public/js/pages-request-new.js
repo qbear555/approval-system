@@ -728,10 +728,15 @@ function initNewRequestInteractions(body, workflows) {
           ? `<div class="muted" style="margin:0 0 8px;color:#9a3412">申請人為經營團隊：略過部門主管、副總經理，經代理人、人事單位後送總經理。</div>`
           : ''
       }
-      ${flowChartHtml(previewSteps, {
-        showLegend: false,
-        flow: skipExecTeamPath ? null : w.flow || null,
-      })}
+      ${(() => {
+        const r = (typeof flowChartHtml === 'function' && flowChartHtml) ||
+          (typeof window !== 'undefined' && typeof window.flowChartHtml === 'function' && window.flowChartHtml) ||
+          null;
+        return r ? r(previewSteps, {
+          showLegend: false,
+          flow: skipExecTeamPath ? null : w.flow || null,
+        }) : '';
+      })()}
       <div class="muted" style="margin-top:6px">${esc(
         leaveMode ? leavePathDescription(previewSteps, proxyPicked) : w.description || ''
       )}</div>`;
