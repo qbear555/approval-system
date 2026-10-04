@@ -46,6 +46,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
+import { performVueLogout } from '@/lib/session';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -62,8 +63,7 @@ const roleText = computed(() => {
 });
 
 function handleLogout() {
-  authStore.logout();
-  router.push('/login');
+  performVueLogout(authStore, router);
 }
 </script>
 

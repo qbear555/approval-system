@@ -148,9 +148,7 @@
           </div>
         </div>
         <div class="split-detail-pane">
-          <div ref="splitDetailHost" id="split-detail-host" style="min-height:300px">
-            <div class="muted" style="padding:40px;text-align:center">正在載入單據詳情…</div>
-          </div>
+          <div ref="splitDetailHost" id="split-detail-host" v-once style="min-height:300px"></div>
         </div>
       </div>
 
@@ -302,14 +300,23 @@ const SCRIPTS = [
   '/js/pages-system.js',
 ];
 
-const V = '20261004_fix2';
+const V = '20261004_split_act';
 function loadLegacyScript(src) {
   return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src^="${src}"]`)) return resolve();
+    const wanted = `${src}?v=${V}`;
+    const existing =
+      document.querySelector(`script[data-legacy-src="${src}"]`) ||
+      document.querySelector(`script[src^="${src}"]`);
+    if (existing) {
+      const cur = existing.getAttribute('src') || '';
+      if (cur.includes(`v=${V}`)) return resolve();
+      existing.remove();
+    }
     const s = document.createElement('script');
-    s.src = `${src}?v=${V}`;
+    s.src = wanted;
     s.async = false;
     s.dataset.legacy = '1';
+    s.dataset.legacySrc = src;
     s.onload = resolve;
     s.onerror = () => reject(new Error(`載入失敗：${src}`));
     document.body.appendChild(s);

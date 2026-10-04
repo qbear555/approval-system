@@ -13,6 +13,10 @@
       </div>
     </main>
     <Toast />
+    <div id="modal" class="modal hidden">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="modal-panel" id="modal-panel"></div>
+    </div>
   </div>
 </template>
 

@@ -978,6 +978,22 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
     request?.status === 'pending' &&
     !!(canReturnApi || previousStep);
 
+  const qIn = (sel) => (body && body.querySelector(sel)) || document.querySelector(sel);
+  const qAllIn = (sel) => [...(body || document).querySelectorAll(sel)];
+  const afterAction = (arg) => {
+    const stay = !!(arg && typeof arg === 'object' && arg.stay);
+    const nextId = arg && typeof arg === 'object' ? arg.id : arg;
+    if (typeof onRefresh === 'function') {
+      try {
+        onRefresh({ stay, id: nextId || id });
+      } catch (err) {
+        console.warn('detail onRefresh', err);
+      }
+      return;
+    }
+    navigate('detail', { id: nextId || id });
+  };
+
   const isPdfTemplateReq = request.pdfLayout?.type === 'pdf_template';
   const usePdfFormView = request.status === 'pending' || isPdfTemplateReq;
 
@@ -1029,8 +1045,9 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
     });
   }
 
+  try {
   if (canApprove && (currentStep?.approverFields || []).length) {
-    const stepBox = $('#step-form-fields') || body;
+    const stepBox = qIn('#step-form-fields') || body;
     bindDateTimeFields(stepBox);
     // 人事：實際工時起迄 → 實際總計自動換算
     if (
@@ -1050,6 +1067,9 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
     bindHrLeaveTypeAutoRemain(stepBox, applicantLabor);
     bindSalesGrossAutoCalc(stepBox);
     bindItRepairNoncompliantNote(stepBox);
+  }
+  } catch (err) {
+    console.warn('bindRequestDetailEvents step fields', err);
   }
 
   body.querySelectorAll('[data-dl-att]').forEach((btn) => {
@@ -1083,12 +1103,16 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
     btn.onclick = () => openOnlyOfficeEditor(btn.dataset.ooEdit, request.id);
   });
 
-  if (typeof bindCommentPhraseChips === 'function') {
-    bindCommentPhraseChips(body);
+  try {
+    if (typeof bindCommentPhraseChips === 'function') {
+      bindCommentPhraseChips(body);
+    }
+  } catch (err) {
+    console.warn('bindCommentPhraseChips', err);
   }
 
   const doAction = async (action) => {
-    const comment = $('#action-comment')?.value || '';
+    const comment = qIn('#action-comment')?.value || '';
     if (action === 'reject' && !comment.trim()) {
       if (!confirm('確定要駁回嗎？（建議填寫意見）')) return;
     }
@@ -1107,7 +1131,7 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
     }
     let step_form_data = {};
     if (action === 'approve' && (currentStep?.approverFields || []).length) {
-      const box = $('#step-form-fields');
+      const box = qIn('#step-form-fields');
       if (box) {
         for (const cid of IT_REPAIR_CHECK_IDS) {
           const sel = box.querySelector(`[data-ff="${cid}"]`);
@@ -1123,7 +1147,7 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
         step_form_data = collectFormData(box);
       }
     }
-    const fileInput = $('#step-attachments');
+    const fileInput = qIn('#step-attachments');
     const files = fileInput?.files ? [...fileInput.files] : [];
     if (files.length > 20) {
       toast('附件最多 20 個', 'error');
@@ -1188,14 +1212,14 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
               ? '已退回上一位'
               : '已取消');
       toast(msg, 'success');
-      navigate('detail', { id });
+      afterAction();
     } catch (e) {
       toast(e.message, 'error');
     }
   };
 
-  $('#btn-upload-step-att')?.addEventListener('click', async () => {
-    const fileInput = $('#step-attachments');
+  qIn('#btn-upload-step-att')?.addEventListener('click', async () => {
+    const fileInput = qIn('#step-attachments');
     const files = fileInput?.files ? [...fileInput.files] : [];
     if (!files.length) {
       toast('請先選擇檔案', 'error');
@@ -1213,13 +1237,13 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
         body: fd,
       });
       toast(data.message || '附件已上傳', 'success');
-      navigate('detail', { id });
+      afterAction({ stay: true });
     } catch (e) {
       toast(e.message, 'error');
     }
   });
 
-  $('#btn-pick-approved-step')?.addEventListener('click', async () => {
+  qIn('#btn-pick-approved-step')?.addEventListener('click', async () => {
     const already = (request.attachments || [])
       .map((a) => a.source_request_id)
       .filter((n) => Number(n) > 0);
@@ -1236,7 +1260,7 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
             body: fd,
           });
           toast(data.message || '已附加已核准申請單', 'success');
-          navigate('detail', { id });
+          afterAction({ stay: true });
         } catch (e) {
           toast(e.message, 'error');
         }
@@ -1245,28 +1269,38 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
   });
 
   const bindActionBtn = (sel, action) => {
-    document.querySelectorAll(sel).forEach((btn) => {
-      btn.addEventListener('click', () => doAction(action));
+    qAllIn(sel).forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        doAction(action);
+      });
     });
   };
   bindActionBtn('#btn-approve, #btn-approve-card', 'approve');
   bindActionBtn('#btn-reject, #btn-reject-card', 'reject');
-  document.querySelectorAll('#btn-return, #btn-return-card').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      openReturnModal(request, detailData, () => {
-        if (typeof onRefresh === 'function') onRefresh();
-        else navigate('detail', { id });
-      });
+  qAllIn('#btn-return, #btn-return-card').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openReturnModal(request, detailData, afterAction);
     });
   });
-  const goDetail = () => navigate('detail', { id });
-  document.querySelectorAll('#btn-cosign, #btn-cosign-card').forEach((btn) => {
-    btn.addEventListener('click', () => openCosignModal(request, goDetail));
+  qAllIn('#btn-cosign, #btn-cosign-card').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openCosignModal(request, () => afterAction({ stay: true }));
+    });
   });
-  document.querySelectorAll('#btn-forward, #btn-forward-card').forEach((btn) => {
-    btn.addEventListener('click', () => openForwardModal(request, goDetail));
+  qAllIn('#btn-forward, #btn-forward-card').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openForwardModal(request, afterAction);
+    });
   });
-  $('#btn-cancel')?.addEventListener('click', () => {
+  qIn('#btn-cancel')?.addEventListener('click', () => {
     if (confirm('確定取消此申請？')) doAction('cancel');
   });
   $('#btn-void-apply')?.addEventListener('click', async () => {
@@ -1296,7 +1330,7 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
         body: { reason: String(reason).trim() },
       });
       toast(data.message || '作廢申請已送出', 'success');
-      navigate('detail', { id: data.request?.id || id });
+      afterAction(data.request?.id || id);
     } catch (e) {
       toast(e.message || '送出失敗', 'error');
       if (btn) btn.disabled = false;
@@ -1326,7 +1360,7 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
         body: { reason: String(reason).trim() },
       });
       toast(data.message || '申請已作廢', 'success');
-      navigate('detail', { id });
+      afterAction();
     } catch (e) {
       toast(e.message || '作廢失敗', 'error');
       if (btn) btn.disabled = false;
@@ -1385,7 +1419,7 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
         body,
       });
       toast(data.message || '申請已送出', 'success');
-      navigate('detail', { id: request.id });
+      afterAction(request.id);
     } catch (e) {
       toast(e.message, 'error');
     }
@@ -1408,7 +1442,7 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
         `已寄送催辦信給 ${data.sentTo || 0} 位${toList ? `：${toList}` : ''}${extra}`,
         'success'
       );
-      navigate('detail', { id });
+      afterAction({ stay: true });
     } catch (e) {
       toast(e.message || '催辦失敗', 'error');
       if (btn) btn.disabled = false;
@@ -1617,12 +1651,16 @@ async function renderDetailEmbedded(container, id, opts = {}) {
       if (typeof opts.onPopout === 'function') opts.onPopout(id);
       else navigate('detail', { id });
     });
-    bindRequestDetailEvents(container, detailData, () => {
+    bindRequestDetailEvents(container, detailData, (info) => {
+      if (info && info.stay) {
+        renderDetailEmbedded(container, id, opts);
+        return;
+      }
       if (typeof opts.onActionCompleted === 'function') {
         opts.onActionCompleted(detailData.request);
-      } else {
-        renderDetailEmbedded(container, id, opts);
+        return;
       }
+      renderDetailEmbedded(container, id, opts);
     });
   } catch (err) {
     container.innerHTML = `<div class="error-msg" style="margin:20px">${esc(err.message || '載入單據失敗')}</div>`;

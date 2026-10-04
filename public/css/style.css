@@ -3007,6 +3007,14 @@ input[type="checkbox"], input[type="radio"] {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+}
+.split-nav-btns .btn {
+  pointer-events: auto;
+  cursor: pointer;
 }
 .split-detail-body {
   padding: 16px;

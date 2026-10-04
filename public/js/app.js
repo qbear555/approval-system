@@ -228,10 +228,31 @@ function htmlToPlainText(raw) {
     .trim();
 }
 
+function ensureToastEl() {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast hidden';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
 function toast(msg, type = '') {
-  const el = $('#toast');
-  el.textContent = msg;
-  el.className = `toast ${type}`;
+  const text = String(msg || '');
+  if (typeof window.__v2Toast === 'function') {
+    try {
+      window.__v2Toast(text, type || 'info');
+      return;
+    } catch {
+      /* fall through to classic toast */
+    }
+  }
+  const el = ensureToastEl();
+  el.textContent = text;
+  el.className = `toast ${type || ''}`.trim();
+  el.classList.remove('hidden');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.classList.add('hidden'), 2800);
 }
@@ -361,11 +382,37 @@ function setAuth(token, user) {
   else localStorage.removeItem('approval_token');
 }
 
+function isVueV2Host() {
+  try {
+    return (
+      Boolean(window.__legacyManualBoot) ||
+      String(location.pathname || '').indexOf('/v2') === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function logout(showMsg = true) {
+  if (window.__approvalLoggingOut) return;
+  window.__approvalLoggingOut = true;
   stopPendingWatcher();
   setAuth('', null);
   state.page = 'dashboard';
   state.pageParams = {};
+  if (isVueV2Host()) {
+    try {
+      if (typeof window.__v2GoLogin === 'function') {
+        window.__v2GoLogin();
+      } else if (!String(location.pathname || '').startsWith('/v2/login')) {
+        location.assign('/v2/login');
+      }
+    } finally {
+      window.__approvalLoggingOut = false;
+    }
+    return;
+  }
+  window.__approvalLoggingOut = false;
   showAuth();
   if (showMsg) toast('已登出');
 }
@@ -1128,11 +1175,13 @@ async function refreshBadge(opts = {}) {
     const { stats } = await api('/api/stats');
     const count = Number(stats.pendingMe) || 0;
     const b = $('#badge-pending');
-    if (count > 0) {
-      b.textContent = String(count);
-      b.classList.remove('hidden');
-    } else {
-      b.classList.add('hidden');
+    if (b) {
+      if (count > 0) {
+        b.textContent = String(count);
+        b.classList.remove('hidden');
+      } else {
+        b.classList.add('hidden');
+      }
     }
 
     if (allowNotify && state.token && state.user) {
@@ -1170,12 +1219,37 @@ function statusTag(status) {
   return `<span class="tag ${s.cls}">${s.label}</span>`;
 }
 
-function openModal(html) {
-  const modal = $('#modal');
-  if (modal) {
-    modal.classList.remove('hidden', 'modal-oo-open');
+function ensureModalEls() {
+  let modal = document.getElementById('modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal';
+    modal.className = 'modal hidden';
+    modal.innerHTML =
+      '<div class="modal-backdrop" data-close-modal></div><div class="modal-panel" id="modal-panel"></div>';
+    document.body.appendChild(modal);
   }
-  const panel = $('#modal-panel');
+  let panel = document.getElementById('modal-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'modal-panel';
+    panel.className = 'modal-panel';
+    modal.appendChild(panel);
+  }
+  if (!window.__modalCloseBound) {
+    window.__modalCloseBound = true;
+    document.addEventListener('click', (e) => {
+      if (e.target && e.target.matches && e.target.matches('[data-close-modal]')) {
+        closeModal();
+      }
+    });
+  }
+  return { modal, panel };
+}
+
+function openModal(html) {
+  const { modal, panel } = ensureModalEls();
+  modal.classList.remove('hidden', 'modal-oo-open');
   panel.className = 'modal-panel';
   panel.innerHTML = html;
 }
@@ -1259,6 +1333,19 @@ async function navigate(page, params = {}, navOpts = {}) {
     page = 'dashboard';
     params = {};
   }
+  if (
+    isVueV2Host() &&
+    typeof window.__v2Navigate === 'function' &&
+    !navOpts.fromHost &&
+    !navOpts.skipVue
+  ) {
+    try {
+      const handled = window.__v2Navigate(page, params, navOpts);
+      if (handled !== false) return;
+    } catch (e) {
+      console.warn('__v2Navigate', e);
+    }
+  }
   state.page = page;
   state.pageParams = params || {};
   // 同步網址 hash：所有頁面（含總覽）皆寫入，重新整理可留在同一項目
@@ -1271,10 +1358,15 @@ async function navigate(page, params = {}, navOpts = {}) {
   $$('.nav-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.page === page);
   });
-  $('#page-title').textContent =
-    page === 'mine' ? minePageTitle(params) : titles[page] || '線上簽核';
-  $('#page-actions').innerHTML = '';
+  const pageTitle = $('#page-title');
+  if (pageTitle) {
+    pageTitle.textContent =
+      page === 'mine' ? minePageTitle(params) : titles[page] || '線上簽核';
+  }
+  const pageActions = $('#page-actions');
+  if (pageActions) pageActions.innerHTML = '';
   const body = $('#page-body');
+  if (!body) return;
   if (typeof window.__unmountNativePage === 'function') window.__unmountNativePage();
   body.innerHTML = '<div class="muted">載入中…</div>';
   const nativeRender = window.__nativePages && window.__nativePages[page];
@@ -1557,6 +1649,7 @@ function bindAuthUI() {
   if (!window.__hashChangeBound) {
     window.__hashChangeBound = true;
     window.addEventListener('hashchange', () => {
+      if (isVueV2Host()) return;
       if (!state.token) return;
       const route = parseRouteFromHash();
       if (!route) {
@@ -1614,7 +1707,7 @@ async function boot() {
 
 // 同步先亮登入畫面
 try {
-  if (document.getElementById('auth-view')) {
+  if (document.getElementById('auth-view') && !window.__legacyManualBoot) {
     document.getElementById('auth-view').classList.remove('hidden');
   }
 } catch (_) {

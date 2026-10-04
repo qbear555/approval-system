@@ -22,6 +22,18 @@
 
 本機首頁：http://127.0.0.1:3847。部署後 HTTP 3847／HTTPS 3848。
 
+### 2026-10-04 雙欄審批右側按鈕無反應
+
+- Vue `/v2/` 待我簽核雙欄模式內嵌經典詳情時，核准／駁回成功後原本呼叫經典 `navigate('detail')`，但 Vue 版面沒有 `#page-body`／`#toast`，點擊後丟錯、畫面不動。
+- 改為簽核完成呼叫雙欄 `onRefresh`／`onActionCompleted`，自動推進下一筆待簽；經典 `/` 雙欄同樣留在原位刷新。
+- 經典 `toast`／`openModal`／`navigate` 在 Vue 宿主改為空值安全，並橋接 `__v2Toast`、`__v2Navigate`。
+- 右欄審批按鈕改在嵌入容器內綁定；雙欄詳情宿主加 `v-once`，避免 Vue 重繪清掉按鈕事件。
+
+### 2026-10-04 Vue 登出卡在「載入中」
+
+- `/v2/` 登出不再呼叫經典 `showAuth()`（LegacyHost 裡只有「載入中…」stub、沒有登入表單）。
+- 改為清 token 後導向 `/v2/login` 真正的 Vue 登入頁；經典 `/` 登出行為不變。
+
 ### 2026-10-04 後端架構模組化拆分、代碼健康度與自動部署（階段三）
 
 - **後端架構模組化拆分（Backend Modularization）**：

@@ -76,8 +76,9 @@ import { useRoute, useRouter } from 'vue-router';
 import { registerNativePages } from '@/native';
 import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
+import { performVueLogout } from '@/lib/session';
 
-const V = '20261004_fix2';
+const V = '20261004_split_act';
 const LOGO = '/img/argo-logo.png';
 const VUE_PAGES = new Set(['dashboard', 'inbox', 'mine', 'records']);
 
@@ -125,12 +126,7 @@ const userRole = computed(() => {
 });
 
 function handleLogout() {
-  if (typeof window.logout === 'function') {
-    window.logout();
-  } else {
-    authStore.logout();
-    router.push('/login');
-  }
+  performVueLogout(authStore, router);
 }
 
 function handleNavClick(e) {
@@ -190,6 +186,7 @@ function vuePathFor(page, params = {}) {
     const query = {};
     if (params.workflowId) query.workflowId = String(params.workflowId);
     if (params.cloneFrom) query.cloneFrom = String(params.cloneFrom);
+    if (params.draftId) query.draftId = String(params.draftId);
     return Object.keys(query).length ? { path: '/new-request', query } : '/new-request';
   }
   return `/${page}`;
