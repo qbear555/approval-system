@@ -177,7 +177,7 @@ function getAttachments(requestId) {
   return db
     .prepare(
       `SELECT a.id, a.original_name, a.mime_type, a.size_bytes, a.created_at, a.step_order,
-              a.uploaded_by, u.name AS uploader_name
+              a.uploaded_by, a.source_request_id, u.name AS uploader_name
        FROM request_attachments a
        LEFT JOIN users u ON u.id = a.uploaded_by
        WHERE a.request_id = ?

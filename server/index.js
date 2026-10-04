@@ -250,7 +250,7 @@ function getAttachments(requestId) {
   return db
     .prepare(
       `SELECT a.id, a.original_name, a.mime_type, a.size_bytes, a.created_at, a.step_order,
-              a.uploaded_by, u.name AS uploader_name
+              a.uploaded_by, a.source_request_id, u.name AS uploader_name
        FROM request_attachments a
        LEFT JOIN users u ON u.id = a.uploaded_by
        WHERE a.request_id = ?
@@ -4468,6 +4468,109 @@ app.get('/api/requests', authMiddleware, (req, res) => {
   });
 });
 
+/** 將指定的已核准單據 PDF 轉存為目標單據的附件 */
+async function attachApprovedRequests(targetRequestId, userId, linkedIds, stepOrder = null) {
+  if (!Array.isArray(linkedIds) || !linkedIds.length) return [];
+  const validIds = linkedIds.map(Number).filter((n) => n > 0);
+  if (!validIds.length) return [];
+
+  const saved = [];
+  for (const srcId of validIds) {
+    try {
+      const srcDetail = getRequestDetail(srcId);
+      if (!srcDetail || srcDetail.status !== 'approved') continue;
+
+      const pdfBuf = await pdfSign.buildApprovalPdfBuffer(srcDetail, writeApprovalPdf);
+      if (!pdfBuf || !pdfBuf.length) continue;
+
+      const pdfName = buildApprovalPdfFileName(srcDetail);
+      const originalName = `已核准_${pdfName}`;
+      const storedName = `${Date.now()}_linked_${srcId}_${crypto.randomBytes(6).toString('hex')}.pdf`;
+      const filePath = path.join(UPLOAD_DIR, storedName);
+
+      fs.writeFileSync(filePath, pdfBuf);
+
+      const r = db.prepare(
+        `INSERT INTO request_attachments
+          (request_id, original_name, stored_name, mime_type, size_bytes, uploaded_by, step_order, source_request_id)
+         VALUES (?, ?, ?, 'application/pdf', ?, ?, ?, ?)`
+      ).run(
+        targetRequestId,
+        originalName,
+        storedName,
+        pdfBuf.length,
+        userId,
+        stepOrder != null ? Number(stepOrder) : null,
+        srcId
+      );
+
+      saved.push({
+        id: Number(r.lastInsertRowid),
+        original_name: originalName,
+        size_bytes: pdfBuf.length,
+        mime_type: 'application/pdf',
+        step_order: stepOrder != null ? Number(stepOrder) : null,
+        source_request_id: srcId,
+      });
+    } catch (err) {
+      console.error(`Failed to attach approved request #${srcId}:`, err);
+    }
+  }
+  return saved;
+}
+
+/** 供「附加已核准申請單」挑選清單使用 */
+app.get('/api/requests/approved-for-attach', authMiddleware, (req, res) => {
+  const uid = req.user.id;
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const limit = Math.min(Math.max(Number(req.query.limit) || 80, 1), 200);
+  const excludeId = Number(req.query.exclude_id) || 0;
+
+  const seeAll = req.user.role === 'admin' || userHasPermission(uid, 'records_all');
+  const seeLeave = canDeleteLeaveRequests(req.user);
+
+  let sql = `
+    SELECT r.id, r.workflow_id, r.requester_id, r.title, r.status, r.created_at, r.updated_at, r.completed_at,
+           w.name AS workflow_name, u.name AS requester_name, u.department AS requester_dept
+    FROM approval_requests r
+    JOIN workflows w ON w.id = r.workflow_id
+    JOIN users u ON u.id = r.requester_id
+    WHERE r.status = 'approved' AND (r.deleted_at IS NULL OR r.deleted_at = '')
+  `;
+  const params = [];
+  if (excludeId > 0) {
+    sql += ` AND r.id <> ?`;
+    params.push(excludeId);
+  }
+  sql += ` ORDER BY r.completed_at DESC, r.id DESC LIMIT 500`;
+
+  let rows = db.prepare(sql).all(...params);
+
+  // 權限過濾：管理員或 records_all 可看全部已核准；一般使用者可選本人、同一部門、或相關單據
+  if (!seeAll) {
+    const userDept = req.user.department || '';
+    rows = rows.filter((r) => {
+      if (seeLeave && isLeaveApprovalRequest(r)) return true;
+      if (userDept && r.requester_dept === userDept) return true;
+      return isRequestRelatedToUser(r, uid);
+    });
+  }
+
+  // 搜尋過濾（單號、主旨、流程名、申請人、部門）
+  if (q) {
+    rows = rows.filter((r) => {
+      const text = `${r.id} ${r.title || ''} ${r.workflow_name || ''} ${r.requester_name || ''} ${r.requester_dept || ''}`.toLowerCase();
+      return text.includes(q);
+    });
+  }
+
+  if (rows.length > limit) {
+    rows = rows.slice(0, limit);
+  }
+
+  res.json({ requests: rows });
+});
+
 app.get('/api/requests/:id', authMiddleware, (req, res) => {
   const detail = getRequestDetail(Number(req.params.id));
   if (!detail) return res.status(404).json({ error: '找不到簽核單' });
@@ -4774,12 +4877,12 @@ app.get('/api/requests/:id', authMiddleware, (req, res) => {
   });
 });
 
-/** 簽核過程補充附件（非最終審核步驟） */
+/** 簽核過程補充附件（非最終審核步驟，支援檔案上傳與已核准單據關聯） */
 app.post(
   '/api/requests/:id/attachments',
   authMiddleware,
   upload.array('attachments', 20),
-  (req, res) => {
+  async (req, res) => {
     const id = Number(req.params.id);
     const detail = getRequestDetail(id);
     if (!detail) return res.status(404).json({ error: '找不到簽核單' });
@@ -4788,29 +4891,45 @@ app.post(
         error: '僅非最終審核步驟的目前簽核人可新增附件',
       });
     }
-    if (!req.files?.length) {
-      return res.status(400).json({ error: '請選擇要上傳的檔案' });
+
+    let linkedIds = [];
+    try {
+      linkedIds = typeof req.body?.linked_request_ids === 'string'
+        ? JSON.parse(req.body.linked_request_ids || '[]')
+        : (req.body?.linked_request_ids || []);
+    } catch {
+      linkedIds = [];
+    }
+
+    if (!req.files?.length && (!Array.isArray(linkedIds) || !linkedIds.length)) {
+      return res.status(400).json({ error: '請選擇要上傳的檔案或已核准單據' });
     }
     const step = (detail.steps || []).find((s) => s.order === detail.current_step);
-    const saved = saveAttachments(id, req.user.id, req.files, step?.order ?? detail.current_step);
-    db.prepare(
-      `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
-       VALUES (?, ?, ?, ?, 'comment', ?, '{}')`
-    ).run(
-      id,
-      step?.order ?? detail.current_step,
-      step?.name || '補充附件',
-      req.user.id,
-      `上傳附件 ${saved.length} 個：${saved.map((s) => s.original_name).join('、')}`
-    );
-    db.prepare(
-      `UPDATE approval_requests SET updated_at = datetime('now', 'localtime') WHERE id = ?`
-    ).run(id);
+    const stepOrder = step?.order ?? detail.current_step;
+    const saved = saveAttachments(id, req.user.id, req.files || [], stepOrder);
+    const linkedSaved = await attachApprovedRequests(id, req.user.id, linkedIds, stepOrder);
+    const allSaved = [...saved, ...linkedSaved];
+
+    if (allSaved.length > 0) {
+      db.prepare(
+        `INSERT INTO approval_actions (request_id, step_order, step_name, actor_id, action, comment, form_data)
+         VALUES (?, ?, ?, ?, 'comment', ?, '{}')`
+      ).run(
+        id,
+        stepOrder,
+        step?.name || '補充附件',
+        req.user.id,
+        `附加檔案 ${allSaved.length} 個：${allSaved.map((s) => s.original_name).join('、')}`
+      );
+      db.prepare(
+        `UPDATE approval_requests SET updated_at = datetime('now', 'localtime') WHERE id = ?`
+      ).run(id);
+    }
     res.status(201).json({
       ok: true,
       attachments: getAttachments(id),
-      saved,
-      message: `已上傳 ${saved.length} 個附件`,
+      saved: allSaved,
+      message: `已附加 ${allSaved.length} 個附件`,
     });
   }
 );
@@ -5102,7 +5221,7 @@ function prepareRequestPayload(req, opts = {}) {
   };
 }
 
-app.post('/api/requests', authMiddleware, upload.array('attachments', 20), (req, res) => {
+app.post('/api/requests', authMiddleware, upload.array('attachments', 20), async (req, res) => {
   const prep = prepareRequestPayload(req);
   if (prep.error) return res.status(400).json({ error: prep.error });
 
@@ -5171,6 +5290,17 @@ app.post('/api/requests', authMiddleware, upload.array('attachments', 20), (req,
 
   try {
     saveAttachments(requestId, req.user.id, req.files || []);
+    let linkedIds = [];
+    try {
+      linkedIds = typeof req.body?.linked_request_ids === 'string'
+        ? JSON.parse(req.body.linked_request_ids || '[]')
+        : (req.body?.linked_request_ids || []);
+    } catch {
+      linkedIds = [];
+    }
+    if (Array.isArray(linkedIds) && linkedIds.length) {
+      await attachApprovedRequests(requestId, req.user.id, linkedIds, 0);
+    }
   } catch (e) {
     console.error('save attachments', e);
   }
@@ -5202,7 +5332,7 @@ app.put(
   '/api/requests/:id',
   authMiddleware,
   upload.array('attachments', 20),
-  (req, res) => {
+  async (req, res) => {
     const id = Number(req.params.id);
     const existing = db
       .prepare(`SELECT * FROM approval_requests WHERE id = ?`)
@@ -5311,6 +5441,17 @@ app.put(
     try {
       if (req.files?.length) {
         saveAttachments(id, req.user.id, req.files);
+      }
+      let linkedIds = [];
+      try {
+        linkedIds = typeof req.body?.linked_request_ids === 'string'
+          ? JSON.parse(req.body.linked_request_ids || '[]')
+          : (req.body?.linked_request_ids || []);
+      } catch {
+        linkedIds = [];
+      }
+      if (Array.isArray(linkedIds) && linkedIds.length) {
+        await attachApprovedRequests(id, req.user.id, linkedIds, 0);
       }
     } catch (e) {
       console.error('save attachments', e);
