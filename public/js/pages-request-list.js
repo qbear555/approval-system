@@ -103,6 +103,163 @@ if (typeof window !== 'undefined') {
   window.openBulkApproveModal = openBulkApproveModal;
 }
 
+function formatTimeElapsed(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(diff) || diff < 0) return '';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `等待 ${Math.max(1, mins)} 分鐘`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `等待 ${hours} 小時`;
+  const days = Math.floor(hours / 24);
+  return `等待 ${days} 天`;
+}
+
+function renderSplitCardsHtml(reqList, activeId) {
+  if (!reqList || !reqList.length) {
+    return `<div class="muted" style="padding:24px;text-align:center">無符合條件的待審案件</div>`;
+  }
+  return reqList
+    .map((r) => {
+      const isAct = Number(r.id) === Number(activeId);
+      return `
+      <div class="split-card ${isAct ? 'active' : ''}" data-split-id="${r.id}">
+        <div class="sc-header">
+          <span class="sc-id">#${r.id}</span>
+          <span class="sc-wf" title="${esc(r.workflow_name || '')}">${esc(r.workflow_name || '一般簽核')}</span>
+          <span class="sc-time">${formatTimeElapsed(r.created_at)}</span>
+        </div>
+        <div class="sc-title" title="${esc(r.title || '')}">${esc(r.title || '（無主旨）')}</div>
+        <div class="sc-footer">
+          <span>👤 ${esc(r.requester_name || '')}${r.requester_dept ? `（${esc(r.requester_dept)}）` : ''}</span>
+          ${r.actingAsProxy ? `<span class="tag" style="background:#fef3c7;color:#92400e;font-size:0.75rem">代簽</span>` : ''}
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+function initSplitReview(container, initialRequests, onListUpdate) {
+  let pendingList = [...initialRequests];
+  let filteredList = [...pendingList];
+  let activeId = pendingList[0]?.id || 0;
+  const cardsListEl = container.querySelector('#split-cards-list');
+  const detailPaneEl = container.querySelector('#split-detail-pane');
+  const searchInput = container.querySelector('#split-filter-input');
+  const counterEl = container.querySelector('#split-counter');
+
+  const updateCounter = () => {
+    if (counterEl) counterEl.textContent = `共 ${pendingList.length} 筆待簽`;
+  };
+
+  const loadActiveDetail = () => {
+    if (!activeId) {
+      if (detailPaneEl) {
+        detailPaneEl.innerHTML = `
+          <div class="card" style="text-align:center;padding:50px 20px;margin:20px">
+            <div style="font-size:3rem;margin-bottom:12px">🎉</div>
+            <h3 style="margin:0 0 8px;color:#166534">太棒了！所有待簽核案件已全部處理完畢</h3>
+            <p class="muted" style="margin:0 0 16px">您已清空待辦案件。</p>
+            <button type="button" class="btn primary sm" id="btn-split-done-refresh">重新整理</button>
+          </div>
+        `;
+        detailPaneEl.querySelector('#btn-split-done-refresh')?.addEventListener('click', () => {
+          if (typeof onListUpdate === 'function') onListUpdate();
+        });
+      }
+      return;
+    }
+    if (typeof window.renderDetailEmbedded === 'function') {
+      window.renderDetailEmbedded(detailPaneEl, activeId, {
+        onActionCompleted: (actedReq) => {
+          toast(`單據 #${actedReq.id} 已完成簽核！`, 'success');
+          pendingList = pendingList.filter((r) => r.id !== actedReq.id);
+          applyFilter(searchInput?.value || '');
+          if (filteredList.length) {
+            activeId = filteredList[0].id;
+          } else if (pendingList.length) {
+            activeId = pendingList[0].id;
+          } else {
+            activeId = 0;
+          }
+          renderCards();
+          loadActiveDetail();
+          updateCounter();
+          if (typeof refreshBadge === 'function') refreshBadge();
+        },
+      });
+    } else {
+      if (detailPaneEl) {
+        detailPaneEl.innerHTML = `<div class="muted" style="padding:40px;text-align:center">載入模組中…</div>`;
+      }
+    }
+  };
+
+  const renderCards = () => {
+    if (cardsListEl) {
+      cardsListEl.innerHTML = renderSplitCardsHtml(filteredList, activeId);
+      cardsListEl.querySelectorAll('.split-card').forEach((card) => {
+        card.onclick = () => {
+          const id = Number(card.dataset.splitId);
+          if (id && id !== activeId) {
+            activeId = id;
+            renderCards();
+            loadActiveDetail();
+          }
+        };
+      });
+    }
+  };
+
+  const applyFilter = (q) => {
+    const kw = (q || '').trim().toLowerCase();
+    if (!kw) {
+      filteredList = [...pendingList];
+    } else {
+      filteredList = pendingList.filter((r) => {
+        const text = `${r.id} ${r.title} ${r.requester_name} ${r.workflow_name} ${r.requester_dept || ''}`.toLowerCase();
+        return text.includes(kw);
+      });
+    }
+  };
+
+  searchInput?.addEventListener('input', (e) => {
+    applyFilter(e.target.value);
+    if (!filteredList.some((r) => r.id === activeId) && filteredList.length) {
+      activeId = filteredList[0].id;
+      loadActiveDetail();
+    }
+    renderCards();
+  });
+
+  const handleKeydown = (e) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+      const idx = filteredList.findIndex((r) => r.id === activeId);
+      if (idx !== -1 && idx < filteredList.length - 1) {
+        e.preventDefault();
+        activeId = filteredList[idx + 1].id;
+        renderCards();
+        loadActiveDetail();
+        cardsListEl?.querySelector(`.split-card.active`)?.scrollIntoView({ block: 'nearest' });
+      }
+    } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+      const idx = filteredList.findIndex((r) => r.id === activeId);
+      if (idx > 0) {
+        e.preventDefault();
+        activeId = filteredList[idx - 1].id;
+        renderCards();
+        loadActiveDetail();
+        cardsListEl?.querySelector(`.split-card.active`)?.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  };
+
+  window.addEventListener('keydown', handleKeydown);
+  renderCards();
+  loadActiveDetail();
+}
+
 async function renderRequestList(body, filter) {
   // 查詢列僅「簽核紀錄」等紀錄頁；待我簽核／我的申請不顯示、也不帶查詢參數
   const showSearch =
@@ -174,6 +331,7 @@ async function renderRequestList(body, filter) {
     allRequests.some((r) => canDeleteRequestRow(r, { adminMode }));
   const isPendingMe = filter === 'pending_me';
   const allowBatchApprove = isPendingMe && requests.length > 0;
+  const inboxViewMode = isPendingMe ? (localStorage.getItem('approval_inbox_view') || 'table') : 'table';
   const hasActiveQuery =
     showSearch &&
     !!(query.q || query.workflow || query.status || query.dateFrom || query.dateTo);
@@ -384,34 +542,76 @@ async function renderRequestList(body, filter) {
           : ''
       }
       ${
-        allowBatchApprove
-          ? `<div class="form-actions" style="margin-bottom:12px;flex-wrap:wrap;align-items:center;gap:10px">
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                <input type="checkbox" id="chk-all-reqs" /> 全選
-              </label>
-              <button type="button" class="btn success sm" id="btn-bulk-approve-reqs" disabled>✅ 批次核准</button>
-              <span class="muted" id="req-sel-count">已選 0 筆</span>
+        isPendingMe && requests.length > 0
+          ? `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+              <div class="inbox-view-switcher">
+                <button type="button" class="inbox-view-btn ${inboxViewMode === 'table' ? 'active' : ''}" id="btn-inbox-view-table">
+                  📋 表格清單
+                </button>
+                <button type="button" class="inbox-view-btn ${inboxViewMode === 'split' ? 'active' : ''}" id="btn-inbox-view-split">
+                  🖥️ 雙欄審批
+                </button>
+              </div>
+              ${
+                allowBatchApprove && inboxViewMode === 'table'
+                  ? `<div class="form-actions" style="margin:0;flex-wrap:wrap;align-items:center;gap:10px">
+                      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                        <input type="checkbox" id="chk-all-reqs" /> 全選
+                      </label>
+                      <button type="button" class="btn success sm" id="btn-bulk-approve-reqs" disabled>✅ 批次核准</button>
+                      <span class="muted" id="req-sel-count">已選 0 筆</span>
+                    </div>`
+                  : ''
+              }
             </div>`
-          : anyDeletable
-            ? `<div class="form-actions" style="margin-bottom:12px;flex-wrap:wrap">
+          : allowBatchApprove
+            ? `<div class="form-actions" style="margin-bottom:12px;flex-wrap:wrap;align-items:center;gap:10px">
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
                   <input type="checkbox" id="chk-all-reqs" /> 全選
                 </label>
-                <button type="button" class="btn danger sm" id="btn-bulk-del-reqs">刪除選取</button>
+                <button type="button" class="btn success sm" id="btn-bulk-approve-reqs" disabled>✅ 批次核准</button>
                 <span class="muted" id="req-sel-count">已選 0 筆</span>
               </div>`
-            : ''
+            : anyDeletable
+              ? `<div class="form-actions" style="margin-bottom:12px;flex-wrap:wrap">
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                    <input type="checkbox" id="chk-all-reqs" /> 全選
+                  </label>
+                  <button type="button" class="btn danger sm" id="btn-bulk-del-reqs">刪除選取</button>
+                  <span class="muted" id="req-sel-count">已選 0 筆</span>
+                </div>`
+              : ''
       }
-      ${requestTable(requests, {
-        allowDelete,
-        adminMode,
-        allowBatchApprove,
-        empty: emptyByFilter[filter] || {
-          title: '尚無資料',
-          desc: '目前沒有符合條件的簽核單據。',
-        },
-      })}
-      ${showSearch ? requestListPagerHtml(paged) : ''}
+      ${
+        isPendingMe && inboxViewMode === 'split' && requests.length > 0
+          ? `<div class="split-review-container" id="split-review-wrap">
+              <div class="split-master-pane">
+                <div class="split-master-header">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <strong style="color:#1e293b;font-size:0.95rem">待審公文清單</strong>
+                    <span class="muted" style="font-size:0.82rem" id="split-counter">共 ${requests.length} 筆待簽</span>
+                  </div>
+                  <input type="search" id="split-filter-input" class="split-search-input" placeholder="快速搜尋待簽案件…" autocomplete="off" />
+                </div>
+                <div class="split-cards-list" id="split-cards-list">
+                  ${renderSplitCardsHtml(requests, requests[0].id)}
+                </div>
+              </div>
+              <div class="split-detail-pane" id="split-detail-pane">
+                <div class="muted" style="padding:40px;text-align:center">正在載入單據詳情…</div>
+              </div>
+            </div>`
+          : `${requestTable(requests, {
+              allowDelete,
+              adminMode,
+              allowBatchApprove: isPendingMe && inboxViewMode === 'table',
+              empty: emptyByFilter[filter] || {
+                title: '尚無資料',
+                desc: '目前沒有符合條件的簽核單據。',
+              },
+            })}
+            ${showSearch ? requestListPagerHtml(paged) : ''}`
+      }
     </div>`;
   bindDataGo(body);
   bindRequestRows(body);
@@ -490,6 +690,20 @@ async function renderRequestList(body, filter) {
       btnApprove.textContent = n > 0 ? `✅ 批次核准 (${n} 筆)` : '✅ 批次核准';
     }
   };
+
+  $('#btn-inbox-view-table')?.addEventListener('click', () => {
+    localStorage.setItem('approval_inbox_view', 'table');
+    renderRequestList(body, filter);
+  });
+  $('#btn-inbox-view-split')?.addEventListener('click', () => {
+    localStorage.setItem('approval_inbox_view', 'split');
+    renderRequestList(body, filter);
+  });
+
+  if (isPendingMe && inboxViewMode === 'split' && requests.length > 0) {
+    initSplitReview(body, requests, () => renderRequestList(body, filter));
+  }
+
   $('#chk-all-reqs')?.addEventListener('change', (e) => {
     body.querySelectorAll('input[data-req-check]').forEach((c) => {
       c.checked = e.target.checked;

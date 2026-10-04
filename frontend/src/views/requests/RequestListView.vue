@@ -75,7 +75,27 @@
         </div>
       </form>
 
-      <div v-if="allowBatchApprove" class="form-actions" style="margin-bottom:12px;flex-wrap:wrap;align-items:center;gap:10px">
+      <!-- 待我簽核檢視模式切換器與批次按鈕 -->
+      <div v-if="filterType === 'inbox' && allRequests.length" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+        <div class="inbox-view-switcher">
+          <button type="button" :class="['inbox-view-btn', inboxViewMode === 'table' ? 'active' : '']" @click="setInboxView('table')">
+            📋 表格清單
+          </button>
+          <button type="button" :class="['inbox-view-btn', inboxViewMode === 'split' ? 'active' : '']" @click="setInboxView('split')">
+            🖥️ 雙欄審批
+          </button>
+        </div>
+        <div v-if="allowBatchApprove && inboxViewMode === 'table'" class="form-actions" style="margin:0;flex-wrap:wrap;align-items:center;gap:10px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" :checked="allVisibleSelected" @change="toggleAll($event.target.checked)" /> 全選
+          </label>
+          <button type="button" class="btn success sm" :disabled="!selectedIds.length" @click="showBulk = true">
+            {{ selectedIds.length ? `✅ 批次核准 (${selectedIds.length} 筆)` : '✅ 批次核准' }}
+          </button>
+          <span class="muted">已選 {{ selectedIds.length }} 筆</span>
+        </div>
+      </div>
+      <div v-else-if="allowBatchApprove" class="form-actions" style="margin-bottom:12px;flex-wrap:wrap;align-items:center;gap:10px">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
           <input type="checkbox" :checked="allVisibleSelected" @change="toggleAll($event.target.checked)" /> 全選
         </label>
@@ -93,13 +113,54 @@
       </div>
 
       <div v-if="loading" class="muted" style="padding:24px;text-align:center">載入簽核案件中...</div>
+
+      <!-- 雙欄審批模式 -->
+      <div v-else-if="filterType === 'inbox' && inboxViewMode === 'split' && allRequests.length" class="split-review-container">
+        <div class="split-master-pane">
+          <div class="split-master-header">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <strong style="color:#1e293b;font-size:0.95rem">待審公文清單</strong>
+              <span class="muted" style="font-size:0.82rem">共 {{ filteredPendingRequests.length }} 筆待簽</span>
+            </div>
+            <input v-model="splitSearch" type="search" class="split-search-input" placeholder="快速搜尋待簽案件…" autocomplete="off" />
+          </div>
+          <div class="split-cards-list">
+            <div
+              v-for="r in filteredPendingRequests"
+              :key="r.id"
+              :class="['split-card', splitSelectedId === r.id ? 'active' : '']"
+              @click="selectSplitItem(r.id)"
+            >
+              <div class="sc-header">
+                <span class="sc-id">#{{ r.id }}</span>
+                <span class="sc-wf" :title="r.workflow_name">{{ r.workflow_name || '一般簽核' }}</span>
+                <span class="sc-time">{{ formatElapsed(r.created_at) }}</span>
+              </div>
+              <div class="sc-title" :title="r.title">{{ r.title || '（無主旨）' }}</div>
+              <div class="sc-footer">
+                <span>👤 {{ r.requester_name }}{{ r.requester_dept ? `（${r.requester_dept}）` : '' }}</span>
+                <span v-if="r.actingAsProxy" class="tag" style="background:#fef3c7;color:#92400e;font-size:0.75rem">代簽</span>
+              </div>
+            </div>
+            <div v-if="!filteredPendingRequests.length" class="muted" style="padding:24px;text-align:center">
+              無符合條件的待審案件
+            </div>
+          </div>
+        </div>
+        <div class="split-detail-pane">
+          <div ref="splitDetailHost" id="split-detail-host" style="min-height:300px">
+            <div class="muted" style="padding:40px;text-align:center">正在載入單據詳情…</div>
+          </div>
+        </div>
+      </div>
+
       <RequestTable
         v-else
         :items="paged.items"
         :empty-title="emptyTitle"
         :empty-desc="emptyDesc"
         :allow-delete="allowDelete"
-        :allow-batch-approve="allowBatchApprove"
+        :allow-batch-approve="allowBatchApprove && inboxViewMode === 'table'"
         :admin-mode="adminMode"
         :selected-ids="selectedIds"
         :is-admin="authStore.isAdmin"
@@ -168,7 +229,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { apiRequest } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
@@ -206,6 +267,158 @@ const bulkComment = ref('同意');
 const bulkBusy = ref(false);
 const exportBusy = ref(false);
 const bulkPhrases = ref(resolveCommentPhrases(authStore.user));
+
+const splitDetailHost = ref(null);
+const splitSelectedId = ref(0);
+const splitSearch = ref('');
+const inboxViewMode = ref(localStorage.getItem('approval_inbox_view') || 'table');
+
+const SCRIPTS = [
+  '/vendor/pdfjs/pdf.min.js',
+  '/js/tw-calendar.js',
+  '/js/rich-editor.js',
+  '/js/ui-helpers.js',
+  '/js/pdf-form-designer.js',
+  '/js/flow-editor.js',
+  '/js/app.js',
+  '/js/pages-dashboard.js',
+  '/js/pages-request-fields.js',
+  '/js/pages-request-table.js',
+  '/js/pages-request-view.js',
+  '/js/pages-request-list.js',
+  '/js/pages-request-new.js',
+  '/js/pages-request-detail.js',
+  '/js/pages-workflows.js',
+  '/js/pages-backups.js',
+  '/js/pages-leave-report.js',
+  '/js/pages-users.js',
+  '/js/pages-departments.js',
+  '/js/pages-audit.js',
+  '/js/pages-settings.js',
+  '/js/pages-line.js',
+  '/js/pages-system.js',
+];
+
+const V = '20261004_split';
+function loadLegacyScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src^="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = `${src}?v=${V}`;
+    s.async = false;
+    s.dataset.legacy = '1';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`載入失敗：${src}`));
+    document.body.appendChild(s);
+  });
+}
+
+let scriptsLoadingPromise = null;
+async function ensureDetailScripts() {
+  if (window.renderDetailEmbedded) return true;
+  if (!scriptsLoadingPromise) {
+    scriptsLoadingPromise = (async () => {
+      for (const src of SCRIPTS) {
+        await loadLegacyScript(src);
+      }
+      return true;
+    })();
+  }
+  return scriptsLoadingPromise;
+}
+
+const filteredPendingRequests = computed(() => {
+  if (filterType.value !== 'inbox') return [];
+  const list = allRequests.value;
+  const kw = (splitSearch.value || '').trim().toLowerCase();
+  if (!kw) return list;
+  return list.filter((r) => {
+    const text = `${r.id} ${r.title || ''} ${r.requester_name || ''} ${r.workflow_name || ''} ${r.requester_dept || ''}`.toLowerCase();
+    return text.includes(kw);
+  });
+});
+
+function formatElapsed(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(diff) || diff < 0) return '';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `等待 ${Math.max(1, mins)} 分鐘`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `等待 ${hours} 小時`;
+  const days = Math.floor(hours / 24);
+  return `等待 ${days} 天`;
+}
+
+function setInboxView(mode) {
+  inboxViewMode.value = mode;
+  localStorage.setItem('approval_inbox_view', mode);
+  if (mode === 'split') {
+    nextTick(() => {
+      if (!splitSelectedId.value && filteredPendingRequests.value.length) {
+        selectSplitItem(filteredPendingRequests.value[0].id);
+      } else if (splitSelectedId.value) {
+        mountSelectedDetail(splitSelectedId.value);
+      }
+    });
+  }
+}
+
+async function mountSelectedDetail(id) {
+  splitSelectedId.value = id;
+  if (!id || !splitDetailHost.value) return;
+  splitDetailHost.value.innerHTML = '<div class="muted" style="padding:40px;text-align:center">正在載入單據詳情…</div>';
+  await ensureDetailScripts();
+  if (typeof window.renderDetailEmbedded === 'function') {
+    window.renderDetailEmbedded(splitDetailHost.value, id, {
+      onActionCompleted: (actedReq) => {
+        toast.success(`單據 #${actedReq.id} 已完成簽核！`);
+        allRequests.value = allRequests.value.filter((r) => r.id !== actedReq.id);
+        const remaining = filteredPendingRequests.value;
+        if (remaining.length) {
+          selectSplitItem(remaining[0].id);
+        } else {
+          splitSelectedId.value = 0;
+          if (splitDetailHost.value) {
+            splitDetailHost.value.innerHTML = `
+              <div class="card" style="text-align:center;padding:50px 20px;margin:20px">
+                <div style="font-size:3rem;margin-bottom:12px">🎉</div>
+                <h3 style="margin:0 0 8px;color:#166534">太棒了！所有待簽核案件已全部處理完畢</h3>
+                <p class="muted" style="margin:0 0 16px">您已清空待辦案件。</p>
+              </div>
+            `;
+          }
+        }
+        if (typeof authStore.fetchStats === 'function') authStore.fetchStats();
+      },
+    });
+  }
+}
+
+function selectSplitItem(id) {
+  splitSelectedId.value = id;
+  mountSelectedDetail(id);
+}
+
+function handleKeydown(e) {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+  if (filterType.value !== 'inbox' || inboxViewMode.value !== 'split') return;
+  const list = filteredPendingRequests.value;
+  if (!list.length) return;
+  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+    const idx = list.findIndex((r) => r.id === splitSelectedId.value);
+    if (idx !== -1 && idx < list.length - 1) {
+      e.preventDefault();
+      selectSplitItem(list[idx + 1].id);
+    }
+  } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+    const idx = list.findIndex((r) => r.id === splitSelectedId.value);
+    if (idx > 0) {
+      e.preventDefault();
+      selectSplitItem(list[idx - 1].id);
+    }
+  }
+}
 
 const filterType = computed(() => {
   if (route.name === 'Inbox') return 'inbox';
@@ -323,6 +536,16 @@ async function loadRequests() {
     allRequests.value = [];
   } finally {
     loading.value = false;
+  }
+
+  if (filterType.value === 'inbox' && inboxViewMode.value === 'split' && allRequests.value.length) {
+    nextTick(() => {
+      if (!splitSelectedId.value || !allRequests.value.some((r) => r.id === splitSelectedId.value)) {
+        selectSplitItem(allRequests.value[0].id);
+      } else {
+        mountSelectedDetail(splitSelectedId.value);
+      }
+    });
   }
 
   finConfirmList.value = [];
@@ -480,5 +703,12 @@ watch(
   }
 );
 
-onMounted(loadRequests);
+onMounted(() => {
+  loadRequests();
+  window.addEventListener('keydown', handleKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown);
+});
 </script>

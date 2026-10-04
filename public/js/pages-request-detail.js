@@ -134,6 +134,112 @@ function buildRequestDetailActionsHtml(detailData) {
   return actionsHtml.join(' ');
 }
 
+function renderActivityTimelineHtml(request) {
+  const actions = Array.isArray(request.actions) ? request.actions : [];
+  if (!actions.length && request.status === 'draft') return '';
+
+  const ACTION_MAP = {
+    submit: { label: '發起申請', cls: 'submit', icon: '📝' },
+    approve: { label: '核准通過', cls: 'approve', icon: '✅' },
+    reject: { label: '駁回退件', cls: 'reject', icon: '❌' },
+    return: { label: '退回上一位', cls: 'return', icon: '↩️' },
+    cosign: { label: '加簽', cls: 'cosign', icon: '➕' },
+    forward: { label: '轉簽', cls: 'forward', icon: '↗️' },
+    void: { label: '申請作廢', cls: 'reject', icon: '🚫' },
+    comment: { label: '留言', cls: 'pending', icon: '💬' },
+    finance_confirm: { label: '財務建檔完成', cls: 'approve', icon: '📊' },
+    applicant_ack: { label: '申請人確認', cls: 'approve', icon: '🆗' },
+  };
+
+  const itemsHtml = actions.map((a) => {
+    const actInfo = ACTION_MAP[a.action] || { label: a.action || '簽核作業', cls: 'pending', icon: '🔹' };
+    const stepLabel = a.step_name
+      ? `【${esc(a.step_name)}】`
+      : a.action === 'submit'
+        ? '【提出申請】'
+        : '';
+    const proxyHtml = a.on_behalf_of_name
+      ? `<span class="tl-proxy-tag" title="受託代理簽核">🏷️ 代 ${esc(a.on_behalf_of_name)}</span>`
+      : '';
+    const rawComment = a.comment ? String(a.comment).trim() : '';
+    const commentText = rawComment ? esc(htmlToPlainText(rawComment)) : '';
+    const commentHtml = commentText
+      ? `<div class="tl-comment-box has-comment">
+           <strong>意見：</strong>${commentText}
+         </div>`
+      : '';
+    const timeStr = a.created_at ? esc(String(a.created_at).slice(0, 16)) : '';
+    const sigHtml = a.signature_image
+      ? `<div><img class="tl-sig-thumb" src="${esc(a.signature_image)}" alt="簽名檔" title="數位手寫簽名" /></div>`
+      : '';
+
+    return `
+      <div class="tl-item is-${actInfo.cls}">
+        <div class="tl-dot"></div>
+        <div class="tl-header">
+          <span class="tl-actor">${esc(a.actor_name || a.actor_username || '審核人')}</span>
+          ${proxyHtml}
+          <span class="tl-action-badge ${actInfo.cls}">${actInfo.icon} ${actInfo.label}</span>
+          <span style="font-size:0.84rem;color:#475569;font-weight:500">${stepLabel}</span>
+          <span class="tl-time">${timeStr}</span>
+        </div>
+        ${commentHtml}
+        ${sigHtml}
+      </div>
+    `;
+  }).join('');
+
+  let pendingNodeHtml = '';
+  if (request.status === 'pending') {
+    const curStepOrder = Number(request.current_step);
+    const steps = Array.isArray(request.steps) ? request.steps : [];
+    const curStepObj = steps.find((s) => Number(s.order) === curStepOrder) || steps[curStepOrder - 1];
+    const curStepName = curStepObj?.name || `步驟 ${curStepOrder}`;
+
+    let elapsedStr = '';
+    const lastAction = actions[actions.length - 1];
+    const baseTime = lastAction?.created_at || request.created_at;
+    if (baseTime) {
+      const diffMs = Date.now() - new Date(baseTime).getTime();
+      if (!isNaN(diffMs) && diffMs > 0) {
+        const hours = Math.floor(diffMs / 3600000);
+        const days = Math.floor(hours / 24);
+        elapsedStr = days > 0 ? `已等待 ${days} 天 ${hours % 24} 小時` : `已等待 ${Math.max(1, hours)} 小時`;
+      }
+    }
+
+    pendingNodeHtml = `
+      <div class="tl-item is-pending">
+        <div class="tl-dot"></div>
+        <div class="tl-header">
+          <span class="tl-actor" style="color:#2563eb">⏳ 審核中關卡</span>
+          <span class="tl-action-badge pending">審批中</span>
+          <span style="font-size:0.84rem;color:#2563eb;font-weight:600">【${esc(curStepName)}】</span>
+          ${elapsedStr ? `<span class="tl-time" style="color:#f59e0b;font-weight:600">${elapsedStr}</span>` : ''}
+        </div>
+        <div class="tl-comment-box" style="border-left-color:#3b82f6;color:#64748b">
+          此步驟正在等候指定主管／審核人簽署，完成後將自動推進至下一步。
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="card timeline-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h4 style="margin:0;display:flex;align-items:center;gap:8px">
+          <span>📜</span> 簽核歷程軌跡（共 ${actions.length} 次紀錄）
+        </h4>
+        <span class="muted" style="font-size:0.82rem">由舊至新時間順序排列</span>
+      </div>
+      <div class="timeline-feed">
+        ${itemsHtml}
+        ${pendingNodeHtml}
+      </div>
+    </div>
+  `;
+}
+
 function buildRequestDetailMainHtml(detailData) {
   const {
     request,
@@ -586,6 +692,7 @@ function buildRequestDetailMainHtml(detailData) {
           requestStatus: request.status,
         })}
       </div>
+      ${renderActivityTimelineHtml(request)}
       ${
         canApprove
           ? `<div class="card">
@@ -1378,6 +1485,48 @@ async function renderDetail(body, id) {
       ${buildRequestDetailMainHtml(detailData)}
     </div>`;
   bindRequestDetailEvents(body, detailData, () => renderDetail(body, id));
+}
+
+async function renderDetailEmbedded(container, id, opts = {}) {
+  try {
+    container.innerHTML = '<div class="muted" style="padding:32px;text-align:center">正在載入單據詳情…</div>';
+    const detailData = await fetchRequestDetailData(id);
+    const actionsHtml = buildRequestDetailActionsHtml(detailData);
+    const mainHtml = buildRequestDetailMainHtml(detailData);
+    container.innerHTML = `
+      <div class="split-detail-nav">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-weight:700;color:#1e293b;font-size:1.1rem">#${detailData.request.id}</span>
+          <span style="font-size:0.95rem;font-weight:600;color:#334155">${esc(detailData.request.title || '')}</span>
+          ${statusTag(detailData.request.status)}
+        </div>
+        <div class="split-nav-btns">
+          ${actionsHtml}
+          <button type="button" class="btn ghost sm" id="btn-split-popout" title="以獨立全頁面開啟此單據">↗️ 獨立頁面</button>
+        </div>
+      </div>
+      <div class="split-detail-body">
+        ${mainHtml}
+      </div>
+    `;
+    container.querySelector('#btn-split-popout')?.addEventListener('click', () => {
+      navigate('detail', { id });
+    });
+    bindRequestDetailEvents(container, detailData, () => {
+      if (typeof opts.onActionCompleted === 'function') {
+        opts.onActionCompleted(detailData.request);
+      } else {
+        renderDetailEmbedded(container, id, opts);
+      }
+    });
+  } catch (err) {
+    container.innerHTML = `<div class="error-msg" style="margin:20px">${esc(err.message || '載入單據失敗')}</div>`;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.renderDetail = renderDetail;
+  window.renderDetailEmbedded = renderDetailEmbedded;
 }
 
 function openCosignModal(request, onDone) {
