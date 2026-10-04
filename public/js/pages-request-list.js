@@ -38,12 +38,7 @@ function openBulkApproveModal({ selectedRequests = [], onCompleted = null } = {}
 
       <div class="field" style="margin-bottom:14px">
         <label style="font-weight:600;display:block;margin-bottom:6px">簽核意見</label>
-        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-          <button type="button" class="btn outline xs btn-quick-opinion" data-val="同意">同意</button>
-          <button type="button" class="btn outline xs btn-quick-opinion" data-val="核可">核可</button>
-          <button type="button" class="btn outline xs btn-quick-opinion" data-val="准予備查">准予備查</button>
-          <button type="button" class="btn outline xs btn-quick-opinion" data-val="依規定辦理">依規定辦理</button>
-        </div>
+        ${typeof commentPhraseButtonsHtml === 'function' ? commentPhraseButtonsHtml('bulk-approve-comment') : ''}
         <textarea id="bulk-approve-comment" rows="3" style="width:100%;box-sizing:border-box" placeholder="請輸入批次簽核意見…">同意</textarea>
       </div>
 
@@ -60,12 +55,16 @@ function openBulkApproveModal({ selectedRequests = [], onCompleted = null } = {}
 
   openModal(modalHtml);
 
-  document.querySelectorAll('.btn-quick-opinion').forEach((btn) => {
-    btn.onclick = () => {
-      const textarea = document.getElementById('bulk-approve-comment');
-      if (textarea) textarea.value = btn.dataset.val || '';
-    };
-  });
+  if (typeof bindCommentPhraseChips === 'function') {
+    bindCommentPhraseChips(document);
+  } else {
+    document.querySelectorAll('.btn-quick-opinion').forEach((btn) => {
+      btn.onclick = () => {
+        const textarea = document.getElementById('bulk-approve-comment');
+        if (textarea) textarea.value = btn.dataset.val || '';
+      };
+    });
+  }
 
   const confirmBtn = document.getElementById('btn-confirm-bulk-approve');
   if (confirmBtn) {
@@ -376,6 +375,7 @@ async function renderRequestList(body, filter) {
               <div class="form-actions" style="margin-top:10px;flex-wrap:wrap">
                 <button type="submit" class="btn primary sm">查詢</button>
                 <button type="button" class="btn outline sm" id="btn-req-clear">清除條件</button>
+                <button type="button" class="btn outline sm" id="btn-req-export">匯出 Excel</button>
                 <span class="muted" style="font-size:0.85rem">共 <strong>${paged.total}</strong> 筆${
                   paged.pages > 1 ? `，每頁 ${REQUEST_LIST_PAGE_SIZE} 筆` : ''
                 }</span>
@@ -447,6 +447,35 @@ async function renderRequestList(body, filter) {
   $('#btn-req-clear')?.addEventListener('click', clearBtn);
   body.querySelectorAll('#btn-req-clear').forEach((b) => {
     b.onclick = clearBtn;
+  });
+
+  $('#btn-req-export')?.addEventListener('click', async () => {
+    const btn = $('#btn-req-export');
+    if (btn) btn.disabled = true;
+    try {
+      const blob = await api('/api/reports/requests-export', {
+        method: 'POST',
+        body: {
+          q: query.q,
+          workflow: query.workflow,
+          status: query.status,
+          dateFrom: query.dateFrom,
+          dateTo: query.dateTo,
+          kind: 'all',
+        },
+        expectBlob: true,
+      });
+      const range =
+        query.dateFrom || query.dateTo
+          ? `_${query.dateFrom || '起'}_${query.dateTo || '迄'}`
+          : '';
+      downloadBlobFile(blob, `單據報表${range}.xlsx`);
+      toast('Excel 已開始下載', 'success');
+    } catch (e) {
+      toast(e.message || '匯出失敗', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   });
 
   if (!anyDeletable && !allowBatchApprove) return;

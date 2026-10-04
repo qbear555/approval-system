@@ -1,29 +1,22 @@
-﻿<template>
+<template>
   <!--
-    v2 功能宿主：在 Vue 外殼內載入經典模組化前端（public/js/pages-*.js）。
-    外觀與功能 100% 等同經典介面；每個功能仍是獨立的 pages-*.js 檔案。
+    尚未改寫為 Vue 的功能（詳情、新增申請、流程、設定…）仍由經典 pages-*.js 承載。
+    總覽／待我簽核／我的申請／簽核紀錄已改走獨立 Vue 路由。
   -->
   <div v-once id="legacy-root">
-    <div id="auth-view" class="auth-wrap">
+    <div id="auth-view" class="auth-wrap hidden">
       <div class="auth-card">
         <div class="auth-brand">
           <img class="brand-logo brand-logo-auth" :src="LOGO" alt="ARGO" width="1048" height="289" decoding="async" />
           <div class="company-name">線上簽核系統</div>
           <h1>線上簽核</h1>
           <p>自訂流程 · 紀錄留存 · PDF 匯出</p>
-          <div class="app-version" id="auth-version" title="系統版本">v—</div>
         </div>
-        <form id="login-form" class="auth-form">
-          <label>帳號<input name="username" autocomplete="username" required placeholder="請輸入帳號" value="" /></label>
-          <label>密碼<input name="password" type="password" autocomplete="current-password" required placeholder="請輸入密碼" value="" /></label>
-          <button type="submit" class="btn primary block">登入</button>
-        </form>
-        <div id="auth-error" class="error-msg hidden"></div>
-        <div class="auth-version-foot muted app-version" id="auth-version-foot">線上簽核系統</div>
+        <div class="muted" style="text-align:center;padding:12px">載入中…</div>
       </div>
     </div>
 
-    <div id="main-view" class="main-layout hidden">
+    <div id="main-view" class="main-layout">
       <aside class="sidebar">
         <div class="sidebar-brand">
           <img class="brand-logo brand-logo-side" :src="LOGO" alt="ARGO" width="1048" height="289" decoding="async" />
@@ -33,7 +26,7 @@
           </div>
         </div>
         <nav class="nav">
-          <button type="button" class="nav-item active" data-page="dashboard">總覽</button>
+          <button type="button" class="nav-item" data-page="dashboard">總覽</button>
           <button type="button" class="nav-item" data-page="inbox">待我簽核 <span id="badge-pending" class="badge hidden">0</span></button>
           <button type="button" class="nav-item" data-page="mine">我的申請</button>
           <button type="button" class="nav-item" data-page="records">簽核紀錄</button>
@@ -61,7 +54,7 @@
 
       <main class="content">
         <header class="page-header">
-          <h2 id="page-title">總覽</h2>
+          <h2 id="page-title">載入中</h2>
           <div id="page-actions"></div>
         </header>
         <div id="page-body" class="page-body"></div>
@@ -78,13 +71,14 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount } from 'vue';
+import { onMounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { registerNativePages } from '@/native';
 
-const V = '20261003_v2';
-const LOGO = '/img/argo-logo.png'; // 以變數引用，避免 Vite 打包時解析
+const V = '20261004_phrases';
+const LOGO = '/img/argo-logo.png';
+const VUE_PAGES = new Set(['dashboard', 'inbox', 'mine', 'records']);
 
-/** 與 public/index.html 相同的載入順序（app.js 為核心，pages-* 為各功能獨立檔案） */
 const SCRIPTS = [
   '/vendor/pdfjs/pdf.min.js',
   '/js/tw-calendar.js',
@@ -111,7 +105,83 @@ const SCRIPTS = [
   '/js/pages-system.js',
 ];
 
-let styleEl = null;
+const route = useRoute();
+const router = useRouter();
+
+function pathSegments() {
+  const raw = route.params.pathMatch;
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === 'string' && raw) return raw.split('/').filter(Boolean);
+  return [];
+}
+
+function legacyTarget() {
+  if (route.meta?.legacyPage === 'detail' || route.name === 'Detail') {
+    return { page: 'detail', params: { id: Number(route.params.id) } };
+  }
+  if (route.meta?.legacyPage === 'new-request' || route.name === 'NewRequest') {
+    const params = { ...route.query };
+    if (route.query.workflowId) params.workflowId = Number(route.query.workflowId);
+    if (route.query.cloneFrom) params.cloneFrom = Number(route.query.cloneFrom);
+    return { page: 'new-request', params };
+  }
+  const segs = pathSegments();
+  const page = segs[0] || 'dashboard';
+  const params = { ...route.query };
+  if (page === 'detail' && segs[1]) params.id = Number(segs[1]);
+  if (route.query.workflowId) params.workflowId = Number(route.query.workflowId);
+  if (route.query.cloneFrom) params.cloneFrom = Number(route.query.cloneFrom);
+  return { page, params };
+}
+
+function desiredHash(target) {
+  if (target.page === 'detail' && target.params.id) return `#detail?id=${target.params.id}`;
+  const q = new URLSearchParams();
+  Object.entries(target.params || {}).forEach(([k, v]) => {
+    if (v != null && v !== '' && k !== 'id') q.set(k, String(v));
+  });
+  const qs = q.toString();
+  return qs ? `#${target.page}?${qs}` : `#${target.page}`;
+}
+
+function vuePathFor(page, params = {}) {
+  if (page === 'dashboard') return '/dashboard';
+  if (page === 'inbox') return '/inbox';
+  if (page === 'mine') {
+    return params.status ? { path: '/mine', query: { status: params.status } } : '/mine';
+  }
+  if (page === 'records') return '/records';
+  if (page === 'detail' && params.id) return `/detail/${params.id}`;
+  if (page === 'new-request') {
+    const query = {};
+    if (params.workflowId) query.workflowId = String(params.workflowId);
+    if (params.cloneFrom) query.cloneFrom = String(params.cloneFrom);
+    return Object.keys(query).length ? { path: '/new-request', query } : '/new-request';
+  }
+  return `/${page}`;
+}
+
+function patchNavigate() {
+  const orig = window.navigate;
+  window.navigate = (page, params = {}, navOpts = {}) => {
+    if (VUE_PAGES.has(page)) {
+      router.push(vuePathFor(page, params));
+      return;
+    }
+    if (page === 'detail' && params.id) {
+      const next = `/detail/${params.id}`;
+      if (route.path !== next) router.push(next);
+      else if (typeof orig === 'function') orig(page, params, navOpts);
+      return;
+    }
+    if (page === 'new-request') {
+      const next = vuePathFor(page, params);
+      router.push(next);
+      return;
+    }
+    if (typeof orig === 'function') return orig(page, params, navOpts);
+  };
+}
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -125,36 +195,50 @@ function loadScript(src) {
   });
 }
 
-onMounted(async () => {
-  styleEl = document.createElement('link');
-  styleEl.rel = 'stylesheet';
-  styleEl.href = `/css/style.css?v=${V}`;
-  document.head.appendChild(styleEl);
+async function showLegacyPage() {
+  const target = legacyTarget();
+  const hash = desiredHash(target);
+  if (`#${String(location.hash || '').replace(/^#/, '')}` !== hash) {
+    location.hash = hash;
+  }
+  if (typeof window.navigate === 'function') {
+    window.navigate(target.page, target.params, { skipHashSync: true });
+  }
+}
 
-  // 經典腳本為全域 const/function，只能載入一次
+onMounted(async () => {
+  const target = legacyTarget();
+  const hash = desiredHash(target);
+  if (`#${String(location.hash || '').replace(/^#/, '')}` !== hash) {
+    location.hash = hash;
+  }
+
   if (window.__legacyLoaded) {
+    patchNavigate();
     window.boot?.();
+    showLegacyPage();
     return;
   }
-  registerNativePages(); // 已改寫成 Vue 的頁面（navigate 時優先使用）
-  window.__legacyManualBoot = true; // 由宿主在所有腳本載入後才呼叫 boot()
+
+  registerNativePages();
+  window.__legacyManualBoot = true;
   try {
     for (const src of SCRIPTS) await loadScript(src);
     window.__legacyLoaded = true;
+    patchNavigate();
     window.boot?.();
+    showLegacyPage();
   } catch (e) {
     console.error('[legacy-host]', e);
-    const el = document.getElementById('auth-error');
-    if (el) {
-      el.textContent = e.message;
-      el.classList.remove('hidden');
-    }
+    const body = document.getElementById('page-body');
+    if (body) body.innerHTML = `<div class="error-msg">${e.message}</div>`;
   }
 });
 
-onBeforeUnmount(() => {
-  styleEl?.remove();
-});
+watch(
+  () => route.fullPath,
+  () => {
+    if (window.__legacyLoaded) showLegacyPage();
+  }
+);
 </script>
-
-

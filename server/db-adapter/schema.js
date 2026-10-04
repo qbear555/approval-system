@@ -22,7 +22,8 @@ const SQLITE_DDL = `
     sl_used_hours REAL NOT NULL DEFAULT 0,
     leave_used_json TEXT NOT NULL DEFAULT '{}',
     leave_entitled_json TEXT NOT NULL DEFAULT '{}',
-    signature_image TEXT
+    signature_image TEXT,
+    comment_phrases_json TEXT NOT NULL DEFAULT '[]'
   );
 
   CREATE TABLE IF NOT EXISTS workflows (
@@ -219,6 +220,7 @@ const MYSQL_DDL = `
     leave_used_json TEXT NOT NULL DEFAULT ('{}'),
     leave_entitled_json TEXT NOT NULL DEFAULT ('{}'),
     signature_image MEDIUMTEXT,
+    comment_phrases_json TEXT NOT NULL DEFAULT ('[]'),
     CONSTRAINT chk_users_role CHECK (role IN ('admin', 'user'))
   ) ${MYSQL_TABLE_OPTS};
 
@@ -430,6 +432,7 @@ const ADD_COLUMNS = [
   ['users', 'leave_used_json', `TEXT NOT NULL DEFAULT '{}'`],
   ['users', 'leave_entitled_json', `TEXT NOT NULL DEFAULT '{}'`],
   ['users', 'signature_image', 'TEXT'],
+  ['users', 'comment_phrases_json', `TEXT NOT NULL DEFAULT '[]'`],
   ['approval_requests', 'notify_email', 'INTEGER NOT NULL DEFAULT 1'],
   ['approval_requests', 'notify_prefs_json', 'TEXT DEFAULT NULL'],
   ['approval_requests', 'last_remind_at', 'TEXT'],
@@ -489,6 +492,7 @@ function mysqlFillJsonDefaults(db) {
     db.exec(`UPDATE users SET permissions_json = '[]' WHERE permissions_json IS NULL OR permissions_json = ''`);
     db.exec(`UPDATE users SET leave_used_json = '{}' WHERE leave_used_json IS NULL OR leave_used_json = ''`);
     db.exec(`UPDATE users SET leave_entitled_json = '{}' WHERE leave_entitled_json IS NULL OR leave_entitled_json = ''`);
+    db.exec(`UPDATE users SET comment_phrases_json = '[]' WHERE comment_phrases_json IS NULL OR comment_phrases_json = ''`);
     db.exec(`UPDATE workflows SET form_fields_json = '[]' WHERE form_fields_json IS NULL OR form_fields_json = ''`);
     db.exec(`UPDATE workflows SET pdf_layout_json = '{"type":"auto"}' WHERE pdf_layout_json IS NULL OR pdf_layout_json = ''`);
     db.exec(
@@ -587,7 +591,6 @@ function migrateMysqlChecks(db) {
 function applySchema(db) {
   if (db.client === 'mysql') db.execRaw(MYSQL_DDL);
   else db.exec(SQLITE_DDL);
-  mysqlFillJsonDefaults(db);
 
   for (const [table, name, spec] of ADD_COLUMNS) {
     try {
@@ -596,6 +599,8 @@ function applySchema(db) {
       console.warn('[db] add column', table + '.' + name, e.message);
     }
   }
+
+  mysqlFillJsonDefaults(db);
 
   ensureIndexes(db);
   rebuildApprovalActionsSqlite(db);

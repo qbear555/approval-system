@@ -12,7 +12,21 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthenticated: (state) => !!state.token,
     isAdmin: (state) => state.user?.role === 'admin',
+    isBuiltinAdmin: (state) => String(state.user?.username || '').trim().toLowerCase() === 'admin',
     userName: (state) => state.user?.name || state.user?.username || '',
+    isFinanceStaff: (state) => {
+      const u = state.user;
+      if (!u) return false;
+      if (u.department === '財務部') return true;
+      if (Array.isArray(u.departments) && u.departments.includes('財務部')) return true;
+      if (u.username === 'Gigi' || u.name === '張美雯') return true;
+      if (u.username === 'Joan' || u.name === '詹慈敏') return true;
+      if (u.role !== 'admin') {
+        const perms = u.permissions || [];
+        return perms.includes('finance_confirm');
+      }
+      return false;
+    },
   },
 
   actions: {
@@ -21,10 +35,11 @@ export const useAuthStore = defineStore('auth', {
       try {
         const res = await apiRequest('/api/auth/login', {
           method: 'POST',
-          body: JSON.stringify({ username, password }),
+          body: { username, password },
         });
         this.token = res.token;
         this.user = res.user;
+        this.initialized = true;
         localStorage.setItem('approval_token', res.token);
         return res;
       } finally {
@@ -41,7 +56,7 @@ export const useAuthStore = defineStore('auth', {
         const res = await apiRequest('/api/auth/me');
         this.user = res.user;
         return this.user;
-      } catch (err) {
+      } catch {
         this.logout();
         return null;
       } finally {

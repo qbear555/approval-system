@@ -43,6 +43,8 @@ const workflowModule = require('./workflow-module');
 const systemPackage = require('./system-package');
 const labor = require('./labor');
 const leaveReport = require('./leave-report');
+const requestExport = require('./request-export');
+const commentPhrases = require('./comment-phrases');
 const twCalendar = require('./tw-calendar');
 const systemSettings = require('./system-settings');
 const pdfSign = require('./pdf-sign');
@@ -605,6 +607,7 @@ function publicUser(row, { withLabor = false } = {}) {
     active: row.active,
     created_at: row.created_at,
     permissions: getPermissionsForUser(row),
+    comment_phrases: commentPhrases.parsePhrasesJson(row.comment_phrases_json),
   };
   if (withLabor) {
     base.labor = labor.buildLaborSummary({
@@ -3232,6 +3235,39 @@ app.put('/api/auth/profile', authMiddleware, (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
+app.get('/api/me/comment-phrases', authMiddleware, (req, res) => {
+  const row = db.prepare(`SELECT comment_phrases_json FROM users WHERE id = ?`).get(req.user.id);
+  if (!row) return res.status(401).json({ error: '使用者不存在' });
+  res.json({
+    phrases: commentPhrases.parsePhrasesJson(row.comment_phrases_json),
+    defaults: commentPhrases.DEFAULT_COMMENT_PHRASES,
+    max: commentPhrases.MAX_PHRASES,
+    maxLen: commentPhrases.MAX_LEN,
+  });
+});
+
+app.put('/api/me/comment-phrases', authMiddleware, (req, res) => {
+  const body = req.body || {};
+  const reset = body.reset === true || body.reset === 1 || body.reset === '1';
+  const phrases = reset
+    ? commentPhrases.DEFAULT_COMMENT_PHRASES.slice()
+    : commentPhrases.normalizePhrases(body.phrases);
+  if (!phrases.length) {
+    return res.status(400).json({ error: '請至少保留一則常用片語，或使用還原預設' });
+  }
+  db.prepare(`UPDATE users SET comment_phrases_json = ? WHERE id = ?`).run(
+    JSON.stringify(phrases),
+    req.user.id
+  );
+  const user = db.prepare(`SELECT * FROM users WHERE id = ? AND active = 1`).get(req.user.id);
+  res.json({
+    ok: true,
+    phrases,
+    user: publicUser(user),
+    message: reset ? '已還原預設片語' : '常用片語已儲存',
+  });
+});
+
 // ---------- Mail settings ----------
 app.get('/api/mail/config', authMiddleware, (req, res) => {
   // 所有登入者可見是否啟用；完整 SMTP 僅管理員
@@ -5339,6 +5375,125 @@ app.post(
     }
   }
 );
+
+/**
+ * 單據 Excel 匯出（費用報支／請購請款／簽核紀錄）
+ * POST body: { dateFrom, dateTo, status, workflow, q, kind }
+ * kind: all | expense | purchase | finance
+ * 權限：登入即可；一般使用者僅本人相關；admin／records_all／leave_report／finance_confirm 可全公司
+ */
+app.post('/api/reports/requests-export', authMiddleware, (req, res) => {
+  try {
+    const body = req.body || {};
+    const uid = req.user.id;
+    const seeAll =
+      req.user.role === 'admin' ||
+      userHasPermission(uid, 'records_all') ||
+      userHasPermission(uid, 'leave_report') ||
+      userHasPermission(uid, 'finance_confirm');
+    const seeAllLeave = canDeleteLeaveRequests(req.user);
+
+    const candidates = db
+      .prepare(
+        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
+                u.name AS requester_name, u.username AS requester_username,
+                u.department AS requester_dept
+         FROM approval_requests r
+         JOIN workflows w ON w.id = r.workflow_id
+         JOIN users u ON u.id = r.requester_id
+         WHERE r.deleted_at IS NULL OR r.deleted_at = ''
+         ORDER BY r.updated_at DESC
+         LIMIT 3000`
+      )
+      .all();
+
+    let rows = seeAll
+      ? candidates
+      : candidates.filter(
+          (r) =>
+            isRequestRelatedToUser(r, uid) ||
+            (seeAllLeave && isLeaveApprovalRequest(r))
+        );
+
+    if (req.user.role !== 'admin') {
+      rows = rows.filter((r) => String(r.status) !== 'draft' || isDraftOwner(r, uid));
+    }
+
+    const q = String(body.q || body.keyword || '')
+      .trim()
+      .toLowerCase();
+    const workflowName = String(body.workflow || body.workflow_name || body.category || '').trim();
+    const statusQ = String(body.status || '')
+      .trim()
+      .toLowerCase();
+    const dateFrom = labor.toDateOnly(body.dateFrom || body.from || '');
+    const dateTo = labor.toDateOnly(body.dateTo || body.to || '');
+
+    if (workflowName) {
+      rows = rows.filter((r) => String(r.workflow_name || '') === workflowName);
+    }
+    if (statusQ && statusQ !== 'all') {
+      const statuses = statusQ.split(/[,|]/).map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        rows = rows.filter((r) => String(r.status) === statuses[0]);
+      } else if (statuses.length > 1) {
+        rows = rows.filter((r) => statuses.includes(String(r.status)));
+      }
+    }
+    if (q) {
+      rows = rows.filter((r) => {
+        const hay = [r.id, r.title, r.requester_name, r.workflow_name, r.status]
+          .map((x) => String(x || '').toLowerCase())
+          .join(' ');
+        return hay.includes(q);
+      });
+    }
+    if (dateFrom || dateTo) {
+      rows = rows.filter((r) => {
+        const raw = String(r.updated_at || r.created_at || r.completed_at || '').slice(0, 10);
+        const d = labor.toDateOnly(raw);
+        if (!d) return false;
+        if (dateFrom && d < dateFrom) return false;
+        if (dateTo && d > dateTo) return false;
+        return true;
+      });
+    }
+
+    const { buffer, meta } = requestExport.buildRequestsExportWorkbook({
+      rows,
+      kind: body.kind || 'all',
+      dateFrom,
+      dateTo,
+      generatedBy: req.user.name || req.user.username || '',
+    });
+
+    const kindTag =
+      meta.kind === 'expense'
+        ? '費用報支'
+        : meta.kind === 'purchase'
+          ? '請購請款'
+          : meta.kind === 'finance' || meta.kind === 'expense_purchase'
+            ? '費用請購'
+            : '單據';
+    const rangeTag =
+      meta.dateFrom || meta.dateTo
+        ? `_${meta.dateFrom || '起'}_${meta.dateTo || '迄'}`
+        : '';
+    const fname = `${kindTag}報表${rangeTag}.xlsx`;
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="requests-export.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`
+    );
+    res.send(buffer);
+  } catch (e) {
+    console.error('requests-export', e);
+    res.status(400).json({ error: e.message || '匯出失敗' });
+  }
+});
 
 // ---------- Approval requests ----------
 /** 單據是否與登入使用者有關（申請人、歷程簽核人、步驟指定簽核人、或財務部對信用額度單） */

@@ -87,6 +87,33 @@
   </div>
 
   <div class="card" style="max-width:560px">
+    <h3>簽核常用片語</h3>
+    <p class="muted" style="margin-top:0;line-height:1.55">
+      核准與批次簽核時可一鍵填入意見。最多 20 則、每則 80 字；儲存後跟著帳號走，各裝置共用。
+    </p>
+    <div id="phrase-list">
+      <div
+        v-for="(p, i) in phrases"
+        :key="'p-' + i"
+        class="phrase-row"
+        style="display:flex;gap:6px;align-items:center;margin-bottom:6px"
+      >
+        <input v-model="phrases[i]" type="text" maxlength="80" style="flex:1" />
+        <button type="button" class="btn outline xs" :disabled="i === 0" @click="movePhrase(i, -1)">↑</button>
+        <button type="button" class="btn outline xs" :disabled="i === phrases.length - 1" @click="movePhrase(i, 1)">↓</button>
+        <button type="button" class="btn danger outline xs" @click="removePhrase(i)">刪</button>
+      </div>
+      <div v-if="!phrases.length" class="muted">尚無片語，請新增或還原預設</div>
+    </div>
+    <div class="form-actions" style="margin-top:10px;flex-wrap:wrap;gap:8px;align-items:center">
+      <input v-model="phraseNew" type="text" maxlength="80" placeholder="新增片語…" style="flex:1;min-width:160px" @keydown.enter.prevent="addPhrase" />
+      <button type="button" class="btn outline sm" @click="addPhrase">新增</button>
+      <button type="button" class="btn primary sm" @click="savePhrases">儲存片語</button>
+      <button type="button" class="btn outline sm" @click="resetPhrases">還原預設</button>
+    </div>
+  </div>
+
+  <div class="card" style="max-width:560px">
     <h3>🎨 客製化佈景主題</h3>
     <p class="muted" style="margin-top:0">點選下方主題即可即時預覽畫面效果，儲存後於此裝置自動持久化套用。</p>
     <div id="theme-selector-grid" class="theme-grid">
@@ -302,6 +329,7 @@
 <script setup>
 import { ref, reactive, computed } from 'vue';
 import { L } from '@/native/bridge';
+import { DEFAULT_COMMENT_PHRASES, resolveCommentPhrases } from '@/lib/comment-phrases';
 
 const user = computed(() => L.state?.user || {});
 const canEditIdentity = computed(() => L.isAdmin());
@@ -480,6 +508,64 @@ const profileForm = reactive({
   phone: u.phone || '',
   email_notify: u.email_notify !== 0,
 });
+
+const phrases = ref(resolveCommentPhrases(u));
+const phraseNew = ref('');
+
+function syncPhraseUser(user) {
+  if (user && L.state) L.state.user = { ...L.state.user, ...user };
+}
+
+function addPhrase() {
+  const v = String(phraseNew.value || '').trim();
+  if (!v) return L.toast('請輸入片語', 'error');
+  if (phrases.value.length >= 20) return L.toast('最多 20 則片語', 'error');
+  if (phrases.value.includes(v)) return L.toast('片語已存在', 'error');
+  phrases.value.push(v);
+  phraseNew.value = '';
+}
+
+function removePhrase(i) {
+  phrases.value.splice(i, 1);
+}
+
+function movePhrase(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= phrases.value.length) return;
+  const next = phrases.value.slice();
+  [next[i], next[j]] = [next[j], next[i]];
+  phrases.value = next;
+}
+
+async function savePhrases() {
+  const list = phrases.value.map((s) => String(s || '').trim()).filter(Boolean);
+  try {
+    const data = await L.api('/api/me/comment-phrases', {
+      method: 'PUT',
+      body: { phrases: list },
+    });
+    phrases.value = data.phrases || list;
+    syncPhraseUser(data.user);
+    L.toast(data.message || '常用片語已儲存', 'success');
+  } catch (err) {
+    L.toast(err.message, 'error');
+  }
+}
+
+async function resetPhrases() {
+  if (!confirm('確定還原為系統預設片語？')) return;
+  try {
+    const data = await L.api('/api/me/comment-phrases', {
+      method: 'PUT',
+      body: { reset: true },
+    });
+    phrases.value = data.phrases || DEFAULT_COMMENT_PHRASES.slice();
+    syncPhraseUser(data.user);
+    L.toast(data.message || '已還原預設片語', 'success');
+  } catch (err) {
+    L.toast(err.message, 'error');
+  }
+}
 
 async function onSaveProfile() {
   const payload = {

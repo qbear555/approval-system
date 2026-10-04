@@ -29,6 +29,14 @@ export default defineConfig({
         target: 'http://localhost:3847',
         changeOrigin: true,
       },
+      '/css': {
+        target: 'http://localhost:3847',
+        changeOrigin: true,
+      },
+      '/js': {
+        target: 'http://localhost:3847',
+        changeOrigin: true,
+      },
     },
   },
   build: {

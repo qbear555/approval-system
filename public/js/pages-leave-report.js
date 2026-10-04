@@ -65,6 +65,44 @@ async function renderLeaveReport(body) {
         <strong>請假明細</strong>（期間已核准）、
         <strong>說明</strong>。
       </p>
+    </div>
+    <div class="card" style="max-width:960px;margin-top:16px">
+      <h3 style="margin-top:0">單據／費用／請購 Excel 匯出</h3>
+      <p class="muted" style="margin-top:0;line-height:1.55">
+        依日期與申請類別匯出簽核單據，含金額、幣別、核准日與彙總。具備請假報表或財務建檔權限者可匯出全公司。
+      </p>
+      <div class="form-grid two" style="margin-bottom:12px">
+        <div class="field">
+          <label>日期起</label>
+          <input type="date" id="rx-from" value="${defaultFrom}" />
+        </div>
+        <div class="field">
+          <label>日期迄</label>
+          <input type="date" id="rx-to" value="${defaultTo}" />
+        </div>
+        <div class="field">
+          <label>單據類型</label>
+          <select id="rx-kind">
+            <option value="all">全部單據</option>
+            <option value="expense">費用報支</option>
+            <option value="purchase">請購／請款</option>
+            <option value="finance">費用＋請購請款</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>狀態</label>
+          <select id="rx-status">
+            <option value="approved" selected>已核准</option>
+            <option value="">全部狀態</option>
+            <option value="pending">簽核中</option>
+            <option value="rejected">已駁回</option>
+            <option value="cancelled">已取消</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn primary" id="rx-export">匯出單據 Excel</button>
+      </div>
     </div>`;
 
   const updateCount = () => {
@@ -121,6 +159,35 @@ async function renderLeaveReport(body) {
       a.download = `請假報表_${dateFrom}_${dateTo}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
+      toast('Excel 已開始下載', 'success');
+    } catch (e) {
+      toast(e.message || '匯出失敗', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  $('#rx-export')?.addEventListener('click', async () => {
+    const dateFrom = $('#rx-from')?.value || '';
+    const dateTo = $('#rx-to')?.value || '';
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      toast('起始日期不可晚於結束日期', 'error');
+      return;
+    }
+    const btn = $('#rx-export');
+    if (btn) btn.disabled = true;
+    try {
+      const kind = $('#rx-kind')?.value || 'all';
+      const status = $('#rx-status')?.value || '';
+      const blob = await api('/api/reports/requests-export', {
+        method: 'POST',
+        body: { dateFrom, dateTo, kind, status },
+        expectBlob: true,
+      });
+      const kindName =
+        kind === 'expense' ? '費用報支' : kind === 'purchase' ? '請購請款' : kind === 'finance' ? '費用請購' : '單據';
+      const range = dateFrom || dateTo ? `_${dateFrom || '起'}_${dateTo || '迄'}` : '';
+      downloadBlobFile(blob, `${kindName}報表${range}.xlsx`);
       toast('Excel 已開始下載', 'success');
     } catch (e) {
       toast(e.message || '匯出失敗', 'error');

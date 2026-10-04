@@ -4,6 +4,7 @@
 const db = require('../db');
 const labor = require('../labor');
 const lineNotify = require('../line-notify');
+const commentPhrases = require('../comment-phrases');
 const {
   isBuiltinAdminUser,
   isBuiltinAdminUsername,
@@ -172,6 +173,7 @@ function publicUser(row, { withLabor = false } = {}) {
     created_at: row.created_at,
     permissions: getPermissionsForUser(row),
     signature_image: row.signature_image || null,
+    comment_phrases: commentPhrases.parsePhrasesJson(row.comment_phrases_json),
   };
   if (withLabor) {
     base.labor = labor.buildLaborSummary({

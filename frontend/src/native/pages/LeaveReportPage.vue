@@ -52,6 +52,46 @@
       <strong>說明</strong>。
     </p>
   </div>
+  <div v-if="allowed" class="card" style="max-width:960px;margin-top:16px">
+    <h3 style="margin-top:0">單據／費用／請購 Excel 匯出</h3>
+    <p class="muted" style="margin-top:0;line-height:1.55">
+      依日期與申請類別匯出簽核單據，含金額、幣別、核准日與彙總。具備請假報表或財務建檔權限者可匯出全公司。
+    </p>
+    <div class="form-grid two" style="margin-bottom:12px">
+      <div class="field">
+        <label>日期起</label>
+        <input v-model="rxFrom" type="date" />
+      </div>
+      <div class="field">
+        <label>日期迄</label>
+        <input v-model="rxTo" type="date" />
+      </div>
+      <div class="field">
+        <label>單據類型</label>
+        <select v-model="rxKind">
+          <option value="all">全部單據</option>
+          <option value="expense">費用報支</option>
+          <option value="purchase">請購／請款</option>
+          <option value="finance">費用＋請購請款</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>狀態</label>
+        <select v-model="rxStatus">
+          <option value="approved">已核准</option>
+          <option value="">全部狀態</option>
+          <option value="pending">簽核中</option>
+          <option value="rejected">已駁回</option>
+          <option value="cancelled">已取消</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn primary" :disabled="rxBusy" @click="doRequestExport">
+        {{ rxBusy ? '匯出中…' : '匯出單據 Excel' }}
+      </button>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -67,6 +107,11 @@ const t = new Date();
 const y = t.getFullYear();
 const dateTo = ref(`${y}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`);
 const dateFrom = ref(`${y}-01-01`);
+const rxFrom = ref(`${y}-01-01`);
+const rxTo = ref(`${y}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`);
+const rxKind = ref('all');
+const rxStatus = ref('approved');
+const rxBusy = ref(false);
 
 if (allowed) {
   await L.loadUsers();
@@ -97,6 +142,45 @@ async function doExport() {
     L.toast(e.message || '匯出失敗', 'error');
   } finally {
     busy.value = false;
+  }
+}
+
+async function doRequestExport() {
+  if (rxFrom.value && rxTo.value && rxFrom.value > rxTo.value) {
+    return L.toast('起始日期不可晚於結束日期', 'error');
+  }
+  rxBusy.value = true;
+  try {
+    const blob = await L.api('/api/reports/requests-export', {
+      method: 'POST',
+      body: {
+        dateFrom: rxFrom.value,
+        dateTo: rxTo.value,
+        kind: rxKind.value,
+        status: rxStatus.value,
+      },
+      expectBlob: true,
+    });
+    const kindName =
+      rxKind.value === 'expense'
+        ? '費用報支'
+        : rxKind.value === 'purchase'
+          ? '請購請款'
+          : rxKind.value === 'finance'
+            ? '費用請購'
+            : '單據';
+    const range = rxFrom.value || rxTo.value ? `_${rxFrom.value || '起'}_${rxTo.value || '迄'}` : '';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${kindName}報表${range}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    L.toast('Excel 已開始下載', 'success');
+  } catch (e) {
+    L.toast(e.message || '匯出失敗', 'error');
+  } finally {
+    rxBusy.value = false;
   }
 }
 </script>

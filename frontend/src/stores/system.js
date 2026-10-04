@@ -13,14 +13,16 @@ export const useSystemStore = defineStore('system', {
   actions: {
     async fetchPublicSettings() {
       try {
-        const res = await apiRequest('/api/system/settings');
+        const res = await apiRequest('/api/system/branding');
         if (res) {
           if (res.companyName) this.companyName = res.companyName;
           if (res.logoUrl) this.logoUrl = res.logoUrl;
           if (res.versionLabel) this.version = res.versionLabel;
+          else if (res.fullVersion) this.version = res.fullVersion;
+          else if (res.version) this.version = `v${res.version}`;
         }
-      } catch (err) {
-        // Fallback default
+      } catch {
+        // keep defaults
       }
     },
 
@@ -28,7 +30,7 @@ export const useSystemStore = defineStore('system', {
       try {
         const res = await apiRequest('/api/stats');
         this.stats = res.stats || {};
-        this.pendingCount = this.stats.pendingApproval || 0;
+        this.pendingCount = Number(this.stats.pendingMe || 0);
       } catch (err) {
         console.warn('載入統計數據失敗', err);
       }

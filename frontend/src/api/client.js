@@ -3,22 +3,30 @@
  * - 自動注入 JWT Token
  * - 統一錯誤處理與 401 攔截
  */
+const LOGIN_PATH = '/v2/login';
+
 export async function apiRequest(endpoint, options = {}) {
   const token = localStorage.getItem('approval_token');
   const headers = {
-    'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
 
-  // 若發送 FormData 則不設定 Content-Type，讓瀏覽器自動加上 boundary
-  if (options.body instanceof FormData) {
+  const { expectBlob, ...rest } = options;
+  let body = rest.body;
+  if (body instanceof FormData) {
     delete headers['Content-Type'];
+  } else if (body != null && typeof body === 'object' && !(body instanceof Blob)) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    body = JSON.stringify(body);
+  } else if (typeof body === 'string' && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
   }
 
   const config = {
-    ...options,
+    ...rest,
     headers,
+    body,
   };
 
   try {
@@ -26,10 +34,19 @@ export async function apiRequest(endpoint, options = {}) {
 
     if (res.status === 401) {
       localStorage.removeItem('approval_token');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      const path = window.location.pathname || '';
+      if (!path.startsWith(LOGIN_PATH) && path !== '/login') {
+        window.location.href = LOGIN_PATH;
       }
       throw new Error('登入憑證已過期，請重新登入');
+    }
+
+    if (expectBlob) {
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || data?.message || `請求失敗 (HTTP ${res.status})`);
+      }
+      return res.blob();
     }
 
     const data = await res.json().catch(() => null);

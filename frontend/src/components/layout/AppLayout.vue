@@ -1,18 +1,17 @@
 <template>
-  <div class="layout-container">
+  <div class="main-layout">
     <Sidebar />
-    <div class="layout-main">
-      <Header :title="currentTitle">
-        <template #actions>
-          <div id="header-portal"></div>
-        </template>
-      </Header>
-      <main class="page-content">
+    <main class="content">
+      <header class="page-header">
+        <h2>{{ currentTitle }}</h2>
+        <div id="page-actions"></div>
+      </header>
+      <div class="page-body">
         <ErrorBoundary :key="$route.fullPath">
           <router-view />
         </ErrorBoundary>
-      </main>
-    </div>
+      </div>
+    </main>
     <Toast />
   </div>
 </template>
@@ -21,15 +20,16 @@
 import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import Sidebar from './Sidebar.vue';
-import Header from './Header.vue';
 import ErrorBoundary from '@/components/common/ErrorBoundary.vue';
 import Toast from '@/components/common/Toast.vue';
 import { useSystemStore } from '@/stores/system';
+import { minePageTitle } from '@/lib/status';
 
 const route = useRoute();
 const systemStore = useSystemStore();
 
 const currentTitle = computed(() => {
+  if (route.name === 'Mine') return minePageTitle(route.query.status);
   return route.meta?.title || '線上簽核';
 });
 
@@ -38,24 +38,3 @@ onMounted(() => {
   systemStore.fetchStats();
 });
 </script>
-
-<style scoped>
-.layout-container {
-  display: flex;
-  min-height: 100vh;
-}
-
-.layout-main {
-  margin-left: var(--sidebar-w);
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.page-content {
-  flex: 1;
-  padding: 24px 28px;
-  background: var(--bg-app);
-}
-</style>

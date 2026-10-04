@@ -705,7 +705,10 @@ function buildRequestDetailMainHtml(detailData) {
                     ? `<p class="muted" style="font-size:0.85rem;margin:0 0 12px">此為最終審核步驟，不可新增附件。</p>`
                     : ''
               }
-              <div class="field"><label>簽核意見</label><textarea id="action-comment" placeholder="選填意見（駁回／退回上一位時建議填寫）…"></textarea></div>
+              <div class="field"><label>簽核意見</label>
+                ${typeof commentPhraseButtonsHtml === 'function' ? commentPhraseButtonsHtml('action-comment') : ''}
+                <textarea id="action-comment" placeholder="選填意見（駁回／退回上一位時建議填寫）…"></textarea>
+              </div>
               <div class="approval-action-bar">
                 <button type="button" class="btn success" id="btn-approve-card">核准</button>
                 <button type="button" class="btn danger" id="btn-reject-card">駁回</button>
@@ -881,6 +884,10 @@ function bindRequestDetailEvents(body, detailData, onRefresh) {
   body.querySelectorAll('[data-oo-edit]').forEach((btn) => {
     btn.onclick = () => openOnlyOfficeEditor(btn.dataset.ooEdit, request.id);
   });
+
+  if (typeof bindCommentPhraseChips === 'function') {
+    bindCommentPhraseChips(body);
+  }
 
   const doAction = async (action) => {
     const comment = $('#action-comment')?.value || '';

@@ -104,6 +104,19 @@ async function renderSettings(body) {
       </form>
     </div>
     <div class="card" style="max-width:560px">
+      <h3>簽核常用片語</h3>
+      <p class="muted" style="margin-top:0;line-height:1.55">
+        核准與批次簽核時可一鍵填入意見。最多 20 則、每則 80 字；儲存後跟著帳號走，各裝置共用。
+      </p>
+      <div id="phrase-list"></div>
+      <div class="form-actions" style="margin-top:10px;flex-wrap:wrap;gap:8px;align-items:center">
+        <input type="text" id="phrase-new" maxlength="80" placeholder="新增片語…" style="flex:1;min-width:160px" />
+        <button type="button" class="btn outline sm" id="btn-phrase-add">新增</button>
+        <button type="button" class="btn primary sm" id="btn-phrase-save">儲存片語</button>
+        <button type="button" class="btn outline sm" id="btn-phrase-reset">還原預設</button>
+      </div>
+    </div>
+    <div class="card" style="max-width:560px">
       <h3>🎨 客製化佈景主題</h3>
       <p class="muted" style="margin-top:0">點選下方主題即可即時預覽畫面效果，儲存後於此裝置自動持久化套用。</p>
       <div id="theme-selector-grid" class="theme-grid">
@@ -351,6 +364,123 @@ async function renderSettings(body) {
       state.user = { ...state.user, signature_image: null, has_signature: false };
       toast(res.message || '簽名檔已清除', 'success');
       navigate('settings');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  const defaultPhrases =
+    typeof DEFAULT_COMMENT_PHRASES !== 'undefined'
+      ? DEFAULT_COMMENT_PHRASES.slice()
+      : ['同意', '核可', '准予備查', '依規定辦理', '請檢附單據正本', '依規定核銷'];
+  let phrases =
+    Array.isArray(u.comment_phrases) && u.comment_phrases.length
+      ? u.comment_phrases.slice()
+      : defaultPhrases.slice();
+
+  const collectPhraseInputs = () => {
+    const box = $('#phrase-list');
+    if (!box) return phrases;
+    return [...box.querySelectorAll('[data-phrase-input]')]
+      .map((inp) => String(inp.value || '').trim())
+      .filter(Boolean)
+      .slice(0, 20);
+  };
+
+  const renderPhraseList = () => {
+    const box = $('#phrase-list');
+    if (!box) return;
+    box.innerHTML =
+      phrases
+        .map(
+          (p, i) => `
+      <div class="phrase-row" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <input type="text" maxlength="80" value="${esc(p)}" data-phrase-input style="flex:1" />
+        <button type="button" class="btn outline xs" data-phrase-up ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="btn outline xs" data-phrase-down ${
+          i === phrases.length - 1 ? 'disabled' : ''
+        }>↓</button>
+        <button type="button" class="btn danger outline xs" data-phrase-del>刪</button>
+      </div>`
+        )
+        .join('') || '<div class="muted">尚無片語，請新增或還原預設</div>';
+    box.querySelectorAll('[data-phrase-up]').forEach((btn, i) => {
+      btn.onclick = () => {
+        phrases = collectPhraseInputs();
+        if (i <= 0) return;
+        [phrases[i - 1], phrases[i]] = [phrases[i], phrases[i - 1]];
+        renderPhraseList();
+      };
+    });
+    box.querySelectorAll('[data-phrase-down]').forEach((btn, i) => {
+      btn.onclick = () => {
+        phrases = collectPhraseInputs();
+        if (i >= phrases.length - 1) return;
+        [phrases[i + 1], phrases[i]] = [phrases[i], phrases[i + 1]];
+        renderPhraseList();
+      };
+    });
+    box.querySelectorAll('[data-phrase-del]').forEach((btn, i) => {
+      btn.onclick = () => {
+        phrases = collectPhraseInputs();
+        phrases.splice(i, 1);
+        renderPhraseList();
+      };
+    });
+  };
+  renderPhraseList();
+
+  $('#btn-phrase-add')?.addEventListener('click', () => {
+    phrases = collectPhraseInputs();
+    const v = String($('#phrase-new')?.value || '').trim();
+    if (!v) {
+      toast('請輸入片語', 'error');
+      return;
+    }
+    if (phrases.length >= 20) {
+      toast('最多 20 則片語', 'error');
+      return;
+    }
+    if (phrases.includes(v)) {
+      toast('片語已存在', 'error');
+      return;
+    }
+    phrases.push(v);
+    if ($('#phrase-new')) $('#phrase-new').value = '';
+    renderPhraseList();
+  });
+  $('#phrase-new')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      $('#btn-phrase-add')?.click();
+    }
+  });
+  $('#btn-phrase-save')?.addEventListener('click', async () => {
+    phrases = collectPhraseInputs();
+    try {
+      const data = await api('/api/me/comment-phrases', {
+        method: 'PUT',
+        body: { phrases },
+      });
+      phrases = data.phrases || phrases;
+      if (data.user) state.user = { ...state.user, ...data.user };
+      renderPhraseList();
+      toast(data.message || '常用片語已儲存', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+  $('#btn-phrase-reset')?.addEventListener('click', async () => {
+    if (!confirm('確定還原為系統預設片語？')) return;
+    try {
+      const data = await api('/api/me/comment-phrases', {
+        method: 'PUT',
+        body: { reset: true },
+      });
+      phrases = data.phrases || defaultPhrases.slice();
+      if (data.user) state.user = { ...state.user, ...data.user };
+      renderPhraseList();
+      toast(data.message || '已還原預設片語', 'success');
     } catch (err) {
       toast(err.message, 'error');
     }

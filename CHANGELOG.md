@@ -22,6 +22,22 @@
 
 本機首頁：http://127.0.0.1:3847。部署後 HTTP 3847／HTTPS 3848。
 
+### 2026-10-04 主管簽核常用片語與單據 Excel 匯出
+
+- **常用片語**：帳號設定可新增／排序／刪除簽核意見（最多 20 則），存於帳號 `comment_phrases_json`，詳情核准與批次簽核一鍵帶入。預設：同意、核可、准予備查、依規定辦理、請檢附單據正本、依規定核銷。
+- **API**：`GET/PUT /api/me/comment-phrases`；`POST /api/reports/requests-export`（kind：`all`／`expense`／`purchase`／`finance`）。
+- **單據 Excel**：簽核紀錄依目前查詢條件匯出；請假報表頁新增「單據／費用／請購」匯出。工作表含單據清單、費用報支、請購請款、依流程／狀態／部門彙總。
+- **權限**：一般使用者僅本人相關單據；admin、`records_all`、`leave_report`、`finance_confirm` 可匯出全公司。部署不覆寫 `data/`。
+- **雙軌**：經典 `/` 與 Vue `/v2/` 同步。
+
+### 2026-10-04 Vue 總覽／列表改為真正的 Vue 頁（/v2/）
+
+- **總覽、待我簽核、我的申請、簽核紀錄**改為 Vue 3 獨立頁（`DashboardView` / `RequestListView`），不再經 LegacyHost 包經典 `pages-*.js`。
+- 統計卡片對齊後端 `/api/stats`：`pendingMe`、`minePending`、`mineDone`；「我的進行中／我已完成」點進去帶 `?status=pending|approved`。
+- 列表欄位改用 `requester_name`、主旨、狀態「簽核中」；簽核紀錄仍為 `filter=related` 並可查詢。
+- 其餘功能（詳情、新增申請、流程、設定…）仍走 LegacyHost；側欄點「總覽／列表」會回到 Vue 頁。
+- 經典 `/` 不變。新版入口：`/v2/`。
+
 ### 2026-10-04 批次簽核核准（主管專用高效率操作）
 
 - **待我簽核多選**：在「待我簽核」列表新增全選與勾選框，即時統計已選筆數並提供「批次核准」按鈕。

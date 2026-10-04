@@ -827,6 +827,62 @@ function applySystemBranding(s) {
   if (sideStrong) sideStrong.textContent = name.length > 8 ? '線上簽核' : name;
 }
 
+const DEFAULT_COMMENT_PHRASES = [
+  '同意',
+  '核可',
+  '准予備查',
+  '依規定辦理',
+  '請檢附單據正本',
+  '依規定核銷',
+];
+
+function getCommentPhrases() {
+  const list = (state.user && state.user.comment_phrases) || [];
+  if (Array.isArray(list) && list.length) {
+    return list.map((s) => String(s || '').trim()).filter(Boolean);
+  }
+  return DEFAULT_COMMENT_PHRASES.slice();
+}
+
+function commentPhraseButtonsHtml(textareaId) {
+  const phrases = getCommentPhrases();
+  return `<div class="comment-phrase-chips" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap" data-phrase-target="${esc(
+    textareaId
+  )}">
+    ${phrases
+      .map(
+        (p) =>
+          `<button type="button" class="btn outline xs btn-quick-opinion" data-val="${esc(p)}">${esc(
+            p
+          )}</button>`
+      )
+      .join('')}
+  </div>`;
+}
+
+function bindCommentPhraseChips(root) {
+  (root || document).querySelectorAll('.btn-quick-opinion').forEach((btn) => {
+    btn.onclick = () => {
+      const wrap = btn.closest('[data-phrase-target]');
+      const id = (wrap && wrap.dataset.phraseTarget) || '';
+      const ta = id
+        ? document.getElementById(id)
+        : document.getElementById('action-comment') ||
+          document.getElementById('bulk-approve-comment');
+      if (ta) ta.value = btn.dataset.val || '';
+    };
+  });
+}
+
+function downloadBlobFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /** 人事／備份：可進入備份資料（含下載請假申請單） */
 function canAccessBackupsPage() {
   return hasPerm('backups') || hasPerm('leave_report') || hasPerm('leave_delete');
