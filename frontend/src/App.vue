@@ -1,5 +1,7 @@
 <template>
   <router-view />
+  <AttachmentViewerModal />
+  <Toast />
 </template>
 
 <script setup>
@@ -7,6 +9,8 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useToastStore } from '@/stores/toast';
 import { performVueLogout } from '@/lib/session';
+import AttachmentViewerModal from '@/components/common/AttachmentViewerModal.vue';
+import Toast from '@/components/common/Toast.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();

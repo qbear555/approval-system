@@ -1,6 +1,6 @@
 import { registerNativePages } from '@/native';
 
-export const CORE_SCRIPTS_VERSION = '20261005_pdf_preview_v2';
+export const CORE_SCRIPTS_VERSION = '20261005_isolated_att';
 
 export const CORE_SCRIPTS = [
   '/vendor/pdfjs/pdf.min.js',

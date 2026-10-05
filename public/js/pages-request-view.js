@@ -591,6 +591,9 @@ async function openApprovedRequestPicker(opts = {}) {
 }
 
 async function openAttachmentPreview(attId, fileName) {
+  if (typeof window !== 'undefined' && typeof window.__openVueAttachmentModal === 'function') {
+    return window.__openVueAttachmentModal(attId, fileName);
+  }
   try {
     const meta = await api(`/api/attachments/${attId}?inline=1`, {
       expectBlob: true,

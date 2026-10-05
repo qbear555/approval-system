@@ -1285,6 +1285,9 @@ function closeModal() {
     /* ignore */
   }
   onlyOfficeEditorInstance = null;
+  if (typeof window.__closeVueAttachmentModal === 'function') {
+    try { window.__closeVueAttachmentModal(); } catch {}
+  }
   const modal = $('#modal');
   if (modal) {
     modal.classList.add('hidden');
