@@ -118,31 +118,10 @@ function getClientIp(req) {
 
 /** 寫入系統進階稽核日誌 (P3-1) */
 
-function logAudit(req, { action_type, category = 'general', description, target_id = null, detail = {} }) {
-  try {
-    const user = req?.user;
-    const userId = user?.id || null;
-    const userName = user?.name || (userId ? '' : '系統/訪客');
-    const userUsername = user?.username || '';
-    const ip = getClientIp(req);
+const auditLog = require('../audit-log');
 
-    db.prepare(`
-      INSERT INTO system_audit_logs (user_id, user_name, user_username, action_type, category, description, ip_address, target_id, detail_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      userId,
-      userName,
-      userUsername,
-      String(action_type || 'unknown'),
-      String(category || 'general'),
-      String(description || ''),
-      ip,
-      target_id ? Number(target_id) : null,
-      JSON.stringify(detail || {})
-    );
-  } catch (e) {
-    console.error('[audit-log] record failed:', e.message);
-  }
+function logAudit(req, opts = {}) {
+  auditLog.write(opts, req);
 }
 
 /**

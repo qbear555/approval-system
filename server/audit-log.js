@@ -1,29 +1,6 @@
 const db = require('./db');
 
-const CATEGORIES = ['auth', 'approval', 'user_management', 'workflow', 'system'];
-
-function ensureTable() {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS audit_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category TEXT NOT NULL DEFAULT 'system',
-        user_id INTEGER,
-        user_name TEXT,
-        user_username TEXT,
-        ip_address TEXT,
-        description TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-      )
-    `);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category)`);
-  } catch (e) {
-    // Table already exists or handled by MySQL schema
-  }
-}
-
-ensureTable();
+const CATEGORIES = ['auth', 'approval', 'user_management', 'workflow', 'system', 'general'];
 
 function normalizeClientIp(raw) {
   let ip = String(raw || '').trim();
@@ -41,7 +18,7 @@ function normalizeClientIp(raw) {
 
 function clientIp(req) {
   if (!req) return '';
-  const xf = String(req.headers['x-forwarded-for'] || '')
+  const xf = String(req.headers?.['x-forwarded-for'] || '')
     .split(',')[0]
     .trim();
   const raw = xf || req.socket?.remoteAddress || req.ip || '';
@@ -68,24 +45,35 @@ function htmlToPlainText(raw) {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * 寫入系統稽核日誌 (寫入標準 system_audit_logs 表)
+ */
 function write(opts = {}, req = null) {
   try {
-    const category = CATEGORIES.includes(opts.category) ? opts.category : 'system';
+    const rawCat = opts.category || 'system';
+    const category = CATEGORIES.includes(rawCat) ? rawCat : 'general';
+    const actionType = String(opts.action_type || opts.action || 'system').slice(0, 50);
     const user = opts.user || req?.user || null;
-    const userId = opts.userId != null ? opts.userId : user?.id || null;
-    const userName = opts.userName != null ? opts.userName : user?.name || '';
-    const userUsername = opts.userUsername != null ? opts.userUsername : user?.username || '';
-    const ip = opts.ip != null ? opts.ip : clientIp(req);
+    const userId = opts.userId != null ? Number(opts.userId) : (user?.id ? Number(user.id) : null);
+    const userName = opts.userName != null ? String(opts.userName) : (user?.name || (userId ? '' : '系統/訪客'));
+    const userUsername = opts.userUsername != null ? String(opts.userUsername) : (user?.username || '');
+    const ip = normalizeClientIp(opts.ip != null ? opts.ip : clientIp(req));
+    const targetId = opts.target_id != null ? Number(opts.target_id) : (opts.targetId != null ? Number(opts.targetId) : null);
+    const detailJson = typeof opts.detail === 'object' ? JSON.stringify(opts.detail) : (typeof opts.detail_json === 'string' ? opts.detail_json : '{}');
     const description = htmlToPlainText(opts.description || '').slice(0, 2000);
+
     db.prepare(
-      `INSERT INTO audit_logs (category, user_id, user_name, user_username, ip_address, description)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(category, userId, userName, userUsername, String(ip || '').slice(0, 80), description);
+      `INSERT INTO system_audit_logs (user_id, user_name, user_username, action_type, category, description, ip_address, target_id, detail_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(userId, userName, userUsername, actionType, category, description, String(ip || '').slice(0, 80), targetId, detailJson);
   } catch (e) {
-    console.warn('[audit-log]', e.message);
+    console.warn('[audit-log] write failed:', e.message);
   }
 }
 
+/**
+ * 查詢系統稽核日誌列表
+ */
 function list(query = {}) {
   const page = Math.max(1, Number(query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(query.limit) || 30));
@@ -103,27 +91,27 @@ function list(query = {}) {
   }
   if (q) {
     where.push(
-      `(COALESCE(user_name,'') LIKE ? OR COALESCE(user_username,'') LIKE ? OR COALESCE(ip_address,'') LIKE ? OR COALESCE(description,'') LIKE ?)`
+      `(COALESCE(user_name,'') LIKE ? OR COALESCE(user_username,'') LIKE ? OR COALESCE(ip_address,'') LIKE ? OR COALESCE(description,'') LIKE ? OR COALESCE(action_type,'') LIKE ?)`
     );
     const like = `%${q}%`;
-    params.push(like, like, like, like);
+    params.push(like, like, like, like, like);
   }
   if (dateFrom) {
-    where.push(`date(created_at) >= date(?)`);
-    params.push(dateFrom);
+    where.push(`created_at >= ?`);
+    params.push(`${dateFrom} 00:00:00`);
   }
   if (dateTo) {
-    where.push(`date(created_at) <= date(?)`);
-    params.push(dateTo);
+    where.push(`created_at <= ?`);
+    params.push(`${dateTo} 23:59:59`);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const totalCount = db
-    .prepare(`SELECT COUNT(*) AS n FROM audit_logs ${whereSql}`)
-    .get(...params).n;
+    .prepare(`SELECT COUNT(*) AS n FROM system_audit_logs ${whereSql}`)
+    .get(...params)?.n || 0;
   const logs = db
     .prepare(
-      `SELECT id, category, user_id, user_name, user_username, ip_address, description, created_at
-       FROM audit_logs ${whereSql}
+      `SELECT id, category, action_type, user_id, user_name, user_username, ip_address, target_id, description, detail_json, created_at
+       FROM system_audit_logs ${whereSql}
        ORDER BY id DESC
        LIMIT ? OFFSET ?`
     )
@@ -142,6 +130,9 @@ function list(query = {}) {
   };
 }
 
+/**
+ * 匯出 CSV 報告 (UTF-8 BOM)
+ */
 function toCsv(query = {}) {
   const data = list({ ...query, page: 1, limit: 5000 });
   const labels = {
@@ -150,17 +141,20 @@ function toCsv(query = {}) {
     user_management: '成員與權限變更',
     workflow: '簽核流程範本',
     system: '系統維運與設定',
+    general: '一般紀錄',
   };
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = [
-    ['時間', '分類', '執行人員', '帳號', 'IP', '說明'].map(esc).join(','),
+    ['時間', '分類', '動作類型', '執行人員', '帳號', 'IP', '目標 ID', '說明'].map(esc).join(','),
     ...data.logs.map((l) =>
       [
         l.created_at,
-        labels[l.category] || l.category,
+        labels[l.category] || l.category || '一般',
+        l.action_type || '',
         l.user_name || '系統/訪客',
         l.user_username || '',
         l.ip_address || '',
+        l.target_id != null ? String(l.target_id) : '',
         l.description || '',
       ]
         .map(esc)
@@ -170,20 +164,13 @@ function toCsv(query = {}) {
   return '\uFEFF' + rows.join('\r\n');
 }
 
-try {
-  const dirty = db
-    .prepare(
-      `SELECT id, description FROM audit_logs
-       WHERE description LIKE '%<%' OR description LIKE '%&nbsp;%'`
-    )
-    .all();
-  const upd = db.prepare(`UPDATE audit_logs SET description = ? WHERE id = ?`);
-  for (const r of dirty) {
-    const plain = htmlToPlainText(r.description).slice(0, 2000);
-    if (plain && plain !== r.description) upd.run(plain, r.id);
-  }
-} catch (e) {
-  console.warn('[audit-log] clean html descriptions', e.message);
-}
-
-module.exports = { write, list, toCsv, CATEGORIES, clientIp, normalizeClientIp };
+module.exports = {
+  write,
+  logAudit: write,
+  list,
+  toCsv,
+  CATEGORIES,
+  clientIp,
+  normalizeClientIp,
+  htmlToPlainText,
+};

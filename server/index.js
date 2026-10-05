@@ -58,6 +58,7 @@ const registerSystemAdminRoutes = require('./routes/system-admin');
 const registerReportRoutes = require('./routes/reports');
 const registerWorkflowRoutes = require('./routes/workflows');
 const registerBackupRoutes = require('./routes/backups');
+const auditLog = require('./audit-log');
 const fs = require('fs');
 const os = require('os');
 const multer = require('multer');
@@ -2795,6 +2796,12 @@ app.post('/api/auth/login', (req, res) => {
   const attemptKey = loginAttemptKey(username, req);
   const lock = loginLockStatus(attemptKey);
   if (lock.locked) {
+    auditLog.write({
+      category: 'auth',
+      action_type: 'login_rate_limited',
+      description: `登入失敗次數過多已鎖定（帳號：${username}）`,
+      ip: req.ip,
+    }, req);
     return res.status(429).json({
       error: `登入失敗次數過多，請約 ${lock.mins} 分鐘後再試`,
       code: 'LOGIN_LOCKED',
@@ -2815,12 +2822,24 @@ app.post('/api/auth/login', (req, res) => {
     });
     if (rec.justLocked) {
       const mins = Math.max(1, Math.ceil(LOGIN_LOCK_MS / 60000));
+      auditLog.write({
+        category: 'auth',
+        action_type: 'login_rate_limited',
+        description: `登入失敗次數過多，帳號已鎖定（帳號：${username}）`,
+        ip: req.ip,
+      }, req);
       return res.status(429).json({
         error: `登入失敗次數過多，帳號已暫時鎖定約 ${mins} 分鐘`,
         code: 'LOGIN_LOCKED',
         retryAfterMinutes: mins,
       });
     }
+    auditLog.write({
+      category: 'auth',
+      action_type: 'login_fail',
+      description: `登入失敗（帳號：${username}）`,
+      ip: req.ip,
+    }, req);
     const left = Math.max(0, LOGIN_MAX_FAILS - (rec.fails || 0));
     return res.status(401).json({
       error:
@@ -2835,6 +2854,13 @@ app.post('/api/auth/login', (req, res) => {
   clearLoginFailures(attemptKey);
   // 同一帳號其他 IP 的失敗紀錄不在此清（避免誤清攻擊者鎖定狀態影響面較小）
   const safe = publicUser(user);
+  auditLog.write({
+    category: 'auth',
+    action_type: 'login',
+    description: `使用者 ${safe.name} (${safe.username}) 登入成功`,
+    user: safe,
+    ip: req.ip,
+  }, req);
   res.json({ token: signToken(safe), user: safe, permissionDefs: PERMISSION_DEFS });
 });
 
@@ -3036,6 +3062,7 @@ registerSystemAdminRoutes(app, {
   authMiddleware,
   adminOnly,
   builtinAdminOnly,
+  userHasPermission,
   uploadPackage,
   packageUploadError,
   parseUploadedPackage,
@@ -5286,6 +5313,13 @@ app.post('/api/requests', authMiddleware, upload.array('attachments', 20), async
       submitComment,
       isProxySubmit ? requester.id : null
     );
+    auditLog.write({
+      category: 'approval',
+      action_type: 'submit_request',
+      target_id: requestId,
+      description: `送出簽核申請「${title}」（單號 #${requestId}）`,
+      user: req.user,
+    }, req);
   }
 
   try {
@@ -6309,6 +6343,13 @@ app.post(
         comment: comment || '取消申請',
       })
     );
+    auditLog.write({
+      category: 'approval',
+      action_type: 'cancel',
+      target_id: id,
+      description: `作廢簽核單 #${id}（${after.title}）`,
+      user: req.user,
+    }, req);
     return res.json({ request: after });
   }
 
@@ -6321,6 +6362,13 @@ app.post(
     if (result.error) {
       return res.status(result.status || 400).json({ error: result.error });
     }
+    auditLog.write({
+      category: 'approval',
+      action_type: 'approve',
+      target_id: id,
+      description: `核准簽核單 #${id}（${detail.title}）`,
+      user: req.user,
+    }, req);
     return res.json(result);
   }
 
@@ -6378,6 +6426,13 @@ app.post(
         comment: comment || '駁回',
       })
     );
+    auditLog.write({
+      category: 'approval',
+      action_type: 'reject',
+      target_id: id,
+      description: `駁回簽核單 #${id}（${after.title}）`,
+      user: req.user,
+    }, req);
     return res.json({ request: after });
   }
 
@@ -6416,6 +6471,13 @@ app.post(
           comment: note,
         })
       );
+      auditLog.write({
+        category: 'approval',
+        action_type: 'return',
+        target_id: id,
+        description: `退回簽核單 #${id} 至申請人修改（${after.title}）`,
+        user: req.user,
+      }, req);
       return res.json({
         request: after,
         message: '已退回申請人修改，申請人修正後可重新送出',
@@ -6470,6 +6532,13 @@ app.post(
       })
     );
     notifyCurrentApprovers(after, 'step', actor?.name || '');
+    auditLog.write({
+      category: 'approval',
+      action_type: 'return',
+      target_id: id,
+      description: `退回簽核單 #${id} 至「${targetStep.name || `步驟 ${targetStep.order}`}」（${after.title}）`,
+      user: req.user,
+    }, req);
     return res.json({
       request: after,
       message: `已退回「${targetStep.name || `步驟 ${targetStep.order}`}」`,

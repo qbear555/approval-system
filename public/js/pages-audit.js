@@ -25,6 +25,7 @@ async function renderAuditLogs(body) {
     user_management: '👥 成員與權限變更',
     workflow: '⚙️ 簽核流程範本',
     system: '🛠️ 系統維運與設定',
+    general: '📌 一般紀錄',
   };
 
   body.innerHTML = `

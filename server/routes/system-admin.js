@@ -19,10 +19,21 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
     authMiddleware,
     adminOnly,
     builtinAdminOnly,
+    userHasPermission,
     uploadPackage,
     packageUploadError,
     parseUploadedPackage,
   } = ctx;
+
+  const canViewAuditLogs = (req, res, next) => {
+    if (
+      req.user?.role === 'admin' ||
+      (typeof userHasPermission === 'function' && userHasPermission(req.user?.id, 'audit_logs'))
+    ) {
+      return next();
+    }
+    return res.status(403).json({ error: '需要系統稽核日誌權限' });
+  };
 
   const logoUpload = multer({
     storage: multer.memoryStorage(),
@@ -547,7 +558,7 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
   );
 
   /** 稽核日誌查詢 */
-  app.get('/api/system/audit-logs', authMiddleware, adminOnly, (req, res) => {
+  app.get('/api/system/audit-logs', authMiddleware, canViewAuditLogs, (req, res) => {
     try {
       const data = auditLog.list(req.query || {});
       res.json(data);
@@ -558,7 +569,7 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
   });
 
   /** 稽核日誌匯出 CSV */
-  app.get('/api/system/audit-logs/export', authMiddleware, adminOnly, (req, res) => {
+  app.get('/api/system/audit-logs/export', authMiddleware, canViewAuditLogs, (req, res) => {
     try {
       const csv = auditLog.toCsv(req.query || {});
       const fname = `稽核日誌_${new Date().toISOString().slice(0, 10)}.csv`;
