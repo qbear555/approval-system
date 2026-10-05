@@ -192,17 +192,39 @@ async function run() {
     }
     console.log(`✅ 通過（預覽彈窗開啟並已渲染第 1 頁）`);
 
-    // 5. 操作按鈕互動與控制台無未捕獲異常
-    process.stdout.write('[Step 5/5] 檢查頁面點擊關閉與操作按鈕健全度... ');
-    await send('Runtime.evaluate', {
-      expression: `(() => {
-        const closeBtn = document.querySelector('[data-close-modal], #btn-att-close, .att-close-btn');
-        if (closeBtn) closeBtn.click();
-        else if (typeof closeModal === 'function') closeModal();
-      })()`
+    // 5. 測試審批動作彈窗（退回/加簽/轉簽沙盒）
+    process.stdout.write('[Step 5/6] 測試審批操作沙盒彈窗 (Return/Cosign/Forward)... ');
+    const actionModalTest = await send('Runtime.evaluate', {
+      expression: `(async () => {
+        try {
+          if (typeof window.__openVueReturnModal !== 'function') {
+            return { ok: false, err: 'window.__openVueReturnModal 未註冊' };
+          }
+          window.__openVueReturnModal({ id: 387, current_step: 1, steps: [{ order: 1, name: '測試' }] }, null, () => {});
+          await new Promise(r => setTimeout(r, 400));
+          const panel = document.querySelector('.action-modal-panel');
+          const isVisible = !!panel && window.getComputedStyle(panel).display !== 'none';
+          const title = panel?.querySelector('.action-modal-title')?.textContent || '';
+          // 關閉
+          const closeBtn = panel?.querySelector('.btn-close-sm, .action-modal-footer button.outline');
+          if (closeBtn) closeBtn.click();
+          return { ok: isVisible, title, hasPanel: !!panel };
+        } catch (e) {
+          return { ok: false, err: e.message };
+        }
+      })()`,
+      awaitPromise: true,
+      returnByValue: true
     });
-    await new Promise(r => setTimeout(r, 800));
 
+    const amVal = actionModalTest.result?.value;
+    if (!amVal?.ok) {
+      throw new Error(`審批操作沙盒彈窗驗證失敗：${JSON.stringify(amVal)}`);
+    }
+    console.log(`✅ 通過（${amVal.title.trim()} 成功彈出並安全關閉）`);
+
+    // 6. 控制台異常檢查
+    process.stdout.write('[Step 6/6] 檢查頁面點擊關閉與操作按鈕健全度... ');
     if (consoleErrors.length > 0) {
       console.log(`⚠️ 有 ${consoleErrors.length} 個非致命前端警告/異常，但流程未受阻。`);
     } else {
@@ -211,7 +233,7 @@ async function run() {
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`\n========================================`);
-    console.log(`🎉 核心功能自動化檢測全部通過！耗時：${duration} 秒`);
+    console.log(`🎉 核心功能自動化檢測全部通過 (6/6)！耗時：${duration} 秒`);
     console.log(`========================================\n`);
 
     ws.close();

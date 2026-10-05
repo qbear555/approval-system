@@ -1679,6 +1679,9 @@ if (typeof window !== 'undefined') {
 }
 
 function openCosignModal(request, onDone) {
+  if (typeof window !== 'undefined' && typeof window.__openVueCosignModal === 'function') {
+    return window.__openVueCosignModal(request, onDone);
+  }
   const me = state.user?.id;
   const users = (state.users || []).filter((u) => u.active !== 0 && u.id !== me);
   openModal(`
@@ -1739,6 +1742,9 @@ function openCosignModal(request, onDone) {
 }
 
 function openForwardModal(request, onDone) {
+  if (typeof window !== 'undefined' && typeof window.__openVueForwardModal === 'function') {
+    return window.__openVueForwardModal(request, onDone);
+  }
   const me = state.user?.id;
   const users = (state.users || []).filter((u) => u.active !== 0 && u.id !== me);
   openModal(`
@@ -1791,6 +1797,9 @@ function openForwardModal(request, onDone) {
 }
 
 function openReturnModal(request, detailData, onDone) {
+  if (typeof window !== 'undefined' && typeof window.__openVueReturnModal === 'function') {
+    return window.__openVueReturnModal(request, detailData, onDone);
+  }
   const steps = detailData?.request?.steps || request?.steps || [];
   const curStep =
     detailData?.currentStep ||

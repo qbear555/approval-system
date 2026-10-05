@@ -1,6 +1,7 @@
 <template>
   <router-view />
   <AttachmentViewerModal />
+  <ApprovalActionModal />
   <Toast />
 </template>
 
@@ -10,6 +11,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useToastStore } from '@/stores/toast';
 import { performVueLogout } from '@/lib/session';
 import AttachmentViewerModal from '@/components/common/AttachmentViewerModal.vue';
+import ApprovalActionModal from '@/components/common/ApprovalActionModal.vue';
 import Toast from '@/components/common/Toast.vue';
 
 const router = useRouter();
