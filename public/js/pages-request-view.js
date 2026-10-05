@@ -251,6 +251,71 @@ function isPreviewableAttachmentName(name, mime) {
   );
 }
 
+async function renderPdfWithPdfJs(blob, containerEl) {
+  if (!containerEl) return;
+  if (!window.pdfjsLib) {
+    containerEl.innerHTML =
+      '<div class="error-msg" style="margin:16px;text-align:center">PDF.js 函式庫尚未載入，請按上方「在新分頁開啟」或「下載」。</div>';
+    return;
+  }
+  if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      '/vendor/pdfjs/pdf.worker.min.js';
+  }
+  containerEl.innerHTML =
+    '<div class="muted" style="padding:28px;text-align:center">正在透過 PDF.js 解析並繪製高畫質頁面…</div>';
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+    containerEl.innerHTML = '';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'pdfjs-pages-scroll';
+    wrap.style.cssText =
+      'overflow-y:auto;max-height:min(82vh,900px);display:flex;flex-direction:column;align-items:center;gap:16px;padding:16px;background:#374151;border-radius:8px;box-shadow:inset 0 2px 6px rgba(0,0,0,0.2);';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const unscaledViewport = page.getViewport({ scale: 1 });
+      const targetWidth = Math.min(
+        containerEl.clientWidth ? containerEl.clientWidth - 48 : 880,
+        1100
+      );
+      const scale = Math.max(1.2, targetWidth / unscaledViewport.width);
+      const viewport = page.getViewport({ scale });
+
+      const pageBox = document.createElement('div');
+      pageBox.style.cssText =
+        'position:relative;display:flex;flex-direction:column;align-items:center;';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.cssText =
+        'max-width:100%;height:auto;box-shadow:0 6px 16px rgba(0,0,0,0.35);border-radius:4px;background:#fff;';
+
+      const pageLabel = document.createElement('div');
+      pageLabel.textContent = `第 ${i} / ${pdf.numPages} 頁`;
+      pageLabel.style.cssText =
+        'color:#f3f4f6;font-size:0.8rem;margin-top:6px;font-weight:500;';
+
+      pageBox.appendChild(canvas);
+      pageBox.appendChild(pageLabel);
+      wrap.appendChild(pageBox);
+
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+    }
+    containerEl.appendChild(wrap);
+  } catch (err) {
+    console.error('PDF.js render failed', err);
+    containerEl.innerHTML = `<div class="error-msg" style="margin:16px;text-align:center">PDF.js 繪製失敗：${esc(
+      err.message || '未知錯誤'
+    )}。請使用上方「在新分頁開啟」或「下載」。</div>`;
+  }
+}
+
 async function openRequestPdfPreview(reqId, title) {
   const id = Number(reqId);
   if (!id) return;
@@ -259,20 +324,103 @@ async function openRequestPdfPreview(reqId, title) {
       expectBlob: true,
       returnMeta: true,
     });
-    const url = URL.createObjectURL(meta.blob);
     const name = title || meta.filename || `申請單#${id}.pdf`;
-    openModal(`
-      <h3 style="margin-top:0">已核准申請單預覽</h3>
-      <p class="muted" style="margin:-4px 0 10px;font-size:0.9rem">${esc(name)}</p>
-      <div id="att-preview-box">
-        <iframe class="att-preview-iframe" title="${esc(name)}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>
+    let previewBlob = meta.blob;
+    if (!previewBlob.type || !previewBlob.type.includes('pdf')) {
+      previewBlob = new Blob([await meta.blob.arrayBuffer()], {
+        type: 'application/pdf',
+      });
+    }
+    const url = URL.createObjectURL(previewBlob);
+    const token =
+      (typeof state !== 'undefined' && state?.token) ||
+      localStorage.getItem('approval_token') ||
+      '';
+    const directUrl = `/api/requests/${id}/pdf?preview=1${
+      token ? `&token=${encodeURIComponent(token)}` : ''
+    }`;
+
+    const isMobileDevice =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent || ''
+      ) || window.innerWidth < 768;
+
+    const modalHtml = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
+        <div>
+          <h3 style="margin:0 0 4px">已核准申請單預覽</h3>
+          <p class="muted" style="margin:0;font-size:0.9rem;word-break:break-all">${esc(name)}</p>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="btn outline sm" id="btn-req-pdf-newtab">在新分頁開啟</button>
+          <button type="button" class="btn outline sm" id="btn-req-pdf-toggle">切換畫布檢視</button>
+          <button type="button" class="btn outline sm" id="btn-req-pdf-download">下載</button>
+          <button type="button" class="btn outline sm" data-close-modal>關閉</button>
+        </div>
       </div>
-      <div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="btn outline" data-close-modal>關閉</button>
+      <div id="att-preview-box" style="position:relative;width:100%;min-height:360px">
+        <iframe class="att-preview-iframe" title="${esc(
+          name
+        )}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>
       </div>
-    `);
-    $('#modal-panel')?.classList.add('wide', 'wide-announcement', 'wide-att-preview');
-    setTimeout(() => URL.revokeObjectURL(url), 180_000);
+    `;
+
+    openModal(modalHtml);
+    const panel = $('#modal-panel');
+    if (panel) {
+      panel.classList.add('wide', 'wide-announcement', 'wide-att-preview');
+    }
+
+    $('#btn-req-pdf-newtab')?.addEventListener('click', () => {
+      window.open(directUrl || url, '_blank', 'noopener');
+    });
+
+    $('#btn-req-pdf-download')?.addEventListener('click', async () => {
+      try {
+        const { blob, filename } = await api(`/api/requests/${id}/pdf`, {
+          returnMeta: true,
+        });
+        const dl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = dl;
+        a.download = filename || name;
+        a.click();
+        URL.revokeObjectURL(dl);
+      } catch (e) {
+        toast(e.message || '下載失敗', 'error');
+      }
+    });
+
+    let isCanvasMode = false;
+    const box = $('#att-preview-box');
+    const toggleBtn = $('#btn-req-pdf-toggle');
+
+    const switchToCanvas = async () => {
+      if (!box) return;
+      isCanvasMode = true;
+      if (toggleBtn) toggleBtn.textContent = '切換原生檢視';
+      await renderPdfWithPdfJs(previewBlob, box);
+    };
+
+    const switchToIframe = () => {
+      if (!box) return;
+      isCanvasMode = false;
+      if (toggleBtn) toggleBtn.textContent = '切換畫布檢視';
+      box.innerHTML = `<iframe class="att-preview-iframe" title="${esc(
+        name
+      )}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`;
+    };
+
+    toggleBtn?.addEventListener('click', () => {
+      if (isCanvasMode) switchToIframe();
+      else switchToCanvas();
+    });
+
+    if (isMobileDevice && window.pdfjsLib) {
+      switchToCanvas();
+    }
+
+    setTimeout(() => URL.revokeObjectURL(url), 300_000);
   } catch (e) {
     toast(e.message || '預覽失敗', 'error');
   }
@@ -448,32 +596,83 @@ async function openAttachmentPreview(attId, fileName) {
       expectBlob: true,
       returnMeta: true,
     });
-    const url = URL.createObjectURL(meta.blob);
-    const ct = String(meta.contentType || meta.blob.type || '').toLowerCase();
     const name = String(meta.filename || fileName || `附件#${attId}`);
+    const ct = String(meta.contentType || meta.blob?.type || '').toLowerCase();
     const isPdf = ct.includes('pdf') || /\.pdf$/i.test(name);
     const isImg =
       ct.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
-    const previewHtml =
-      isPdf
-        ? `<iframe class="att-preview-iframe" title="${esc(name)}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`
-        : isImg
-          ? `<img class="att-preview-img" alt="${esc(name)}" src="${url}" />`
-          : `<p class="muted">此格式無法內嵌預覽，請改用下載。</p>`;
-    openModal(`
-      <h3 style="margin-top:0">附件檢視</h3>
-      <p class="muted" style="margin:-4px 0 10px;font-size:0.9rem">${esc(name)}</p>
-      <div id="att-preview-box">${previewHtml}</div>
-      <div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="btn outline" id="btn-att-download">下載</button>
-        <button type="button" class="btn outline" data-close-modal>關閉</button>
+
+    // 強制校正 PDF Blob MIME 類型，避免 Chromium/Firefox 將其當作 octet-stream 阻擋渲染
+    let previewBlob = meta.blob;
+    if (isPdf && (!previewBlob.type || !previewBlob.type.includes('pdf'))) {
+      previewBlob = new Blob([await meta.blob.arrayBuffer()], {
+        type: 'application/pdf',
+      });
+    }
+    const url = URL.createObjectURL(previewBlob);
+
+    // 取得帶 Token 之直連連結（新分頁開啟可供原生瀏覽器 PDF 閱讀器直接解析）
+    const token =
+      (typeof state !== 'undefined' && state?.token) ||
+      localStorage.getItem('approval_token') ||
+      '';
+    const directUrl = `/api/attachments/${attId}?inline=1${
+      token ? `&token=${encodeURIComponent(token)}` : ''
+    }`;
+
+    const isMobileDevice =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent || ''
+      ) || window.innerWidth < 768;
+
+    const modalHtml = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
+        <div>
+          <h3 style="margin:0 0 4px">附件檢視</h3>
+          <p class="muted" style="margin:0;font-size:0.9rem;word-break:break-all">${esc(name)}</p>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${
+            isPdf
+              ? `<button type="button" class="btn outline sm" id="btn-att-newtab" title="在新分頁以完整瀏覽器模式開啟">在新分頁開啟</button>
+                 <button type="button" class="btn outline sm" id="btn-att-toggle-mode" title="在瀏覽器原生檢視與 PDF.js 高畫質畫布檢視間切換">切換畫布檢視</button>`
+              : ''
+          }
+          <button type="button" class="btn outline sm" id="btn-att-download">下載</button>
+          <button type="button" class="btn outline sm" data-close-modal>關閉</button>
+        </div>
       </div>
-    `);
-    $('#modal-panel')?.classList.add('wide', 'wide-announcement', 'wide-att-preview');
+      <div id="att-preview-box" style="position:relative;width:100%;min-height:360px">
+        ${
+          isPdf
+            ? `<iframe class="att-preview-iframe" title="${esc(
+                name
+              )}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`
+            : isImg
+            ? `<img class="att-preview-img" alt="${esc(name)}" src="${url}" />`
+            : `<p class="muted" style="padding:20px;text-align:center">此格式無法內嵌預覽，請改用右上角「下載」。</p>`
+        }
+      </div>
+    `;
+
+    openModal(modalHtml);
+    const panel = $('#modal-panel');
+    if (panel) {
+      panel.classList.add('wide', 'wide-announcement', 'wide-att-preview');
+    }
+
+    // 綁定「在新分頁開啟」
+    $('#btn-att-newtab')?.addEventListener('click', () => {
+      window.open(directUrl || url, '_blank', 'noopener');
+    });
+
+    // 綁定「下載」
     $('#btn-att-download')?.addEventListener('click', async () => {
       try {
-        const blob = await api(`/api/attachments/${attId}`, { expectBlob: true });
-        const dl = URL.createObjectURL(blob);
+        const dlBlob = await api(`/api/attachments/${attId}`, {
+          expectBlob: true,
+        });
+        const dl = URL.createObjectURL(dlBlob);
         const a = document.createElement('a');
         a.href = dl;
         a.download = name;
@@ -483,7 +682,44 @@ async function openAttachmentPreview(attId, fileName) {
         toast(e.message || '下載失敗', 'error');
       }
     });
-    setTimeout(() => URL.revokeObjectURL(url), 180_000);
+
+    // PDF 模式切換邏輯 (原生 iframe ↔ PDF.js Canvas)
+    if (isPdf) {
+      let isCanvasMode = false;
+      const box = $('#att-preview-box');
+      const toggleBtn = $('#btn-att-toggle-mode');
+
+      const switchToCanvas = async () => {
+        if (!box) return;
+        isCanvasMode = true;
+        if (toggleBtn) toggleBtn.textContent = '切換原生檢視';
+        await renderPdfWithPdfJs(previewBlob, box);
+      };
+
+      const switchToIframe = () => {
+        if (!box) return;
+        isCanvasMode = false;
+        if (toggleBtn) toggleBtn.textContent = '切換畫布檢視';
+        box.innerHTML = `<iframe class="att-preview-iframe" title="${esc(
+          name
+        )}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`;
+      };
+
+      toggleBtn?.addEventListener('click', () => {
+        if (isCanvasMode) {
+          switchToIframe();
+        } else {
+          switchToCanvas();
+        }
+      });
+
+      // 行動裝置自動啟用 PDF.js Canvas 檢視，確保 100% 可直接在手機平版瀏覽
+      if (isMobileDevice && window.pdfjsLib) {
+        switchToCanvas();
+      }
+    }
+
+    setTimeout(() => URL.revokeObjectURL(url), 300_000);
   } catch (e) {
     toast(e.message || '附件開啟失敗', 'error');
   }

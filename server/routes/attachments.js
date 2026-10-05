@@ -110,22 +110,34 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   if (!fs.existsSync(abs)) return res.status(404).json({ error: '附件檔案不存在' });
 
   const downloadName = decodeUploadFilename(att.original_name || `file-${att.id}`);
-  const INLINE_PREVIEW_MIME = new Set([
-    'application/pdf',
-    'image/png',
-    'image/jpeg',
-    'image/gif',
-    'image/webp',
-  ]);
+  const ext = path.extname(String(downloadName || att.stored_name || '')).toLowerCase();
+  const mime = String(att.mime_type || '').toLowerCase();
+  const canInline =
+    mime.includes('pdf') ||
+    ext === '.pdf' ||
+    mime.startsWith('image/') ||
+    /\.(png|jpe?g|gif|webp|bmp)$/i.test(ext);
   const inline = String(req.query.inline || '') === '1';
   const disposition = contentDispositionAttachment(downloadName, `file-${att.id}`);
   res.setHeader(
     'Content-Disposition',
-    inline && INLINE_PREVIEW_MIME.has(att.mime_type)
+    inline && canInline
       ? disposition.replace(/^attachment/i, 'inline')
       : disposition
   );
-  if (att.mime_type) res.setHeader('Content-Type', att.mime_type);
+  if (ext === '.pdf' || mime.includes('pdf')) {
+    res.setHeader('Content-Type', 'application/pdf');
+  } else if (ext === '.png') {
+    res.setHeader('Content-Type', 'image/png');
+  } else if (ext === '.jpg' || ext === '.jpeg') {
+    res.setHeader('Content-Type', 'image/jpeg');
+  } else if (ext === '.gif') {
+    res.setHeader('Content-Type', 'image/gif');
+  } else if (ext === '.webp') {
+    res.setHeader('Content-Type', 'image/webp');
+  } else if (att.mime_type) {
+    res.setHeader('Content-Type', att.mime_type);
+  }
   fs.createReadStream(abs).pipe(res);
 });
 

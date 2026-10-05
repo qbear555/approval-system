@@ -5618,10 +5618,18 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   } else {
     res.setHeader('Content-Disposition', disp);
   }
-  if (att.mime_type) {
-    res.setHeader('Content-Type', att.mime_type);
-  } else if (ext === '.pdf') {
+  if (ext === '.pdf' || mime.includes('pdf')) {
     res.setHeader('Content-Type', 'application/pdf');
+  } else if (ext === '.png') {
+    res.setHeader('Content-Type', 'image/png');
+  } else if (ext === '.jpg' || ext === '.jpeg') {
+    res.setHeader('Content-Type', 'image/jpeg');
+  } else if (ext === '.gif') {
+    res.setHeader('Content-Type', 'image/gif');
+  } else if (ext === '.webp') {
+    res.setHeader('Content-Type', 'image/webp');
+  } else if (att.mime_type) {
+    res.setHeader('Content-Type', att.mime_type);
   }
   fs.createReadStream(abs).pipe(res);
 });

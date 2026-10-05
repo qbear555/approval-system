@@ -292,6 +292,11 @@ function initNewRequestInteractions(body, workflows) {
             <li style="margin:5px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
               <button type="button" class="linkish" data-draft-dl-att="${a.id}"
                 data-dl-name="${esc(a.original_name || '')}">${esc(a.original_name || `附件#${a.id}`)}</button>
+              ${
+                isPreviewableAttachmentName(a.original_name, a.mime_type)
+                  ? `<button type="button" class="btn sm outline" data-draft-preview="${a.id}" data-dl-name="${esc(a.original_name || '')}">線上檢視</button>`
+                  : ''
+              }
               <span class="muted" style="font-size:0.82rem">${
                 a.size_bytes ? fmtAttSize(a.size_bytes) : ''
               }</span>
@@ -310,6 +315,11 @@ function initNewRequestInteractions(body, workflows) {
             <li style="margin:5px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
               <span>${esc(f.name || `檔案${i + 1}`)}</span>
               <span class="muted" style="font-size:0.82rem">${fmtAttSize(f.size)}</span>
+              ${
+                /\.pdf$/i.test(f.name || '') || /^image\//i.test(f.type || '')
+                  ? `<button type="button" class="btn sm outline" data-pending-preview="${i}">預覽</button>`
+                  : ''
+              }
               <button type="button" class="btn sm outline" data-pending-rm="${i}">移除</button>
             </li>`
             )
@@ -367,6 +377,11 @@ function initNewRequestInteractions(body, workflows) {
         }
       };
     });
+    box.querySelectorAll('[data-draft-preview]').forEach((btn) => {
+      btn.onclick = () => {
+        openAttachmentPreview(btn.dataset.draftPreview, btn.dataset.dlName || '');
+      };
+    });
     box.querySelectorAll('[data-draft-rm-att]').forEach((btn) => {
       btn.onclick = async () => {
         const attId = Number(btn.dataset.draftRmAtt);
@@ -380,6 +395,70 @@ function initNewRequestInteractions(body, workflows) {
         } catch (e) {
           toast(e.message || '移除失敗', 'error');
         }
+      };
+    });
+    box.querySelectorAll('[data-pending-preview]').forEach((btn) => {
+      btn.onclick = () => {
+        const idx = Number(btn.dataset.pendingPreview);
+        const file = pendingLocalFiles[idx];
+        if (!file) return;
+        const name = file.name || '本地檔案';
+        const isPdf = /\.pdf$/i.test(name) || /pdf/i.test(file.type || '');
+        const isImg =
+          /^image\//i.test(file.type || '') ||
+          /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
+        const url = URL.createObjectURL(file);
+        openModal(`
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
+            <div>
+              <h3 style="margin:0 0 4px">檔案預覽（送出前）</h3>
+              <p class="muted" style="margin:0;font-size:0.9rem;word-break:break-all">${esc(name)}</p>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              ${
+                isPdf
+                  ? `<button type="button" class="btn outline sm" id="btn-local-newtab">在新分頁開啟</button>
+                     <button type="button" class="btn outline sm" id="btn-local-toggle">切換畫布檢視</button>`
+                  : ''
+              }
+              <button type="button" class="btn outline sm" data-close-modal>關閉</button>
+            </div>
+          </div>
+          <div id="att-preview-box" style="position:relative;width:100%;min-height:360px">
+            ${
+              isPdf
+                ? `<iframe class="att-preview-iframe" title="${esc(
+                    name
+                  )}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`
+                : isImg
+                ? `<img class="att-preview-img" alt="${esc(name)}" src="${url}" />`
+                : `<p class="muted" style="padding:20px;text-align:center">此格式無法內嵌預覽。</p>`
+            }
+          </div>
+        `);
+        $('#modal-panel')?.classList.add('wide', 'wide-announcement', 'wide-att-preview');
+        $('#btn-local-newtab')?.addEventListener('click', () => {
+          window.open(url, '_blank', 'noopener');
+        });
+        if (isPdf) {
+          let isCanvas = false;
+          const previewBox = $('#att-preview-box');
+          const toggleBtn = $('#btn-local-toggle');
+          toggleBtn?.addEventListener('click', async () => {
+            if (isCanvas) {
+              isCanvas = false;
+              toggleBtn.textContent = '切換畫布檢視';
+              previewBox.innerHTML = `<iframe class="att-preview-iframe" title="${esc(
+                name
+              )}" src="${url}#toolbar=1&navpanes=0&view=FitH"></iframe>`;
+            } else {
+              isCanvas = true;
+              toggleBtn.textContent = '切換原生檢視';
+              await renderPdfWithPdfJs(file, previewBox);
+            }
+          });
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 180_000);
       };
     });
     box.querySelectorAll('[data-pending-rm]').forEach((btn) => {

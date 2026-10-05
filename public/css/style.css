@@ -927,8 +927,11 @@ table.data tr.clickable { cursor: pointer; }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .modal-panel h3 { margin: 0 0 12px; }
-.modal-panel.wide { width: min(860px, 100%); }
-.modal-panel.wide-att-preview,
+.modal-panel.wide-att-preview {
+  width: min(1760px, 98vw);
+  animation: none !important;
+  transform: none !important;
+}
 .modal-panel.wide-announcement {
   width: min(1760px, 98vw);
 }
@@ -2385,6 +2388,19 @@ input[type="checkbox"], input[type="radio"] {
   display: block;
   margin: 0 auto;
   border-radius: 8px;
+}
+.pdfjs-pages-scroll {
+  scrollbar-width: thin;
+}
+.pdfjs-pages-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.pdfjs-pages-scroll::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+.pdfjs-pages-scroll::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
 }
 .appr-pick-list {
   max-height: min(52vh, 520px);
