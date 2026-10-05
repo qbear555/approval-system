@@ -1245,3 +1245,38 @@ function getCategoryClass(category = '') {
   if (c.includes('業務')) return 'cat-sales';
   return 'cat-memo';
 }
+
+if (typeof window !== 'undefined') {
+  window.openAttachmentPreview = openAttachmentPreview;
+  window.renderPdfWithPdfJs = renderPdfWithPdfJs;
+  window.isPreviewableAttachmentName = isPreviewableAttachmentName;
+
+  if (!window.__globalAttClickDelegationBound) {
+    window.__globalAttClickDelegationBound = true;
+    document.addEventListener('click', (e) => {
+      const viewBtn = e.target && e.target.closest && e.target.closest('[data-view-att]');
+      if (viewBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = viewBtn.dataset.viewAtt;
+        const name = viewBtn.dataset.dlName || '';
+        openAttachmentPreview(id, name);
+        return;
+      }
+      const dlBtn = e.target && e.target.closest && e.target.closest('[data-dl-att]');
+      if (
+        dlBtn &&
+        (dlBtn.dataset.attView === '1' ||
+          (typeof isPreviewableAttachmentName === 'function' &&
+            isPreviewableAttachmentName(dlBtn.dataset.dlName || '')))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = dlBtn.dataset.dlAtt;
+        const name = dlBtn.dataset.dlName || '';
+        openAttachmentPreview(id, name);
+      }
+    });
+  }
+}
+

@@ -92,7 +92,7 @@ module.exports = function register(ctx) {
   } = ctx;
   const { isRequestRelatedToUser } = require('./request-helpers')(ctx);
 /** 下載附件 */
-app.get('/api/attachments/:id', authMiddleware, (req, res) => {
+app.get('/api/attachments/:id', authMiddleware, async (req, res) => {
   const att = db
     .prepare(`SELECT * FROM request_attachments WHERE id = ?`)
     .get(Number(req.params.id));
@@ -107,6 +107,19 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   }
 
   const abs = path.join(UPLOAD_DIR, att.stored_name);
+  if (!fs.existsSync(abs) && att.source_request_id) {
+    try {
+      const srcDetail = getRequestDetail(att.source_request_id);
+      if (srcDetail) {
+        const pdfBuf = await pdfSign.buildApprovalPdfBuffer(srcDetail, writeApprovalPdf);
+        if (pdfBuf && pdfBuf.length) {
+          fs.writeFileSync(abs, pdfBuf);
+        }
+      }
+    } catch (err) {
+      console.warn('Auto-generate missing source_request_id PDF failed:', err);
+    }
+  }
   if (!fs.existsSync(abs)) return res.status(404).json({ error: '附件檔案不存在' });
 
   const downloadName = decodeUploadFilename(att.original_name || `file-${att.id}`);

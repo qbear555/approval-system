@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
 import { L } from '@/native/bridge';
 
 const props = defineProps({
@@ -35,8 +35,9 @@ async function loadData() {
   }
 }
 
-function bindAll() {
+async function bindAll() {
   if (!detailData) return;
+  await nextTick();
   const pageTitle = document.getElementById('page-title');
   if (pageTitle && detailData.request) {
     pageTitle.textContent = `簽核詳情 #${detailData.request.id}${
@@ -53,10 +54,14 @@ function bindAll() {
   }
 }
 
+watch(mainHtml, () => {
+  bindAll();
+});
+
 await loadData();
 
-onMounted(() => {
-  bindAll();
+onMounted(async () => {
+  await bindAll();
 });
 
 onBeforeUnmount(() => {
