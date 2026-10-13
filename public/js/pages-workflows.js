@@ -761,6 +761,7 @@ async function openWorkflowEditor(workflow = null) {
 
   const PDF_LAYOUT_OPTIONS = [
     { type: 'auto', label: '依流程名稱自動判斷' },
+    { type: 'canvas_objects', label: '🧩 可編輯畫布版面（表格／文字物件）' },
     { type: 'pdf_template', label: '📄 紙本底圖套印版面（畫布拖拉設計）' },
     { type: 'leave', label: '請假單版面' },
     { type: 'credit_limit', label: '信用額度申請表版面' },
@@ -772,6 +773,18 @@ async function openWorkflowEditor(workflow = null) {
     { type: 'overtime', label: '延長工時版面' },
     { type: 'dept_meeting', label: '會議記錄版面' },
     { type: 'general', label: '一般簽呈版面' },
+  ];
+  const BUILTIN_PDF_TYPES = [
+    'leave',
+    'credit_limit',
+    'welfare',
+    'purchase',
+    'expense',
+    'travel',
+    'it_repair',
+    'overtime',
+    'dept_meeting',
+    'general',
   ];
   let curPdfLayout = workflow?.pdfLayout ? JSON.parse(JSON.stringify(workflow.pdfLayout)) : { type: 'auto' };
   const curPdfType = curPdfLayout.type || 'auto';
@@ -864,6 +877,32 @@ async function openWorkflowEditor(workflow = null) {
               </div>
             </div>
             <button type="button" class="btn sm primary" id="btn-open-pdf-designer">🎨 開啟畫布設計器</button>
+          </div>
+        </div>
+        <div id="pdf-canvas-config-box" class="${curPdfType === 'canvas_objects' ? '' : 'hidden'}" style="margin-top:10px;padding:12px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div>
+              <strong style="color:#166534;">🧩 可編輯畫布版面</strong>
+              <div id="pdf-canvas-status-text" class="muted" style="margin-top:2px;">
+                ${
+                  Array.isArray(curPdfLayout.objects) && curPdfLayout.objects.length
+                    ? `已有 ${(curPdfLayout.objects || []).length} 個物件${curPdfLayout.sourceType ? `（來源：${curPdfLayout.sourceType}）` : ''}，可拖曳改字、改表格`
+                    : '尚未建立物件。可從內建排版轉入，或開啟畫布自行新增文字與表格。'
+                }
+              </div>
+            </div>
+            <button type="button" class="btn sm primary" id="btn-open-canvas-designer">🎨 開啟畫布編輯</button>
+          </div>
+        </div>
+        <div id="pdf-builtin-convert-box" class="${BUILTIN_PDF_TYPES.includes(curPdfType) ? '' : 'hidden'}" style="margin-top:10px;padding:12px 14px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div>
+              <strong style="color:#9a3412;">內建排版可轉成可編輯物件</strong>
+              <div class="muted" style="margin-top:2px;">
+                目前為固定程式排版。轉成畫布後，表格與文字可拖曳、改字、增刪列欄。
+              </div>
+            </div>
+            <button type="button" class="btn sm" id="btn-convert-builtin-canvas" style="background:#ea580c;color:#fff;">轉成可編輯畫布</button>
           </div>
         </div>
         <p class="muted" style="font-size:0.8rem;margin:6px 0 0">
@@ -1104,15 +1143,94 @@ async function openWorkflowEditor(workflow = null) {
   const pdfLayoutSel = $('#wf-pdf-layout');
   const templateConfigBox = $('#pdf-template-config-box');
   const templateStatusText = $('#pdf-template-status-text');
+  const canvasConfigBox = $('#pdf-canvas-config-box');
+  const canvasStatusText = $('#pdf-canvas-status-text');
+  const builtinConvertBox = $('#pdf-builtin-convert-box');
   const btnOpenDesigner = $('#btn-open-pdf-designer');
+  const btnOpenCanvasDesigner = $('#btn-open-canvas-designer');
+  const btnConvertBuiltin = $('#btn-convert-builtin-canvas');
 
-  if (pdfLayoutSel && templateConfigBox) {
+  const mergeConvertedFormFields = (incoming) => {
+    if (!Array.isArray(incoming) || !incoming.length) return;
+    incoming.forEach((cf) => {
+      if (!cf || !cf.id) return;
+      const exist = formFields.find((f) => f.id === cf.id);
+      if (!exist) {
+        formFields.push({
+          id: cf.id,
+          label: cf.label || cf.id,
+          type: cf.type || 'text',
+          required: !!cf.required,
+          options: cf.options || [],
+        });
+      } else {
+        exist.label = cf.label || exist.label;
+        exist.type = cf.type || exist.type;
+        exist.required = !!cf.required;
+        if (cf.options) exist.options = cf.options;
+      }
+    });
+    if (typeof renderFormFields === 'function') renderFormFields();
+  };
+
+  const updateCanvasStatus = () => {
+    if (!canvasStatusText) return;
+    const n = (curPdfLayout.objects || []).length;
+    canvasStatusText.textContent = n
+      ? `已有 ${n} 個物件${curPdfLayout.sourceType ? `（來源：${curPdfLayout.sourceType}）` : ''}，可拖曳改字、改表格`
+      : '尚未建立物件。可從內建排版轉入，或開啟畫布自行新增文字與表格。';
+  };
+
+  const syncPdfLayoutBoxes = () => {
+    const t = pdfLayoutSel ? pdfLayoutSel.value : curPdfType;
+    if (templateConfigBox) templateConfigBox.classList.toggle('hidden', t !== 'pdf_template');
+    if (canvasConfigBox) canvasConfigBox.classList.toggle('hidden', t !== 'canvas_objects');
+    if (builtinConvertBox) builtinConvertBox.classList.toggle('hidden', !BUILTIN_PDF_TYPES.includes(t));
+  };
+
+  const openCanvasDesigner = () => {
+    syncStepsFromDom();
+    if (!window.PdfFormDesigner) {
+      toast('畫布設計器元件載入中，請稍候重試', 'error');
+      return;
+    }
+    window.PdfFormDesigner.openPdfFormDesignerModal({
+      workflow: { ...workflow, steps },
+      initialPdfLayout: curPdfLayout,
+      objectCanvas: true,
+      onSave: (res) => {
+        curPdfLayout = res.pdfLayout;
+        if (pdfLayoutSel) pdfLayoutSel.value = 'canvas_objects';
+        updateCanvasStatus();
+        syncPdfLayoutBoxes();
+        mergeConvertedFormFields(res.formFields);
+        toast('可編輯畫布版面已更新', 'success');
+      },
+    });
+  };
+
+  if (pdfLayoutSel) {
     pdfLayoutSel.addEventListener('change', () => {
-      const isTemplate = pdfLayoutSel.value === 'pdf_template';
-      templateConfigBox.classList.toggle('hidden', !isTemplate);
-      if (isTemplate && (!curPdfLayout || curPdfLayout.type !== 'pdf_template')) {
+      const t = pdfLayoutSel.value;
+      if (t === 'pdf_template' && (!curPdfLayout || curPdfLayout.type !== 'pdf_template')) {
         curPdfLayout = { type: 'pdf_template', fields: [] };
       }
+      if (t === 'canvas_objects' && (!curPdfLayout || curPdfLayout.type !== 'canvas_objects')) {
+        const src =
+          curPdfLayout && BUILTIN_PDF_TYPES.includes(curPdfLayout.type)
+            ? curPdfLayout.type
+            : 'general';
+        if (window.CanvasLayouts && typeof window.CanvasLayouts.builtinToCanvasLayout === 'function') {
+          curPdfLayout = window.CanvasLayouts.builtinToCanvasLayout(src);
+        } else {
+          curPdfLayout = { type: 'canvas_objects', sourceType: src, objects: [] };
+        }
+        updateCanvasStatus();
+      }
+      if (t !== 'pdf_template' && t !== 'canvas_objects') {
+        curPdfLayout = { type: t };
+      }
+      syncPdfLayoutBoxes();
     });
   }
 
@@ -1131,23 +1249,40 @@ async function openWorkflowEditor(workflow = null) {
           if (templateStatusText) {
             templateStatusText.textContent = `已綁定底圖：${curPdfLayout.templateMeta?.originalName || curPdfLayout.templateFile}（${(curPdfLayout.fields || []).length} 個套印欄位）`;
           }
-          if (Array.isArray(res.formFields) && res.formFields.length) {
-            res.formFields.forEach((cf) => {
-              const exist = formFields.find((f) => f.id === cf.id);
-              if (!exist) {
-                formFields.push(cf);
-              } else {
-                exist.label = cf.label || exist.label;
-                exist.type = cf.type || exist.type;
-                exist.required = !!cf.required;
-                if (cf.options) exist.options = cf.options;
-              }
-            });
-            renderFormFields();
-          }
+          mergeConvertedFormFields(res.formFields);
           toast('紙本底圖模版與欄位已更新', 'success');
         },
       });
+    });
+  }
+
+  if (btnOpenCanvasDesigner) {
+    btnOpenCanvasDesigner.addEventListener('click', openCanvasDesigner);
+  }
+
+  if (btnConvertBuiltin) {
+    btnConvertBuiltin.addEventListener('click', async () => {
+      const src = pdfLayoutSel ? pdfLayoutSel.value : 'general';
+      const applyPreset = (layout, fields) => {
+        curPdfLayout = layout;
+        if (pdfLayoutSel) pdfLayoutSel.value = 'canvas_objects';
+        updateCanvasStatus();
+        syncPdfLayoutBoxes();
+        mergeConvertedFormFields(fields);
+        toast('已轉成可編輯畫布，可再開啟畫布調整表格與文字', 'success');
+        openCanvasDesigner();
+      };
+      try {
+        const data = await api(`/api/workflows/canvas-preset/${encodeURIComponent(src)}`);
+        applyPreset(data.pdfLayout, data.formFields);
+      } catch (err) {
+        if (window.CanvasLayouts && typeof window.CanvasLayouts.builtinToCanvasLayout === 'function') {
+          const layout = window.CanvasLayouts.builtinToCanvasLayout(src);
+          applyPreset(layout, window.CanvasLayouts.extractFormFields(layout));
+        } else {
+          toast(err.message || '轉換失敗', 'error');
+        }
+      }
     });
   }
   // 常用層級一鍵新增（可任意組合、自行修改）
@@ -1492,7 +1627,15 @@ async function openWorkflowEditor(workflow = null) {
               fields: curPdfLayout.fields || [],
               formMode: curPdfLayout.formMode || 'paper',
             }
-          : { type: String(pdfLayoutType || 'auto') },
+          : pdfLayoutType === 'canvas_objects'
+            ? {
+                type: 'canvas_objects',
+                sourceType: curPdfLayout.sourceType || '',
+                page: curPdfLayout.page || {},
+                objects: curPdfLayout.objects || [],
+                label: curPdfLayout.label || '可編輯畫布版面',
+              }
+            : { type: String(pdfLayoutType || 'auto') },
       finalNotify: {
         enabled: finalNotifyEnabled,
         userIds: finalNotifyUserIds,

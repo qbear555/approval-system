@@ -108,6 +108,22 @@ module.exports = function registerWorkflowRoutes(app, ctx) {
     res.json({ types: workflowModule.listPdfLayoutTypes() });
   });
 
+  /** 內建排版轉成可編輯畫布物件 */
+  app.get('/api/workflows/canvas-preset/:type', authMiddleware, requirePerm('workflows'), (req, res) => {
+    const canvasLayouts = require('../pdf/canvas-layouts');
+    const type = String(req.params.type || 'general').trim();
+    const allowed = new Set(canvasLayouts.BUILDERS || []);
+    const key = allowed.has(type) ? type : 'general';
+    const pdfLayout = canvasLayouts.builtinToCanvasLayout(key);
+    const formFields = canvasLayouts.extractFormFields(pdfLayout);
+    res.json({
+      type: pdfLayout.type,
+      sourceType: pdfLayout.sourceType,
+      pdfLayout,
+      formFields,
+    });
+  });
+
   /** 匯出全部啟用中流程（一個 JSON 包：流程＋表單＋PDF 排版；不含系統設定） */
   app.get('/api/workflows/export', authMiddleware, requirePerm('workflows'), (req, res) => {
     const rows = db

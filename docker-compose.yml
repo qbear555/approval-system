@@ -34,7 +34,7 @@ services:
       - MYSQL_HOST=${MYSQL_HOST:-127.0.0.1}
       - MYSQL_PORT=${MYSQL_PORT:-3306}
       - MYSQL_USER=${MYSQL_USER:-approval}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-Ww837*5630}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-approval}
       # OnlyOffice（預設關閉；啟用 profile 時請一併改 .env）
       - ONLYOFFICE_ENABLED=${ONLYOFFICE_ENABLED:-0}

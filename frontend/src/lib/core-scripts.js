@@ -1,6 +1,6 @@
 import { registerNativePages } from '@/native';
 
-export const CORE_SCRIPTS_VERSION = '20261005_approval_sandbox';
+export const CORE_SCRIPTS_VERSION = '20261013_canvas_objects';
 
 export const CORE_SCRIPTS = [
   '/vendor/pdfjs/pdf.min.js',
@@ -9,6 +9,7 @@ export const CORE_SCRIPTS = [
   '/js/ui-helpers.js',
   '/js/app.js',
   '/js/shared-helpers.js',
+  '/js/canvas-layouts.js',
   '/js/pdf-form-designer.js',
   '/js/flow-editor.js',
   '/js/pages-request-fields.js',

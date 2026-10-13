@@ -8224,6 +8224,23 @@ function writeApprovalPdf(request, destStream) {
     const contentW = pageW - margin * 2;
     const leftX = margin;
 
+    // 可編輯畫布物件：依儲存的文字／表格重繪
+    if (pl.type === 'canvas_objects' && Array.isArray(pl.objects) && pl.objects.length) {
+      try {
+        const { drawCanvasObjectsForm } = require('./pdf/forms/canvas-objects');
+        drawCanvasObjectsForm(
+          { doc, useFont, leftX, contentW, pageH, margin },
+          request,
+          pl
+        );
+        endPdfWithApprovedStamp(doc, request, useFont);
+      } catch (e) {
+        console.error('[pdf] canvas objects form failed', e);
+        reject(e);
+      }
+      return;
+    }
+
     // 作廢申請：標準表單，抬頭顯示「作廢申請」（勿套用原單請假／簽呈版面）
     if (isVoidApplicationRequest(request)) {
       try {

@@ -10,6 +10,7 @@ const { drawOvertimeForm } = require('./forms/overtime');
 const { drawGeneralMemoForm } = require('./forms/memo');
 const { drawCreditLimitForm } = require('./forms/credit');
 const { kitThemeFromRequest, drawStandardWorkflowForm } = require('./forms/standard');
+const { drawCanvasObjectsForm } = require('./forms/canvas-objects');
 const { drawApprovedStamp, endPdfWithApprovedStamp } = require('./stamp');
 
 module.exports = {
@@ -25,4 +26,5 @@ module.exports = {
   kitThemeFromRequest,
   drawStandardWorkflowForm,
   drawCreditLimitForm,
+  drawCanvasObjectsForm,
 };

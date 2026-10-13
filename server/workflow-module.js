@@ -3,7 +3,7 @@
  * 匯出／匯入一體；不包含系統設定、Email 帳密、使用者帳號本體、歷史單據。
  *
  * pdfLayout.type 對應 server/pdf.js 版面：
- *   leave | credit_limit | welfare | dept_meeting | purchase | expense | travel | it_repair | overtime | general | auto
+ *   leave | credit_limit | welfare | dept_meeting | purchase | expense | travel | it_repair | overtime | general | pdf_template | canvas_objects | auto
  *
  * finalNotify：最終一步（如總經理）核定通過、單據變「已核准」後，
  * 可選擇通知的額外人員（**系統內通知**，非 Email；需點「確認收到通知」）。
@@ -21,6 +21,7 @@ const PDF_LAYOUT_TYPES = [
   'dept_meeting',
   'general',
   'pdf_template',
+  'canvas_objects',
   'auto',
 ];
 
@@ -36,6 +37,7 @@ const TYPE_META = {
   dept_meeting: { label: '會議記錄版面', match: /部門月會|會議記錄/ },
   general: { label: '一般簽呈版面', match: /簽呈/i },
   pdf_template: { label: '紙本底圖套印版面', match: null },
+  canvas_objects: { label: '可編輯畫布版面（表格／文字物件）', match: null },
   auto: { label: '依流程名稱自動判斷', match: null },
 };
 
@@ -65,7 +67,7 @@ function detectPdfLayoutType(workflowName) {
 
 /**
  * 正規化 pdfLayout 物件
- * @returns {{ type: string, label?: string, options?: object, templateFile?: string, templateMeta?: object, fields?: Array }}
+ * @returns {{ type: string, label?: string, options?: object, templateFile?: string, templateMeta?: object, fields?: Array, objects?: Array, sourceType?: string, page?: object }}
  */
 function normalizePdfLayout(raw, workflowName) {
   let obj = raw;
@@ -92,6 +94,11 @@ function normalizePdfLayout(raw, workflowName) {
     res.fields = Array.isArray(obj.fields) ? obj.fields : [];
     res.formMode = obj.formMode || 'paper'; // 'paper' (電子紙) or 'split' (對照)
   }
+  if (type === 'canvas_objects' || Array.isArray(obj.objects)) {
+    res.objects = Array.isArray(obj.objects) ? obj.objects : [];
+    res.sourceType = obj.sourceType || '';
+    res.page = obj.page && typeof obj.page === 'object' ? obj.page : {};
+  }
   return res;
 }
 
@@ -114,6 +121,11 @@ function pdfLayoutToJson(layout, workflowName) {
     label: n.label,
     options: n.options || {},
   };
+  if (n.type === 'canvas_objects' || (Array.isArray(n.objects) && n.objects.length)) {
+    out.objects = n.objects || [];
+    out.sourceType = n.sourceType || '';
+    out.page = n.page || {};
+  }
   if (n.type === 'pdf_template' || n.templateFile) {
     out.templateFile = n.templateFile;
     out.templateMeta = n.templateMeta;
@@ -314,6 +326,21 @@ function buildExportModule({
       resolvedType: layout.resolvedType,
       label: layout.label,
       options: layout.options || {},
+      ...(layout.type === 'pdf_template'
+        ? {
+            templateFile: layout.templateFile,
+            templateMeta: layout.templateMeta,
+            fields: layout.fields,
+            formMode: layout.formMode,
+          }
+        : {}),
+      ...(layout.type === 'canvas_objects'
+        ? {
+            objects: layout.objects || [],
+            sourceType: layout.sourceType || '',
+            page: layout.page || {},
+          }
+        : {}),
     },
     finalNotify: {
       enabled: notify.enabled,

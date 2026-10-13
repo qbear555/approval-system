@@ -1,6 +1,8 @@
 /**
  * 產生簽核 PDF 並寫入串流
  */
+const fs = require('fs');
+const path = require('path');
 const PDFDocument = require('pdfkit');
 const { getChineseFontPath, getCompanyNameForPdf } = require('./font');
 const {
@@ -123,6 +125,12 @@ function writeApprovalPdf(request, destStream) {
     const ctx = { doc, useFont, leftX, contentW, pageH, margin };
 
     try {
+      if (pl.type === 'canvas_objects' && Array.isArray(pl.objects) && pl.objects.length) {
+        const { drawCanvasObjectsForm } = require('./forms/canvas-objects');
+        drawCanvasObjectsForm(ctx, request, pl);
+        endPdfWithApprovedStamp(doc, request, useFont, fontReady);
+        return;
+      }
       let drawn = false;
       for (const [match, draw, label] of FORM_DRAWERS) {
         if (!match(request)) continue;

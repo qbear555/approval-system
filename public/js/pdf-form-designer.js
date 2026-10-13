@@ -373,6 +373,60 @@
         gap: 4px;
         transition: all 0.15s;
       }
+      .obj-table {
+        width: 100%;
+        height: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 11px;
+        color: #0f172a;
+        background: #fff;
+      }
+      .obj-table td {
+        border: 1px solid #94a3b8;
+        padding: 0;
+        vertical-align: stretch;
+        overflow: hidden;
+      }
+      .obj-cell-inner {
+        display: flex;
+        height: 100%;
+        min-height: 18px;
+      }
+      .obj-cell-label {
+        flex: 0 0 auto;
+        background: #f1f5f9;
+        color: #334155;
+        font-size: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 4px;
+        border-right: 1px solid #cbd5e1;
+        white-space: nowrap;
+      }
+      .obj-cell-value {
+        flex: 1;
+        padding: 3px 6px;
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        outline: none;
+      }
+      .obj-cell-value[contenteditable="true"]:focus {
+        background: #fff7ed;
+      }
+      .obj-text-body {
+        width: 100%;
+        height: 100%;
+        padding: 4px 8px;
+        box-sizing: border-box;
+        overflow: hidden;
+        outline: none;
+      }
+      .designer-obj-box[data-kind="table"] .field-title-badge {
+        top: -21px;
+      }
       .align-btn:hover {
         background: #334155;
         color: #38bdf8;
@@ -739,7 +793,15 @@
    * @param {Object} [options.initialPdfLayout] - 既有 pdfLayout 設定
    * @param {Function} options.onSave - 儲存回呼 ({ pdfLayout, formFields }) => {}
    */
-  function openPdfFormDesignerModal({ workflow, initialPdfLayout, onSave }) {
+  function openPdfFormDesignerModal(opts) {
+    const layout0 = (opts && opts.initialPdfLayout) || {};
+    if (opts && (opts.objectCanvas || layout0.type === 'canvas_objects')) {
+      return openCanvasObjectDesignerModal(opts);
+    }
+    return openPdfTemplateDesignerModal(opts);
+  }
+
+  function openPdfTemplateDesignerModal({ workflow, initialPdfLayout, onSave }) {
     ensureDesignerStyles();
 
     const layout = JSON.parse(JSON.stringify(initialPdfLayout || { type: 'pdf_template', fields: [] }));
@@ -1944,11 +2006,640 @@
     return modalEl;
   }
 
+  function handlesHtml() {
+    return `
+      <div class="designer-handles" style="display:none;">
+        <div class="resize-handle" data-dir="nw" style="top:-4.5px;left:-4.5px;cursor:nwse-resize;"></div>
+        <div class="resize-handle" data-dir="n" style="top:-4.5px;left:calc(50% - 4.5px);cursor:ns-resize;"></div>
+        <div class="resize-handle" data-dir="ne" style="top:-4.5px;right:-4.5px;cursor:nesw-resize;"></div>
+        <div class="resize-handle" data-dir="e" style="top:calc(50% - 4.5px);right:-4.5px;cursor:ew-resize;"></div>
+        <div class="resize-handle" data-dir="se" style="bottom:-4.5px;right:-4.5px;cursor:nwse-resize;"></div>
+        <div class="resize-handle" data-dir="s" style="bottom:-4.5px;left:calc(50% - 4.5px);cursor:ns-resize;"></div>
+        <div class="resize-handle" data-dir="sw" style="bottom:-4.5px;left:-4.5px;cursor:nesw-resize;"></div>
+        <div class="resize-handle" data-dir="w" style="top:calc(50% - 4.5px);left:-4.5px;cursor:ew-resize;"></div>
+      </div>`;
+  }
+
+  function openCanvasObjectDesignerModal({ workflow, initialPdfLayout, onSave }) {
+    ensureDesignerStyles();
+    const srcLayout = JSON.parse(JSON.stringify(initialPdfLayout || {}));
+    let objects = Array.isArray(srcLayout.objects) ? srcLayout.objects : [];
+    if (!objects.length && window.CanvasLayouts) {
+      const src = srcLayout.sourceType || srcLayout.type || 'general';
+      const preset = window.CanvasLayouts.builtinToCanvasLayout(
+        ['pdf_template', 'canvas_objects', 'auto'].includes(src) ? 'general' : src
+      );
+      objects = preset.objects || [];
+      srcLayout.sourceType = preset.sourceType;
+      srcLayout.page = preset.page;
+      srcLayout.label = preset.label;
+    }
+    let selectedId = null;
+    let selectedCell = null;
+    let zoomLevel = 1;
+
+    const modalEl = document.createElement('div');
+    modalEl.id = 'pdf-designer-modal';
+    modalEl.tabIndex = -1;
+    modalEl.style.cssText =
+      'position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0b0f19;z-index:99999;display:flex;flex-direction:column;color:#f8fafc;font-family:system-ui,"Noto Sans TC",sans-serif;';
+    modalEl.innerHTML = `
+      <div style="height:56px;background:#1e293b;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <strong style="font-size:1.05rem;color:#34d399;">🧩 可編輯畫布設計器</strong>
+          <span style="color:#94a3b8;font-size:0.85rem;background:#0f172a;padding:3px 8px;border-radius:4px;border:1px solid #334155;">
+            ${workflow?.name ? `流程：${workflow.name}` : '自訂版面'}
+          </span>
+          <span id="pdf-designer-filename" style="font-size:0.82rem;color:#94a3b8;">空白 A4 · 文字與表格皆可直接改</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:flex;align-items:center;gap:3px;background:#0f172a;padding:2px 6px;border-radius:6px;border:1px solid #334155;font-size:0.82rem;">
+            <button type="button" class="btn sm ghost" id="pdf-zoom-out" style="color:#cbd5e1;padding:2px 8px;">−</button>
+            <span id="pdf-zoom-level" style="min-width:44px;text-align:center;color:#34d399;">100%</span>
+            <button type="button" class="btn sm ghost" id="pdf-zoom-in" style="color:#cbd5e1;padding:2px 8px;">＋</button>
+            <button type="button" class="btn sm ghost" id="pdf-zoom-fit" style="color:#94a3b8;padding:2px 6px;font-size:0.75rem;">適應</button>
+          </div>
+          <button type="button" class="btn sm" id="pdf-designer-save-btn" style="background:#059669;color:#fff;font-weight:600;padding:6px 18px;border-radius:6px;">✓ 儲存並套用</button>
+          <button type="button" class="btn sm" id="pdf-designer-close-btn" style="background:#475569;color:#fff;border-radius:6px;padding:6px 12px;">關閉</button>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;overflow:hidden;">
+        <div id="pdf-designer-canvas-scroll" style="flex:1;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:36px;background:#080c14;">
+          <div id="pdf-designer-wrapper" style="position:relative;background:#fff;box-shadow:0 12px 36px rgba(0,0,0,0.6);transform-origin:top center;">
+            <canvas id="pdf-designer-canvas" style="display:block;"></canvas>
+            <div id="pdf-designer-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;cursor:default;"></div>
+          </div>
+        </div>
+        <div style="width:340px;background:#1e293b;border-left:1px solid #334155;display:flex;flex-direction:column;flex-shrink:0;">
+          <div style="padding:14px 16px;border-bottom:1px solid #334155;background:#172033;">
+            <div style="font-size:0.82rem;color:#34d399;margin-bottom:10px;font-weight:700;">＋ 新增物件</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+              <button type="button" class="quick-btn" data-add-kind="text"><span>📝</span> 文字</button>
+              <button type="button" class="quick-btn" data-add-kind="table"><span>▦</span> 表格</button>
+              <button type="button" class="quick-btn" data-add-kind="field"><span>🔖</span> 欄位</button>
+              <button type="button" class="quick-btn" data-add-kind="note"><span>📌</span> 說明列</button>
+              <button type="button" class="quick-btn" data-add-kind="signature" style="grid-column:1/-1;background:#92400e;border-color:#b45309;justify-content:center;"><span>🖋️</span> 簽章格</button>
+            </div>
+          </div>
+          <div id="pdf-designer-prop-panel" style="flex:1;overflow-y:auto;padding:16px;">
+            <div id="pdf-prop-empty" style="color:#64748b;text-align:center;margin-top:40px;font-size:0.85rem;line-height:1.6;">
+              點選畫布上的文字或表格<br/>即可改字、改格、增刪列欄
+            </div>
+            <div id="pdf-prop-form" style="display:none;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #334155;">
+                <strong style="color:#34d399;">物件屬性</strong>
+                <button type="button" id="pdf-del-obj-btn" class="btn sm" style="background:#dc2626;color:#fff;padding:2px 8px;font-size:0.75rem;">刪除</button>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;font-size:0.84rem;">
+                <div>
+                  <label style="display:block;color:#94a3b8;margin-bottom:4px;">類型</label>
+                  <input type="text" id="prop-kind" class="prop-input" disabled />
+                </div>
+                <div id="prop-text-wrap">
+                  <label style="display:block;color:#94a3b8;margin-bottom:4px;">文字內容（可直接在畫布上改）</label>
+                  <textarea id="prop-text" class="prop-input" rows="3"></textarea>
+                </div>
+                <div>
+                  <label style="display:block;color:#94a3b8;margin-bottom:4px;">綁定欄位（執行期填入申請資料）</label>
+                  <input type="text" id="prop-bind" class="prop-input" placeholder="例如 leave_type、__requester_name" />
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <div>
+                    <label style="display:block;color:#94a3b8;margin-bottom:4px;">字級</label>
+                    <input type="number" id="prop-fontsize" min="8" max="36" value="12" class="prop-input" />
+                  </div>
+                  <div>
+                    <label style="display:block;color:#94a3b8;margin-bottom:4px;">對齊</label>
+                    <select id="prop-align" class="prop-input">
+                      <option value="left">靠左</option>
+                      <option value="center">置中</option>
+                      <option value="right">靠右</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="prop-table-tools" style="display:none;background:#0f172a;padding:10px;border-radius:6px;border:1px solid #334155;">
+                  <div style="color:#34d399;font-weight:600;margin-bottom:8px;">表格編輯</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                    <button type="button" class="align-btn" id="btn-add-row">＋ 列</button>
+                    <button type="button" class="align-btn" id="btn-del-row">− 列</button>
+                    <button type="button" class="align-btn" id="btn-add-col">＋ 欄</button>
+                    <button type="button" class="align-btn" id="btn-del-col">− 欄</button>
+                  </div>
+                  <div id="prop-cell-box" style="margin-top:10px;display:none;">
+                    <label style="display:block;color:#94a3b8;margin-bottom:4px;">儲存格標籤</label>
+                    <input type="text" id="prop-cell-label" class="prop-input" />
+                    <label style="display:block;color:#94a3b8;margin:8px 0 4px;">儲存格文字</label>
+                    <input type="text" id="prop-cell-text" class="prop-input" />
+                    <label style="display:block;color:#94a3b8;margin:8px 0 4px;">儲存格綁定</label>
+                    <input type="text" id="prop-cell-bind" class="prop-input" placeholder="欄位 id" />
+                  </div>
+                </div>
+                <div style="background:#0f172a;padding:10px;border-radius:6px;border:1px solid #334155;">
+                  <div style="font-size:0.8rem;color:#38bdf8;font-weight:600;margin-bottom:8px;">座標 %</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <input type="number" id="prop-rx" step="0.1" class="prop-input" />
+                    <input type="number" id="prop-ry" step="0.1" class="prop-input" />
+                    <input type="number" id="prop-rw" step="0.1" class="prop-input" />
+                    <input type="number" id="prop-rh" step="0.1" class="prop-input" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modalEl);
+
+    const scrollContainer = modalEl.querySelector('#pdf-designer-canvas-scroll');
+    const wrapper = modalEl.querySelector('#pdf-designer-wrapper');
+    const canvas = modalEl.querySelector('#pdf-designer-canvas');
+    const overlay = modalEl.querySelector('#pdf-designer-overlay');
+    const zoomLevelEl = modalEl.querySelector('#pdf-zoom-level');
+    const propEmpty = modalEl.querySelector('#pdf-prop-empty');
+    const propForm = modalEl.querySelector('#pdf-prop-form');
+
+    const PAGE_W = 595.28;
+    const PAGE_H = 841.89;
+    const SCALE = 1.5;
+
+    function initBlankA4() {
+      canvas.width = Math.round(PAGE_W * SCALE);
+      canvas.height = Math.round(PAGE_H * SCALE);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+    }
+
+    function setZoom(z) {
+      zoomLevel = Math.max(0.4, Math.min(2.5, Math.round(z * 100) / 100));
+      wrapper.style.transform = `scale(${zoomLevel})`;
+      zoomLevelEl.textContent = `${Math.round(zoomLevel * 100)}%`;
+    }
+
+    function findObj(id) {
+      return objects.find((o) => o.id === id);
+    }
+
+    function bindMoveResize(box, obj) {
+      box.onmousedown = (e) => {
+        if (e.target.classList.contains('resize-handle')) return;
+        if (e.target.closest('.obj-cell-value') || e.target.closest('.obj-text-body')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        selectObj(obj.id, false);
+        const startClientX = e.clientX;
+        const startClientY = e.clientY;
+        const startRx = obj.rx;
+        const startRy = obj.ry;
+        function onMove(ev) {
+          const r = overlay.getBoundingClientRect();
+          const dx = (ev.clientX - startClientX) / (r.width || 1);
+          const dy = (ev.clientY - startClientY) / (r.height || 1);
+          obj.rx = Math.max(0, Math.min(1 - obj.rw, startRx + dx));
+          obj.ry = Math.max(0, Math.min(1 - obj.rh, startRy + dy));
+          box.style.left = `${(obj.rx * 100).toFixed(3)}%`;
+          box.style.top = `${(obj.ry * 100).toFixed(3)}%`;
+          syncCoords(obj);
+        }
+        function onUp() {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+        }
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      };
+      box.querySelectorAll('.resize-handle').forEach((handleEl) => {
+        handleEl.onmousedown = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          selectObj(obj.id, false);
+          const dir = handleEl.dataset.dir;
+          const startClientX = e.clientX;
+          const startClientY = e.clientY;
+          const startRx = obj.rx;
+          const startRy = obj.ry;
+          const startRw = obj.rw;
+          const startRh = obj.rh;
+          const MIN_W = 0.04;
+          const MIN_H = 0.015;
+          function onMove(ev) {
+            const r = overlay.getBoundingClientRect();
+            const dx = (ev.clientX - startClientX) / (r.width || 1);
+            const dy = (ev.clientY - startClientY) / (r.height || 1);
+            let rx = startRx;
+            let ry = startRy;
+            let rw = startRw;
+            let rh = startRh;
+            if (dir.includes('e')) rw = Math.max(MIN_W, Math.min(1 - startRx, startRw + dx));
+            else if (dir.includes('w')) {
+              const maxR = startRx + startRw;
+              rx = Math.min(maxR - MIN_W, Math.max(0, startRx + dx));
+              rw = maxR - rx;
+            }
+            if (dir.includes('s')) rh = Math.max(MIN_H, Math.min(1 - startRy, startRh + dy));
+            else if (dir.includes('n')) {
+              const maxB = startRy + startRh;
+              ry = Math.min(maxB - MIN_H, Math.max(0, startRy + dy));
+              rh = maxB - ry;
+            }
+            obj.rx = rx;
+            obj.ry = ry;
+            obj.rw = rw;
+            obj.rh = rh;
+            box.style.left = `${(rx * 100).toFixed(3)}%`;
+            box.style.top = `${(ry * 100).toFixed(3)}%`;
+            box.style.width = `${(rw * 100).toFixed(3)}%`;
+            box.style.height = `${(rh * 100).toFixed(3)}%`;
+            syncCoords(obj);
+          }
+          function onUp() {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+          }
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        };
+      });
+    }
+
+    function tableHtml(obj) {
+      const rows = obj.rows || [];
+      return `<table class="obj-table">${rows
+        .map((row, ri) => {
+          const cells = row.cells || [];
+          const sumW = cells.reduce((a, c) => a + (Number(c.w) || 1), 0) || 1;
+          return `<tr>${cells
+            .map((c, ci) => {
+              const w = (((Number(c.w) || 1) / sumW) * 100).toFixed(2);
+              const label = c.label
+                ? `<div class="obj-cell-label" style="width:${Math.max(28, (Number(c.labelW) || 0.28) * 80)}px">${c.label}</div>`
+                : '';
+              const shown = c.text || (c.bind ? `〔${c.bind}〕` : '');
+              return `<td style="width:${w}%" data-row="${ri}" data-col="${ci}">
+                <div class="obj-cell-inner">${label}<div class="obj-cell-value" contenteditable="true" data-row="${ri}" data-col="${ci}">${shown.replace(/</g, '&lt;')}</div></div>
+              </td>`;
+            })
+            .join('')}</tr>`;
+        })
+        .join('')}</table>`;
+    }
+
+    function renderObjects() {
+      overlay.innerHTML = '';
+      objects.forEach((obj) => {
+        const box = document.createElement('div');
+        const isSel = obj.id === selectedId;
+        box.className = `designer-field-box designer-obj-box ${isSel ? 'is-selected' : ''}`;
+        box.dataset.id = obj.id;
+        box.dataset.kind = obj.kind || 'text';
+        box.style.left = `${(obj.rx * 100).toFixed(3)}%`;
+        box.style.top = `${(obj.ry * 100).toFixed(3)}%`;
+        box.style.width = `${(obj.rw * 100).toFixed(3)}%`;
+        box.style.height = `${(obj.rh * 100).toFixed(3)}%`;
+        box.style.border = isSel ? '2px solid #34d399' : '1px solid #94a3b8';
+        box.style.background =
+          obj.kind === 'rect' || obj.kind === 'note'
+            ? obj.fill || '#fffbeb'
+            : obj.kind === 'signature'
+              ? 'rgba(245,158,11,0.18)'
+              : 'transparent';
+        box.style.cursor = 'move';
+        box.style.zIndex = isSel ? '50' : '10';
+        box.style.overflow = 'visible';
+        const kindLabel =
+          { text: '文字', table: '表格', field: '欄位', signature: '簽章', note: '說明', rect: '色塊' }[
+            obj.kind
+          ] || obj.kind;
+        let inner = '';
+        if (obj.kind === 'table') inner = tableHtml(obj);
+        else if (obj.kind === 'rect') inner = '';
+        else {
+          const shown = obj.text || (obj.bind ? `〔${obj.bind}〕` : '');
+          inner = `<div class="obj-text-body" contenteditable="true" style="text-align:${obj.align || 'left'};font-size:${obj.fontSize || 12}px;color:${obj.color || '#0f172a'};font-weight:${obj.bold ? '700' : '400'};">${String(shown).replace(/</g, '&lt;')}</div>`;
+        }
+        box.innerHTML = `<div class="field-title-badge" style="background:${isSel ? '#047857' : '#334155'};"><span>${kindLabel}</span></div>${inner}${handlesHtml()}`;
+        const handles = box.querySelector('.designer-handles');
+        if (handles) handles.style.display = isSel ? 'block' : 'none';
+        bindMoveResize(box, obj);
+        const textBody = box.querySelector('.obj-text-body');
+        if (textBody) {
+          textBody.onmousedown = (e) => e.stopPropagation();
+          textBody.oninput = () => {
+            obj.text = textBody.innerText;
+            const inp = modalEl.querySelector('#prop-text');
+            if (inp && document.activeElement !== inp) inp.value = obj.text;
+          };
+        }
+        box.querySelectorAll('.obj-cell-value').forEach((el) => {
+          el.onmousedown = (e) => {
+            e.stopPropagation();
+            selectedCell = { objId: obj.id, row: Number(el.dataset.row), col: Number(el.dataset.col) };
+            selectObj(obj.id, false);
+          };
+          el.oninput = () => {
+            const row = obj.rows[Number(el.dataset.row)];
+            const cell = row && row.cells[Number(el.dataset.col)];
+            if (cell) {
+              cell.text = el.innerText;
+              const inp = modalEl.querySelector('#prop-cell-text');
+              if (inp && document.activeElement !== inp) inp.value = cell.text;
+            }
+          };
+        });
+        overlay.appendChild(box);
+      });
+    }
+
+    function syncCoords(obj) {
+      const rx = modalEl.querySelector('#prop-rx');
+      const ry = modalEl.querySelector('#prop-ry');
+      const rw = modalEl.querySelector('#prop-rw');
+      const rh = modalEl.querySelector('#prop-rh');
+      if (rx && document.activeElement !== rx) rx.value = (obj.rx * 100).toFixed(1);
+      if (ry && document.activeElement !== ry) ry.value = (obj.ry * 100).toFixed(1);
+      if (rw && document.activeElement !== rw) rw.value = (obj.rw * 100).toFixed(1);
+      if (rh && document.activeElement !== rh) rh.value = (obj.rh * 100).toFixed(1);
+    }
+
+    function selectObj(id, rerender) {
+      selectedId = id;
+      if (rerender) renderObjects();
+      else {
+        overlay.querySelectorAll('.designer-obj-box').forEach((el) => {
+          const on = el.dataset.id === id;
+          el.classList.toggle('is-selected', on);
+          el.style.border = on ? '2px solid #34d399' : '1px solid #94a3b8';
+          el.style.zIndex = on ? '50' : '10';
+          const h = el.querySelector('.designer-handles');
+          if (h) h.style.display = on ? 'block' : 'none';
+        });
+      }
+      const obj = findObj(id);
+      if (!obj) {
+        propEmpty.style.display = 'block';
+        propForm.style.display = 'none';
+        return;
+      }
+      propEmpty.style.display = 'none';
+      propForm.style.display = 'block';
+      modalEl.querySelector('#prop-kind').value = obj.kind || '';
+      modalEl.querySelector('#prop-text').value = obj.text || '';
+      modalEl.querySelector('#prop-bind').value = obj.bind || obj.fieldId || '';
+      modalEl.querySelector('#prop-fontsize').value = obj.fontSize || 12;
+      modalEl.querySelector('#prop-align').value = obj.align || 'left';
+      const tableTools = modalEl.querySelector('#prop-table-tools');
+      tableTools.style.display = obj.kind === 'table' ? 'block' : 'none';
+      const cellBox = modalEl.querySelector('#prop-cell-box');
+      if (obj.kind === 'table' && selectedCell && selectedCell.objId === obj.id) {
+        const cell = obj.rows?.[selectedCell.row]?.cells?.[selectedCell.col];
+        cellBox.style.display = cell ? 'block' : 'none';
+        if (cell) {
+          modalEl.querySelector('#prop-cell-label').value = cell.label || '';
+          modalEl.querySelector('#prop-cell-text').value = cell.text || '';
+          modalEl.querySelector('#prop-cell-bind').value = cell.bind || cell.field || '';
+        }
+      } else {
+        cellBox.style.display = 'none';
+      }
+      syncCoords(obj);
+    }
+
+    function addObject(kind) {
+      const id = genFieldId(kind === 'table' ? 'tbl' : 'obj');
+      const base = { id, kind, rx: 0.12, ry: 0.18, rw: 0.76, rh: 0.06, fontSize: 12, align: 'left' };
+      if (kind === 'text') Object.assign(base, { text: '新文字', color: '#0f172a' });
+      if (kind === 'note') Object.assign(base, { text: '說明文字', fill: '#fffbeb', stroke: '#f59e0b', rh: 0.04, fontSize: 9 });
+      if (kind === 'field') Object.assign(base, { text: '', fieldId: id, fieldType: 'text', name: '新欄位' });
+      if (kind === 'signature') Object.assign(base, { text: '簽章', stepOrder: 'requester', rh: 0.08 });
+      if (kind === 'table') {
+        Object.assign(base, {
+          rh: 0.08,
+          rows: [
+            {
+              h: 30,
+              cells: [
+                { w: 0.5, label: '欄位一', text: '', labelW: 0.3 },
+                { w: 0.5, label: '欄位二', text: '', labelW: 0.3 },
+              ],
+            },
+            {
+              h: 30,
+              cells: [
+                { w: 0.5, label: '欄位三', text: '', labelW: 0.3 },
+                { w: 0.5, label: '欄位四', text: '', labelW: 0.3 },
+              ],
+            },
+          ],
+        });
+      }
+      const last = objects[objects.length - 1];
+      if (last) base.ry = Math.min(0.88, (last.ry || 0) + (last.rh || 0.05) + 0.012);
+      objects.push(base);
+      selectedId = id;
+      selectedCell = null;
+      renderObjects();
+      selectObj(id, false);
+    }
+
+    modalEl.querySelectorAll('[data-add-kind]').forEach((btn) => {
+      btn.onclick = () => addObject(btn.getAttribute('data-add-kind'));
+    });
+    modalEl.querySelector('#pdf-designer-close-btn').onclick = () => modalEl.remove();
+    modalEl.querySelector('#pdf-zoom-in').onclick = () => setZoom(zoomLevel + 0.15);
+    modalEl.querySelector('#pdf-zoom-out').onclick = () => setZoom(zoomLevel - 0.15);
+    modalEl.querySelector('#pdf-zoom-fit').onclick = () => {
+      const availableW = scrollContainer.clientWidth - 80;
+      setZoom(availableW / canvas.width);
+    };
+    modalEl.querySelector('#pdf-del-obj-btn').onclick = () => {
+      objects = objects.filter((o) => o.id !== selectedId);
+      selectedId = null;
+      selectedCell = null;
+      renderObjects();
+      propEmpty.style.display = 'block';
+      propForm.style.display = 'none';
+    };
+    modalEl.querySelector('#prop-text').oninput = (e) => {
+      const obj = findObj(selectedId);
+      if (obj) {
+        obj.text = e.target.value;
+        const body = overlay.querySelector(`.designer-obj-box[data-id="${obj.id}"] .obj-text-body`);
+        if (body) body.textContent = obj.text;
+      }
+    };
+    modalEl.querySelector('#prop-bind').oninput = (e) => {
+      const obj = findObj(selectedId);
+      if (obj) {
+        obj.bind = e.target.value;
+        if (obj.kind === 'field') obj.fieldId = e.target.value || obj.fieldId;
+      }
+    };
+    modalEl.querySelector('#prop-fontsize').oninput = (e) => {
+      const obj = findObj(selectedId);
+      if (obj) obj.fontSize = Number(e.target.value) || 12;
+    };
+    modalEl.querySelector('#prop-align').onchange = (e) => {
+      const obj = findObj(selectedId);
+      if (obj) {
+        obj.align = e.target.value;
+        const body = overlay.querySelector(`.designer-obj-box[data-id="${obj.id}"] .obj-text-body`);
+        if (body) body.style.textAlign = obj.align;
+      }
+    };
+    ['rx', 'ry', 'rw', 'rh'].forEach((k) => {
+      modalEl.querySelector('#prop-' + k).onchange = (e) => {
+        const obj = findObj(selectedId);
+        if (!obj) return;
+        obj[k] = Math.max(0, Math.min(1, Number(e.target.value) / 100));
+        renderObjects();
+        selectObj(obj.id, false);
+      };
+    });
+    modalEl.querySelector('#btn-add-row').onclick = () => {
+      const obj = findObj(selectedId);
+      if (!obj || obj.kind !== 'table') return;
+      const last = obj.rows[obj.rows.length - 1];
+      const cells = (last?.cells || [{ w: 1, text: '' }]).map((c) => ({
+        w: c.w || 1,
+        label: c.label || '',
+        text: '',
+        labelW: c.labelW,
+        bind: '',
+      }));
+      obj.rows.push({ h: last?.h || 30, cells });
+      obj.rh = Math.min(0.7, obj.rh + 0.035);
+      renderObjects();
+      selectObj(obj.id, false);
+    };
+    modalEl.querySelector('#btn-del-row').onclick = () => {
+      const obj = findObj(selectedId);
+      if (!obj || obj.kind !== 'table' || obj.rows.length <= 1) return;
+      const idx = selectedCell && selectedCell.objId === obj.id ? selectedCell.row : obj.rows.length - 1;
+      obj.rows.splice(Math.max(0, idx), 1);
+      selectedCell = null;
+      renderObjects();
+      selectObj(obj.id, false);
+    };
+    modalEl.querySelector('#btn-add-col').onclick = () => {
+      const obj = findObj(selectedId);
+      if (!obj || obj.kind !== 'table') return;
+      obj.rows.forEach((row) => {
+        row.cells.push({ w: 0.2, text: '', label: '新欄' });
+      });
+      renderObjects();
+      selectObj(obj.id, false);
+    };
+    modalEl.querySelector('#btn-del-col').onclick = () => {
+      const obj = findObj(selectedId);
+      if (!obj || obj.kind !== 'table') return;
+      const ci = selectedCell && selectedCell.objId === obj.id ? selectedCell.col : null;
+      obj.rows.forEach((row) => {
+        if (row.cells.length <= 1) return;
+        row.cells.splice(ci != null ? ci : row.cells.length - 1, 1);
+      });
+      selectedCell = null;
+      renderObjects();
+      selectObj(obj.id, false);
+    };
+    modalEl.querySelector('#prop-cell-label').oninput = (e) => {
+      const obj = findObj(selectedId);
+      const cell = obj?.rows?.[selectedCell?.row]?.cells?.[selectedCell?.col];
+      if (cell) {
+        cell.label = e.target.value;
+        renderObjects();
+        selectObj(obj.id, false);
+      }
+    };
+    modalEl.querySelector('#prop-cell-text').oninput = (e) => {
+      const obj = findObj(selectedId);
+      const cell = obj?.rows?.[selectedCell?.row]?.cells?.[selectedCell?.col];
+      if (cell) cell.text = e.target.value;
+    };
+    modalEl.querySelector('#prop-cell-bind').oninput = (e) => {
+      const obj = findObj(selectedId);
+      const cell = obj?.rows?.[selectedCell?.row]?.cells?.[selectedCell?.col];
+      if (cell) {
+        cell.bind = e.target.value;
+        cell.field = e.target.value;
+      }
+    };
+
+    overlay.onclick = (e) => {
+      if (e.target === overlay) {
+        selectedId = null;
+        selectedCell = null;
+        selectObj(null, true);
+      }
+    };
+
+    modalEl.querySelector('#pdf-designer-save-btn').onclick = () => {
+      const convertedFormFields = [];
+      const seen = new Set();
+      objects.forEach((obj) => {
+        if (obj.kind === 'field' && obj.fieldId && !seen.has(obj.fieldId)) {
+          seen.add(obj.fieldId);
+          convertedFormFields.push({
+            id: obj.fieldId,
+            label: obj.name || obj.fieldId,
+            type: obj.fieldType || 'text',
+            required: !!obj.required,
+          });
+        }
+        if (obj.kind === 'table') {
+          (obj.rows || []).forEach((row) => {
+            (row.cells || []).forEach((c) => {
+              const fid = c.field || (c.bind && !String(c.bind).startsWith('__') ? c.bind : '');
+              if (fid && !seen.has(fid)) {
+                seen.add(fid);
+                convertedFormFields.push({
+                  id: fid,
+                  label: c.label || fid,
+                  type: 'text',
+                  required: false,
+                });
+              }
+            });
+          });
+        }
+      });
+      const outPdfLayout = {
+        type: 'canvas_objects',
+        label: srcLayout.label || '可編輯畫布版面',
+        sourceType: srcLayout.sourceType || '',
+        page: srcLayout.page || { size: 'A4', widthPt: PAGE_W, heightPt: PAGE_H, marginPt: 40 },
+        objects,
+      };
+      if (typeof onSave === 'function') onSave({ pdfLayout: outPdfLayout, formFields: convertedFormFields });
+      modalEl.remove();
+    };
+
+    document.addEventListener('keydown', function onKey(e) {
+      if (!document.body.contains(modalEl)) {
+        document.removeEventListener('keydown', onKey);
+        return;
+      }
+      if (e.key === 'Escape') modalEl.remove();
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && !['INPUT', 'TEXTAREA'].includes(e.target.tagName) && !e.target.isContentEditable) {
+        e.preventDefault();
+        modalEl.querySelector('#pdf-del-obj-btn').click();
+      }
+    });
+
+    initBlankA4();
+    renderObjects();
+    setZoom(Math.min(1, (scrollContainer.clientWidth - 80) / canvas.width));
+    return modalEl;
+  }
+
   // 掛載到全域 window 物件
   window.PdfFormDesigner = {
     loadTemplateToCanvas,
     renderPdfFormViewer,
     openPdfFormDesignerModal,
+    openCanvasObjectDesignerModal,
     autoDetectFormFields,
     detectGridBoxesFromCanvas,
   };
