@@ -5,6 +5,20 @@
  */
 const LOGIN_PATH = '/login';
 
+function parseContentDispositionFilename(cd) {
+  if (!cd) return '';
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim().replace(/^["']|["']$/g, ''));
+    } catch {
+      /* fall through */
+    }
+  }
+  const plain = /filename\s*=\s*("?)([^";]+)\1/i.exec(cd);
+  return plain ? plain[2].trim() : '';
+}
+
 export async function apiRequest(endpoint, options = {}) {
   const token = localStorage.getItem('approval_token');
   const headers = {
@@ -12,7 +26,7 @@ export async function apiRequest(endpoint, options = {}) {
     ...(options.headers || {}),
   };
 
-  const { expectBlob, ...rest } = options;
+  const { expectBlob, returnMeta, ...rest } = options;
   let body = rest.body;
   if (body instanceof FormData) {
     delete headers['Content-Type'];
@@ -41,12 +55,16 @@ export async function apiRequest(endpoint, options = {}) {
       throw new Error('登入憑證已過期，請重新登入');
     }
 
-    if (expectBlob) {
+    if (expectBlob || returnMeta) {
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || data?.message || `請求失敗 (HTTP ${res.status})`);
       }
-      return res.blob();
+      const blob = await res.blob();
+      if (returnMeta) {
+        return { blob, filename: parseContentDispositionFilename(res.headers.get('Content-Disposition')) };
+      }
+      return blob;
     }
 
     const data = await res.json().catch(() => null);

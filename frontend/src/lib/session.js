@@ -1,15 +1,9 @@
-/** 登出處理：清除 Token 與全域使用者狀態並導向登入頁面 */
+import { stopPendingWatcher } from '@/lib/admin-runtime';
+
+/** 登出處理：停止待簽輪詢、清除 Token，並導向登入頁。 */
 export function clearGlobalSession() {
   try {
-    if (typeof window.stopPendingWatcher === 'function') window.stopPendingWatcher();
-  } catch {
-    /* ignore */
-  }
-  try {
-    if (window.appState) {
-      window.appState.token = '';
-      window.appState.user = null;
-    }
+    stopPendingWatcher();
   } catch {
     /* ignore */
   }

@@ -1,0 +1,17 @@
+export const THEMES = [
+  { id: 'navy', name: '🌊 經典藍調', vars: { '--primary': '#2563eb', '--primary-hover': '#1d4ed8', '--sidebar': '#0b192c', '--sidebar-2': '#1e3e62', '--bg': '#f1f5f9', '--surface': '#ffffff', '--text': '#0f172a', '--text-heading': '#0f172a', '--muted': '#64748b', '--border': '#cbd5e1', '--input-bg': '#ffffff' } },
+  { id: 'dark', name: '🌙 暗黑夜空', vars: { '--primary': '#3b82f6', '--primary-hover': '#60a5fa', '--sidebar': '#0f172a', '--sidebar-2': '#1e293b', '--bg': '#090d16', '--surface': '#151d2a', '--text': '#e2e8f0', '--text-heading': '#f8fafc', '--muted': '#94a3b8', '--border': '#2a3649', '--input-bg': '#1e293b' } },
+  { id: 'emerald', name: '🌲 翡翠森林', vars: { '--primary': '#059669', '--primary-hover': '#047857', '--sidebar': '#064e3b', '--sidebar-2': '#047857', '--bg': '#f0fdf4', '--surface': '#ffffff', '--text': '#064e3b', '--text-heading': '#022c22', '--muted': '#374151', '--border': '#a7f3d0', '--input-bg': '#ffffff' } },
+  { id: 'violet', name: '💜 皇家紫羅蘭', vars: { '--primary': '#7c3aed', '--primary-hover': '#6d28d9', '--sidebar': '#2e1065', '--sidebar-2': '#4c1d95', '--bg': '#f5f3ff', '--surface': '#ffffff', '--text': '#2e1065', '--text-heading': '#1e1b4b', '--muted': '#6b7280', '--border': '#ddd6fe', '--input-bg': '#ffffff' } },
+  { id: 'amber', name: '🌅 暖陽日暮', vars: { '--primary': '#d97706', '--primary-hover': '#b45309', '--sidebar': '#451a03', '--sidebar-2': '#78350f', '--bg': '#fffbeb', '--surface': '#ffffff', '--text': '#451a03', '--text-heading': '#292524', '--muted': '#57534e', '--border': '#fde68a', '--input-bg': '#ffffff' } },
+  { id: 'rose', name: '🌸 櫻花石榴', vars: { '--primary': '#e11d48', '--primary-hover': '#be123c', '--sidebar': '#4c0519', '--sidebar-2': '#881337', '--bg': '#fff1f2', '--surface': '#ffffff', '--text': '#4c0519', '--text-heading': '#881337', '--muted': '#64748b', '--border': '#fecdd3', '--input-bg': '#ffffff' } },
+];
+
+export function applyUserTheme(themeId, save = false) {
+  const theme = THEMES.find((t) => t.id === themeId) || THEMES[0];
+  Object.entries(theme.vars).forEach(([key, val]) => {
+    document.documentElement.style.setProperty(key, val);
+  });
+  if (save) localStorage.setItem('approval_user_theme', theme.id);
+  return theme;
+}

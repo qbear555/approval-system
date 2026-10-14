@@ -148,7 +148,19 @@
           </div>
         </div>
         <div class="split-detail-pane">
-          <div ref="splitDetailHost" id="split-detail-host" v-once style="min-height:300px"></div>
+          <div v-if="splitCleared" class="card" style="text-align:center;padding:50px 20px;margin:20px">
+            <div style="font-size:3rem;margin-bottom:12px">🎉</div>
+            <h3 style="margin:0 0 8px;color:#166534">太棒了！所有待簽核案件已全部處理完畢</h3>
+            <p class="muted" style="margin:0 0 16px">您已清空待辦案件。</p>
+          </div>
+          <RequestDetailPanel
+            v-else-if="splitSelectedId"
+            :key="splitSelectedId"
+            :request-id="splitSelectedId"
+            embedded
+            @popout="(reqId) => router.push(`/detail/${reqId}`)"
+            @action-completed="onSplitActionCompleted"
+          />
         </div>
       </div>
 
@@ -229,7 +241,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ensureCoreScriptsLoaded } from '@/lib/core-scripts';
 import { apiRequest } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
@@ -238,6 +249,7 @@ import { normalizeRequestStatus, statusLabel } from '@/lib/status';
 import { resolveCommentPhrases } from '@/lib/comment-phrases';
 import { canDeleteRequestRow } from '@/lib/request-access';
 import RequestTable from '@/components/requests/RequestTable.vue';
+import RequestDetailPanel from '@/components/requests/RequestDetailPanel.vue';
 
 const PAGE_SIZE = 20;
 const statusOpts = [
@@ -269,8 +281,8 @@ const bulkBusy = ref(false);
 const exportBusy = ref(false);
 const bulkPhrases = ref(resolveCommentPhrases(authStore.user));
 
-const splitDetailHost = ref(null);
 const splitSelectedId = ref(0);
+const splitCleared = ref(false);
 const splitSearch = ref('');
 const inboxViewMode = ref(localStorage.getItem('approval_inbox_view') || 'table');
 
@@ -300,52 +312,34 @@ function formatElapsed(dateStr) {
 function setInboxView(mode) {
   inboxViewMode.value = mode;
   localStorage.setItem('approval_inbox_view', mode);
+  splitCleared.value = false;
   if (mode === 'split') {
     nextTick(() => {
       if (!splitSelectedId.value && filteredPendingRequests.value.length) {
         selectSplitItem(filteredPendingRequests.value[0].id);
-      } else if (splitSelectedId.value) {
-        mountSelectedDetail(splitSelectedId.value);
       }
     });
   }
 }
 
-async function mountSelectedDetail(id) {
-  splitSelectedId.value = id;
-  if (!id || !splitDetailHost.value) return;
-  splitDetailHost.value.innerHTML = '<div class="muted" style="padding:40px;text-align:center">正在載入單據詳情…</div>';
-  await ensureCoreScriptsLoaded(authStore);
-  if (typeof window.renderDetailEmbedded === 'function') {
-    window.renderDetailEmbedded(splitDetailHost.value, id, {
-      onPopout: (reqId) => router.push(`/detail/${reqId}`),
-      onActionCompleted: (actedReq) => {
-        toast.success(`單據 #${actedReq.id} 已完成簽核！`);
-        allRequests.value = allRequests.value.filter((r) => r.id !== actedReq.id);
-        const remaining = filteredPendingRequests.value;
-        if (remaining.length) {
-          selectSplitItem(remaining[0].id);
-        } else {
-          splitSelectedId.value = 0;
-          if (splitDetailHost.value) {
-            splitDetailHost.value.innerHTML = `
-              <div class="card" style="text-align:center;padding:50px 20px;margin:20px">
-                <div style="font-size:3rem;margin-bottom:12px">🎉</div>
-                <h3 style="margin:0 0 8px;color:#166534">太棒了！所有待簽核案件已全部處理完畢</h3>
-                <p class="muted" style="margin:0 0 16px">您已清空待辦案件。</p>
-              </div>
-            `;
-          }
-        }
-        if (typeof authStore.fetchStats === 'function') authStore.fetchStats();
-      },
-    });
+function onSplitActionCompleted(acted) {
+  const actedId = acted?.id;
+  toast.success(`單據 #${actedId} 已完成簽核！`);
+  allRequests.value = allRequests.value.filter((r) => r.id !== actedId);
+  const remaining = filteredPendingRequests.value;
+  if (remaining.length) {
+    splitCleared.value = false;
+    selectSplitItem(remaining[0].id);
+  } else {
+    splitSelectedId.value = 0;
+    splitCleared.value = true;
   }
+  systemStore.fetchStats().catch(() => {});
 }
 
 function selectSplitItem(id) {
+  splitCleared.value = false;
   splitSelectedId.value = id;
-  mountSelectedDetail(id);
 }
 
 function handleKeydown(e) {

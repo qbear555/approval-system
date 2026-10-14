@@ -32,7 +32,7 @@ const HOT_FILES = [
   'server/system-settings.js',
   'server/index.js',
   'server/pdf-sign.js',
-  'public/js/app.js',
+  'server/pdf/canvas-layouts.js',
   'public/css/style.css',
   'public/index.html',
   'package.json',
@@ -244,7 +244,7 @@ async function deployNas() {
         .on('error', reject)
         .connect({
           host: HOST,
-          port: 22,
+          port: Number(process.env.NAS_PORT || 22),
           username: USER,
           password: PASS,
           readyTimeout: 30000,
@@ -298,7 +298,12 @@ async function deployNas() {
   log(`NAS ${USER}@${HOST} 部署中（NAS_SKIP_DB=1，不覆寫 data）…`);
   const conn = await connect();
   log('SSH OK');
-  const s = await sftp(conn);
+  let s = null;
+  try {
+    s = await sftp(conn);
+  } catch (err) {
+    log('SFTP 不可用，改以 SSH 串流上傳：', err.message);
+  }
 
   // 熱更新檔 + 整包 server/public
   const walk = (relDir) => {
@@ -319,14 +324,62 @@ async function deployNas() {
   };
 
   const fileSet = new Set([...HOT_FILES, ...walk('server'), ...walk('public')]);
-
-  for (const rel of fileSet) {
+  const files = [...fileSet].filter((rel) => {
     const local = path.join(ROOT, rel);
-    if (!fs.existsSync(local) || !fs.statSync(local).isFile()) continue;
-    const remote = `${SFTP_ROOT}/${rel.replace(/\\/g, '/')}`;
-    await ensureRemoteDir(s, path.posix.dirname(remote));
-    await put(s, local, remote);
-    log('put', rel);
+    return fs.existsSync(local) && fs.statSync(local).isFile() && !rel.replace(/\\/g, '/').startsWith('data/');
+  });
+
+  if (s) {
+    for (const rel of files) {
+      const local = path.join(ROOT, rel);
+      const remote = `${SFTP_ROOT}/${rel.replace(/\\/g, '/')}`;
+      await ensureRemoteDir(s, path.posix.dirname(remote));
+      await put(s, local, remote);
+      log('put', rel);
+    }
+  } else {
+    log(`SSH 上傳 ${files.length} 個檔案…`);
+    const os = require('os');
+    const stamp = Date.now();
+    const listPath = path.join(os.tmpdir(), `nas-upload-${stamp}.txt`);
+    const tarPath = path.join(os.tmpdir(), `nas-upload-${stamp}.tar`);
+    fs.writeFileSync(listPath, files.join('\n'));
+    await new Promise((resolve, reject) => {
+      const tar = spawn('tar', ['-cf', tarPath, '-C', ROOT, '-T', listPath], {
+        cwd: ROOT,
+        windowsHide: true,
+      });
+      let errText = '';
+      tar.stderr.on('data', (d) => {
+        errText += d.toString();
+      });
+      tar.on('error', reject);
+      tar.on('close', (code) => {
+        if (code !== 0) reject(new Error(`本機打包失敗 (${code}) ${errText}`));
+        else resolve();
+      });
+    });
+    const size = fs.statSync(tarPath).size;
+    log(`本機封包 ${(size / 1048576).toFixed(1)} MB，開始傳送…`);
+    await new Promise((resolve, reject) => {
+      const cmd = `mkdir -p ${REMOTE} && tar -xf - -C ${REMOTE}`;
+      conn.exec(cmd, (err, stream) => {
+        if (err) return reject(err);
+        let stderr = '';
+        stream.on('data', (d) => process.stdout.write(d));
+        stream.on('close', (code) => {
+          try { fs.unlinkSync(listPath); } catch { /* ignore */ }
+          try { fs.unlinkSync(tarPath); } catch { /* ignore */ }
+          if (code !== 0) reject(new Error(`遠端解壓失敗 (${code}) ${stderr.slice(0, 400)}`));
+          else resolve();
+        });
+        stream.stderr.on('data', (d) => {
+          stderr += d.toString();
+        });
+        fs.createReadStream(tarPath).pipe(stream);
+      });
+    });
+    log('SSH 上傳完成');
   }
 
   // announcements 目錄權限（避免上傳附件 EACCES）
@@ -347,7 +400,7 @@ async function deployNas() {
   await exec(conn, `curl -s -o /dev/null -w "http=%{http_code}\\n" http://127.0.0.1:3847/`);
   await exec(
     conn,
-    `${DOCKER} exec ${CONTAINER} sh -c "grep -c getAnnouncementSchedule /app/server/system-settings.js; grep -c 僅供檢視 /app/public/js/app.js || true"`
+    `${DOCKER} exec ${CONTAINER} sh -c "grep -c getAnnouncementSchedule /app/server/system-settings.js; grep -c assets/index- /app/public/index.html || true"`
   );
   conn.end();
   log('[OK] NAS 部署完成');

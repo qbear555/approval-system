@@ -26,6 +26,16 @@ export const useSystemStore = defineStore('system', {
       }
     },
 
+    applyBranding(settings = {}) {
+      if (settings.companyName) this.companyName = settings.companyName;
+      if (settings.logoUrl) this.logoUrl = settings.logoUrl;
+      const href = this.logoUrl || '/img/argo-logo.png';
+      ['app-favicon', 'app-favicon-shortcut', 'app-favicon-apple'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.href = href;
+      });
+    },
+
     async fetchStats() {
       try {
         const res = await apiRequest('/api/stats');

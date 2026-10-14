@@ -61,20 +61,22 @@ const required = [
   'server/pdf/forms/purchase.js',
   'server/pdf/forms/credit.js',
   'server/pdf/forms/standard.js',
-  'public/js/pages-users.js',
-  'public/js/pages-audit.js',
-  'public/js/pages-departments.js',
-  'public/js/pages-settings.js',
-  'public/js/pages-line.js',
-  'public/js/pages-system.js',
-  'public/js/pages-request-fields.js',
-  'public/js/pages-request-table.js',
-  'public/js/pages-request-view.js',
-  'public/js/pages-request-list.js',
-  'public/js/pages-request-new.js',
-  'public/js/pages-request-detail.js',
+  'server/pdf/canvas-layouts.js',
+  'public/index.html',
 ];
 for (const rel of required) mustExist(rel);
+for (const rel of [
+  'public/js/app.js',
+  'public/js/pages-users.js',
+  'public/js/pages-request-detail.js',
+  'public/js/flow-editor.js',
+  'public/js/pdf-form-designer.js',
+  'public/js/rich-editor.js',
+  'public/js/canvas-layouts.js',
+  'public/vendor/pdfjs/pdf.min.js',
+]) {
+  if (fs.existsSync(path.join(ROOT, rel))) throw new Error(`${rel} 應已拆除（畫面已改 Vue）`);
+}
 if (fs.existsSync(path.join(ROOT, 'public/js/pages-admin.js'))) {
   throw new Error('pages-admin.js 應已拆走');
 }
@@ -128,14 +130,16 @@ child.stderr.on('data', (d) => process.stderr.write(d));
       await new Promise((r) => setTimeout(r, 250));
     }
     const home = await req('/');
+    if (!home.raw.includes('/assets/index-')) throw new Error('index.html 不是 Vue 入口');
     for (const name of [
       'tw-calendar.js',
       'rich-editor.js',
       'ui-helpers.js',
       'app.js',
       'flow-editor.js',
+      '/vendor/pdfjs/',
     ]) {
-      if (!home.raw.includes(name)) throw new Error('index.html 未載入 ' + name);
+      if (home.raw.includes(name)) throw new Error('index.html 仍載入經典腳本 ' + name);
     }
     const csp = String(home.headers['content-security-policy'] || '');
     if (!csp.includes("default-src 'self'")) throw new Error('缺少 CSP');

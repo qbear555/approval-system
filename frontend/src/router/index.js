@@ -6,7 +6,18 @@ const AppLayout = () => import('@/components/layout/AppLayout.vue');
 const LoginView = () => import('@/views/auth/LoginView.vue');
 const DashboardView = () => import('@/views/dashboard/DashboardView.vue');
 const RequestListView = () => import('@/views/requests/RequestListView.vue');
-const AppHost = () => import('@/views/host/AppHost.vue');
+const RequestDetailView = () => import('@/views/requests/RequestDetailView.vue');
+const NewRequestView = () => import('@/views/requests/NewRequestView.vue');
+const WorkflowsView = () => import('@/views/workflows/WorkflowsView.vue');
+const BackupsPage = () => import('@/views/system/BackupsPage.vue');
+const LeaveReportPage = () => import('@/views/reports/LeaveReportPage.vue');
+const AuditLogsPage = () => import('@/views/system/AuditLogsPage.vue');
+const UsersPage = () => import('@/views/organization/UsersPage.vue');
+const DepartmentsPage = () => import('@/views/organization/DepartmentsPage.vue');
+const SettingsPage = () => import('@/views/user/SettingsPage.vue');
+const LineSettingsView = () => import('@/views/system/LineSettingsView.vue');
+const SystemSettingsPage = () => import('@/views/system/SystemSettingsPage.vue');
+const NotFoundView = () => import('@/views/NotFoundView.vue');
 
 const router = createRouter({
   history: createWebHistory('/'),
@@ -47,79 +58,79 @@ const router = createRouter({
           component: RequestListView,
           meta: { title: '簽核紀錄', listType: 'records' },
         },
+        {
+          path: 'detail/:id',
+          name: 'Detail',
+          component: RequestDetailView,
+          meta: { title: '簽核詳情' },
+        },
+        {
+          path: 'new-request',
+          name: 'NewRequest',
+          component: NewRequestView,
+          meta: { title: '新增申請' },
+        },
+        {
+          path: 'workflows',
+          name: 'Workflows',
+          component: WorkflowsView,
+          meta: { title: '簽核流程' },
+        },
+        {
+          path: 'backups',
+          name: 'Backups',
+          component: BackupsPage,
+          meta: { title: '備份資料' },
+        },
+        {
+          path: 'leave-report',
+          name: 'LeaveReport',
+          component: LeaveReportPage,
+          meta: { title: '請假報表' },
+        },
+        {
+          path: 'audit-logs',
+          name: 'AuditLogs',
+          component: AuditLogsPage,
+          meta: { title: '稽核日誌' },
+        },
+        {
+          path: 'users',
+          name: 'Users',
+          component: UsersPage,
+          meta: { title: '成員名單' },
+        },
+        {
+          path: 'departments',
+          name: 'Departments',
+          component: DepartmentsPage,
+          meta: { title: '部門' },
+        },
+        {
+          path: 'settings',
+          name: 'Settings',
+          component: SettingsPage,
+          meta: { title: '帳號設定' },
+        },
+        {
+          path: 'line-settings',
+          name: 'LineSettings',
+          component: LineSettingsView,
+          meta: { title: 'LINE 通知' },
+        },
+        {
+          path: 'system-settings',
+          name: 'SystemSettings',
+          component: SystemSettingsPage,
+          meta: { title: '系統設定' },
+        },
+        {
+          path: ':pathMatch(.*)*',
+          name: 'NotFound',
+          component: NotFoundView,
+          meta: { title: '找不到頁面' },
+        },
       ],
-    },
-    {
-      path: '/detail/:id',
-      name: 'Detail',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '簽核詳情', hostPage: 'detail' },
-    },
-    {
-      path: '/new-request',
-      name: 'NewRequest',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '新增申請', hostPage: 'new-request' },
-    },
-    {
-      path: '/workflows',
-      name: 'Workflows',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '簽核流程', hostPage: 'workflows' },
-    },
-    {
-      path: '/backups',
-      name: 'Backups',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '備份資料', hostPage: 'backups' },
-    },
-    {
-      path: '/leave-report',
-      name: 'LeaveReport',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '請假報表', hostPage: 'leave-report' },
-    },
-    {
-      path: '/audit-logs',
-      name: 'AuditLogs',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '稽核日誌', hostPage: 'audit-logs' },
-    },
-    {
-      path: '/users',
-      name: 'Users',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '成員名單', hostPage: 'users' },
-    },
-    {
-      path: '/departments',
-      name: 'Departments',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '部門', hostPage: 'departments' },
-    },
-    {
-      path: '/settings',
-      name: 'Settings',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '帳號設定', hostPage: 'settings' },
-    },
-    {
-      path: '/line-settings',
-      name: 'LineSettings',
-      component: AppHost,
-      meta: { requiresAuth: true, title: 'LINE 通知', hostPage: 'line-settings' },
-    },
-    {
-      path: '/system-settings',
-      name: 'SystemSettings',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '系統設定', hostPage: 'system-settings' },
-    },
-    {
-      path: '/:pathMatch(.*)*',
-      name: 'AppHostFallback',
-      component: AppHost,
-      meta: { requiresAuth: true, title: '線上簽核' },
     },
   ],
 });

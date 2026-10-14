@@ -258,29 +258,10 @@ async function runAudit() {
 
   // 4. 前端單一 Vue 3 架構與核心模組驗證
   console.log('\n[4/5] 檢查前端統一 Vue 3 產物與核心計算模組...');
-  const coreScripts = [
-    'vendor/pdfjs/pdf.min.js',
-    'js/tw-calendar.js',
-    'js/rich-editor.js',
-    'js/ui-helpers.js',
-    'js/pdf-form-designer.js',
-    'js/flow-editor.js',
-    'js/app.js',
-    'js/pages-request-fields.js',
-    'js/pages-request-table.js',
-    'js/pages-request-view.js',
-    'js/pages-request-new.js',
-    'js/pages-request-detail.js',
-    'js/pages-workflows.js',
-    'js/pages-backups.js',
-    'js/pages-leave-report.js',
-    'js/pages-users.js',
-    'js/pages-departments.js',
-    'js/pages-audit.js',
-    'js/pages-settings.js',
-    'js/pages-line.js',
-    'js/pages-system.js',
-  ];
+  const indexHtml = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const coreScripts = indexHtml.includes('/assets/index-') && !indexHtml.includes('/vendor/pdfjs/')
+    ? ['index.html']
+    : ['index.html-missing-vue-entry'];
 
   let missingScriptCount = 0;
   for (const s of coreScripts) {

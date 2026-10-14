@@ -130,6 +130,14 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { useAuthStore } from '@/stores/auth';
+import { useUsersStore } from '@/stores/users';
+import { useToastStore } from '@/stores/toast';
+import { goPage, registerUi } from '@/lib/app-services';
+
+const auth = useAuthStore();
+const usersStore = useUsersStore();
+const toast = useToastStore();
 
 const visible = ref(false);
 const submitting = ref(false);
@@ -186,8 +194,8 @@ const submitBtnClass = computed(() => {
 });
 
 const candidateUsers = computed(() => {
-  const users = window.appState?.users || window.state?.users || [];
-  const myId = Number(window.appState?.user?.id || window.state?.user?.id || 0);
+  const users = usersStore.list || [];
+  const myId = Number(auth.user?.id || 0);
   return users.filter((u) => u.active !== 0 && Number(u.id) !== myId);
 });
 
@@ -236,11 +244,9 @@ async function apiCall(url, opts = {}) {
 }
 
 function showToast(msg, type = 'info') {
-  if (typeof window.__v2Toast === 'function') {
-    window.__v2Toast(msg, type);
-  } else if (typeof window.toast === 'function') {
-    window.toast(msg, type);
-  }
+  if (type === 'success') toast.success(msg);
+  else if (type === 'error') toast.error(msg);
+  else toast.info(msg);
 }
 
 function openCosign(request, onDone) {
@@ -333,9 +339,7 @@ async function handleSubmit() {
       showToast(res.message || '已成功退回', 'success');
       close();
       if (typeof onDoneCallback === 'function') onDoneCallback(res);
-      else if (typeof window.navigate === 'function') {
-        window.navigate('detail', { id: reqId });
-      }
+      else goPage('detail', { id: reqId });
     }
   } catch (err) {
     showToast(err.message, 'error');
@@ -351,15 +355,16 @@ function handleKeyDown(e) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown);
-  if (typeof window !== 'undefined') {
-    window.__openVueCosignModal = (req, done) => openCosign(req, done);
-    window.__openVueForwardModal = (req, done) => openForward(req, done);
-    window.__openVueReturnModal = (req, detail, done) => openReturn(req, detail, done);
-  }
+  registerUi({
+    cosign: openCosign,
+    forward: openForward,
+    returnTo: openReturn,
+  });
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyDown);
+  registerUi({ cosign: null, forward: null, returnTo: null });
 });
 
 defineExpose({ openCosign, openForward, openReturn, close });

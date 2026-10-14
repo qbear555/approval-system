@@ -83,6 +83,8 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { getPdfjs } from '@/lib/pdfjs';
+import { registerUi } from '@/lib/app-services';
 
 const visible = ref(false);
 const loading = ref(false);
@@ -102,6 +104,10 @@ let currentRenderPromise = null;
 
 function getAuthToken() {
   return localStorage.getItem('approval_token') || '';
+}
+
+function ensurePdfJs() {
+  return getPdfjs();
 }
 
 async function fetchAttachment(id) {
@@ -124,19 +130,12 @@ async function fetchAttachment(id) {
 }
 
 async function renderPdfWithPdfJs(blob, container) {
-  if (!window.pdfjsLib) {
-    container.innerHTML = '<div class="error-msg" style="margin:16px;text-align:center">PDF.js 函式庫尚未載入，請按上方「切換原生檢視」或「下載」。</div>';
-    return;
-  }
-  if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
-  }
-
+  const pdfjsLib = await ensurePdfJs();
   try {
     renderingCanvas.value = true;
     container.innerHTML = '';
     const arrayBuffer = await blob.arrayBuffer();
-    const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
     const pdf = await loadingTask.promise;
 
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
@@ -218,6 +217,7 @@ async function open(id, name = '') {
     loading.value = false;
 
     if (isPdf.value && mode.value === 'canvas') {
+      await ensurePdfJs();
       await nextTick();
       if (canvasContainerRef.value) {
         await renderPdfWithPdfJs(finalBlob, canvasContainerRef.value);
@@ -226,6 +226,44 @@ async function open(id, name = '') {
   } catch (err) {
     loading.value = false;
     error.value = err.message || '無法開啟附件';
+  }
+}
+
+async function openBlob(blob, name = '') {
+  attId.value = null;
+  fileName.value = name || '檔案預覽';
+  visible.value = true;
+  loading.value = true;
+  error.value = '';
+  renderingCanvas.value = false;
+  mode.value = 'canvas';
+
+  try {
+    const fname = String(name || '').toLowerCase();
+    const ct = String(blob?.type || '').toLowerCase();
+    isPdf.value = ct.includes('pdf') || fname.endsWith('.pdf');
+    isImg.value = ct.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(fname);
+
+    let finalBlob = blob;
+    if (isPdf.value && (!finalBlob.type || !finalBlob.type.includes('pdf'))) {
+      finalBlob = new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
+    }
+    activeBlob = finalBlob;
+    if (blobUrl.value) URL.revokeObjectURL(blobUrl.value);
+    blobUrl.value = URL.createObjectURL(finalBlob);
+    directUrl.value = blobUrl.value;
+    loading.value = false;
+
+    if (isPdf.value && mode.value === 'canvas') {
+      await ensurePdfJs();
+      await nextTick();
+      if (canvasContainerRef.value) {
+        await renderPdfWithPdfJs(finalBlob, canvasContainerRef.value);
+      }
+    }
+  } catch (err) {
+    loading.value = false;
+    error.value = err.message || '無法預覽檔案';
   }
 }
 
@@ -279,18 +317,19 @@ function handleKeyDown(e) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown);
-  if (typeof window !== 'undefined') {
-    window.__openVueAttachmentModal = (id, name) => open(id, name);
-    window.__closeVueAttachmentModal = () => close();
-  }
+  registerUi({
+    attachment: (id, name) => open(id, name),
+    attachmentBlob: (blob, name) => openBlob(blob, name),
+  });
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyDown);
+  registerUi({ attachment: null, attachmentBlob: null });
   if (blobUrl.value) URL.revokeObjectURL(blobUrl.value);
 });
 
-defineExpose({ open, close });
+defineExpose({ open, openBlob, close });
 </script>
 
 <style scoped>
