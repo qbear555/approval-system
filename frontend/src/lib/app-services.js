@@ -6,6 +6,7 @@ const modals = {
   cosign: null,
   forward: null,
   returnTo: null,
+  onlyOffice: null,
 };
 
 export function bindRouter(r) {
@@ -69,3 +70,10 @@ export function openReturnModal(request, detail, onDone) {
   modals.returnTo(request, detail, onDone);
   return true;
 }
+
+export function openOnlyOffice(attachmentId, requestId, onDone) {
+  if (typeof modals.onlyOffice !== 'function') return false;
+  modals.onlyOffice(attachmentId, requestId, onDone);
+  return true;
+}
+

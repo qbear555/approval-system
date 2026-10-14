@@ -4,4 +4,5 @@ export {
   openCosignModal,
   openForwardModal,
   openReturnModal,
+  openOnlyOffice,
 } from '@/lib/app-services';

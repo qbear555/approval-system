@@ -305,7 +305,7 @@ import {
   voidStepsPathText,
   stepAssigneeLabel,
 } from '@/lib/request-detail';
-import { openCosignModal, openForwardModal, openReturnModal } from '@/composables/useApprovalActions';
+import { openCosignModal, openForwardModal, openReturnModal, openOnlyOffice } from '@/composables/useApprovalActions';
 import FormDataViewer from '@/components/form/FormDataViewer.vue';
 import FormFields from '@/components/form/FormFields.vue';
 import AttachmentList from '@/components/form/AttachmentList.vue';
@@ -934,12 +934,20 @@ async function delRequest() {
 
 async function openOffice(att) {
   try {
-    if (typeof window.openOnlyOfficeEditor === 'function') {
-      await window.openOnlyOfficeEditor(att.id, request.value.id);
+    const ok = openOnlyOffice(att.id, request.value?.id, () => {
+      if (request.value?.id) {
+        loadDetail(request.value.id);
+      }
+    });
+    if (!ok && typeof window.openOnlyOfficeEditor === 'function') {
+      window.openOnlyOfficeEditor(att.id, request.value?.id, () => {
+        if (request.value?.id) loadDetail(request.value.id);
+      });
       return;
     }
-    await apiRequest(`/api/onlyoffice/editor/${att.id}`);
-    toast.info('請先至其他管理頁載入編輯器，或改以下載後開啟');
+    if (!ok) {
+      toast.error('OnlyOffice 模組尚未就緒，請稍後再試或改用下載開啟');
+    }
   } catch (e) {
     toast.error(e.message || '無法開啟 OnlyOffice');
   }

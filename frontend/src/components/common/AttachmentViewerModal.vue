@@ -73,8 +73,18 @@
 
         <!-- 不支援內嵌的檔案格式 -->
         <div v-else class="att-state-box muted">
-          <p>此格式不支援瀏覽器內嵌預覽，請使用右上角「下載」至本機開啟。</p>
-          <button type="button" class="btn primary" @click="downloadFile">立即下載</button>
+          <p>此格式不支援直接預覽，請使用右上角「下載」至本機開啟。</p>
+          <div style="display:flex;gap:10px;justify-content:center;margin-top:10px">
+            <button
+              v-if="isOfficeName(fileName) && attId"
+              type="button"
+              class="btn primary"
+              @click="openInOnlyOffice"
+            >
+              📄 使用 OnlyOffice 線上開啟
+            </button>
+            <button type="button" class="btn outline" @click="downloadFile">立即下載</button>
+          </div>
         </div>
       </div>
     </div>
@@ -84,7 +94,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { getPdfjs } from '@/lib/pdfjs';
-import { registerUi } from '@/lib/app-services';
+import { registerUi, openOnlyOffice } from '@/lib/app-services';
 
 const visible = ref(false);
 const loading = ref(false);
@@ -308,6 +318,18 @@ function downloadFile() {
     window.location.href = `/api/attachments/${attId.value}`;
   }
 }
+
+function isOfficeName(name) {
+  return /\.(docx?|xlsx?|pptx?|odt|ods|odp|csv|rtf)$/i.test(String(name || ''));
+}
+
+function openInOnlyOffice() {
+  if (!attId.value) return;
+  const targetId = attId.value;
+  close();
+  openOnlyOffice(targetId);
+}
+
 
 function handleKeyDown(e) {
   if (visible.value && e.key === 'Escape') {

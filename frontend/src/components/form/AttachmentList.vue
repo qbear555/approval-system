@@ -35,7 +35,7 @@ const props = defineProps({
   title: { type: String, default: '附件' },
 });
 
-defineEmits(['office']);
+const emit = defineEmits(['office']);
 
 const list = computed(() => props.attachments || []);
 const canEdit = computed(() => props.requestStatus === 'pending' || props.requestStatus === 'draft');
@@ -58,6 +58,10 @@ function fmtSize(n) {
 }
 
 function open(a) {
+  if (props.onlyOfficeEnabled && isOffice(a.original_name)) {
+    emit('office', a);
+    return;
+  }
   if (!openAttachmentViewer(a.id, a.original_name || '')) {
     window.open(`/api/attachments/${a.id}`, '_blank', 'noopener');
   }
