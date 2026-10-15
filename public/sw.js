@@ -3,7 +3,7 @@
  * - 靜態 App Shell 與字型快取
  * - API 請求絕對維持 Network-First，保障簽核狀態與權限即時性
  */
-const CACHE_NAME = 'approval-pwa-v1';
+const CACHE_NAME = 'approval-pwa-v2';
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
