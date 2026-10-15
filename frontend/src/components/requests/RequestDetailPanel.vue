@@ -169,7 +169,7 @@
         <div v-if="usePdfFormView" class="pdf-form-view">
           <div class="pdf-form-toolbar">
             <strong>申請單（PDF）</strong>
-            <span class="muted" style="font-size:0.82rem">簽核中以正式 PDF 版面檢視</span>
+            <span class="muted" style="font-size:0.82rem">{{ request.status === 'draft' ? '草稿階段以正式 PDF 版面檢視' : '簽核中以正式 PDF 版面檢視' }}</span>
             <button type="button" class="btn outline sm" style="margin-left:auto" @click="loadPdfPreview">重新載入</button>
             <button type="button" class="btn outline sm" :disabled="!pdfObjectUrl" @click="openPdfTab">新分頁開啟</button>
           </div>
@@ -323,7 +323,7 @@ import {
   voidStepsPathText,
   stepAssigneeLabel,
 } from '@/lib/request-detail';
-import { openCosignModal, openForwardModal, openReturnModal, openOnlyOffice } from '@/composables/useApprovalActions';
+import { openCosignModal, openForwardModal, openReturnModal, openOnlyOffice, openAttachmentBlob } from '@/composables/useApprovalActions';
 import FormDataViewer from '@/components/form/FormDataViewer.vue';
 import FormFields from '@/components/form/FormFields.vue';
 import AttachmentList from '@/components/form/AttachmentList.vue';
@@ -469,7 +469,7 @@ const financeBanner = computed(() => {
 const usePdfFormView = computed(() => {
   const r = request.value;
   if (!r) return false;
-  return r.status === 'pending' || r.pdfLayout?.type === 'pdf_template';
+  return r.status === 'pending' || r.status === 'draft' || r.pdfLayout?.type === 'pdf_template';
 });
 
 const approverFields = computed(() =>
@@ -505,6 +505,7 @@ const headerButtons = computed(() => {
     ? `（代理 ${detail.value.actingAsProxy.principal.name}）`
     : '';
   if (isOwnDraft.value) {
+    out.push({ id: 'preview-pdf', label: '📄 PDF 檢視', cls: 'btn outline', run: previewPdfModal });
     out.push({ id: 'edit-draft', label: '繼續編輯草稿', cls: 'btn primary', run: editDraft });
     out.push({ id: 'submit-draft', label: '送出申請', cls: 'btn success', run: submitDraft });
   }
@@ -833,6 +834,18 @@ async function loadPdfPreview() {
 }
 function openPdfTab() {
   if (pdfObjectUrl.value) window.open(pdfObjectUrl.value, '_blank', 'noopener');
+}
+
+async function previewPdfModal() {
+  if (!request.value?.id) return;
+  try {
+    toast.info('正在產生草稿 PDF 預覽…');
+    const blob = await fetchRequestPdf(request.value.id, { preview: true });
+    const name = `${request.value.title || '申請單'}_#${request.value.id}.pdf`;
+    openAttachmentBlob(blob, name);
+  } catch (e) {
+    toast.error(e.message || 'PDF 預覽失敗');
+  }
 }
 
 async function ackFinalNotify() {

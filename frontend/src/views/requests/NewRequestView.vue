@@ -356,6 +356,16 @@
 
           <div class="form-actions" style="flex-wrap:wrap;gap:8px">
             <button type="button" class="btn outline" :disabled="busy" @click="submitRequest(true)">儲存草稿</button>
+            <button
+              v-if="editingDraftId"
+              type="button"
+              class="btn outline"
+              :disabled="busy"
+              title="線上檢視此草稿產生的 PDF 表單"
+              @click="viewDraftPdf"
+            >
+              📄 PDF 檢視
+            </button>
             <button type="submit" class="btn primary" :disabled="busy">
               {{ busy ? '處理中…' : '送出申請' }}
             </button>
@@ -773,7 +783,7 @@ function buildBody({ asDraft }) {
   return body;
 }
 
-async function submitRequest(asDraft) {
+async function submitRequest(asDraft, opts = {}) {
   busy.value = true;
   try {
     const body = buildBody({ asDraft });
@@ -787,7 +797,9 @@ async function submitRequest(asDraft) {
     if (asDraft) {
       if (data.request?.id) editingDraftId.value = data.request.id;
       draftHint.value = `草稿 #${editingDraftId.value} 已儲存`;
-      toast.success(data.message || '草稿已儲存');
+      if (!opts.silentToast) {
+        toast.success(data.message || '草稿已儲存');
+      }
       pendingFiles.value = [];
       linkedRequests.value = [];
       const req = data.request || data;
@@ -801,14 +813,35 @@ async function submitRequest(asDraft) {
         }
       }
       router.replace({ path: '/new-request', query: { draftId: String(editingDraftId.value) } }).catch(() => {});
+      return data;
     } else {
       toast.success(data.message || '申請已送出');
       const id = data.request?.id;
       if (id) router.push(`/detail/${id}`);
       else router.push('/mine');
+      return data;
     }
   } catch (e) {
     toast.error(e.message || (asDraft ? '儲存草稿失敗' : '送出申請失敗'));
+    return null;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function viewDraftPdf() {
+  if (busy.value) return;
+  try {
+    const res = await submitRequest(true, { silentToast: true });
+    if (!res || !editingDraftId.value) return;
+
+    busy.value = true;
+    toast.info('正在產生草稿 PDF 預覽…');
+    const blob = await fetchRequestPdf(editingDraftId.value, { preview: true });
+    const name = `${title.value || selected.value?.name || '申請單'}_草稿#${editingDraftId.value}.pdf`;
+    openAttachmentBlob(blob, name);
+  } catch (e) {
+    toast.error(e.message || '草稿 PDF 載入失敗');
   } finally {
     busy.value = false;
   }
