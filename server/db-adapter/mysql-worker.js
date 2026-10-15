@@ -15,17 +15,42 @@ try {
   throw e;
 }
 
-let conn;
+let pool;
 
-async function getConn() {
-  if (conn) return conn;
+async function getPool() {
+  if (pool) return pool;
   const cfg = workerData || {};
-  conn = await mysql.createConnection({
+  const dbName = String(cfg.database || 'approval').replace(/[^A-Za-z0-9_]/g, '') || 'approval';
+
+  let initConn;
+  try {
+    initConn = await mysql.createConnection({
+      host: cfg.host,
+      port: cfg.port,
+      user: cfg.user,
+      password: cfg.password,
+      connectTimeout: 8000,
+    });
+    await initConn.query(
+      `CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+    );
+  } catch (e) {
+    if (!/ER_DBACCESS_DENIED|ER_SPECIFIC_ACCESS_DENIED|ER_DB_CREATE_EXISTS/i.test(e.code || e.message || '')) {
+      console.warn('[db:mysql-worker] create db warning:', e.message);
+    }
+  } finally {
+    if (initConn) await initConn.end().catch(() => {});
+  }
+
+  pool = mysql.createPool({
     host: cfg.host,
     port: cfg.port,
     user: cfg.user,
     password: cfg.password,
-    multipleStatements: true,
+    database: dbName,
+    waitForConnections: true,
+    connectionLimit: 4,
+    queueLimit: 0,
     timezone: '+08:00',
     dateStrings: true,
     decimalNumbers: true,
@@ -34,54 +59,51 @@ async function getConn() {
     bigNumberStrings: false,
     connectTimeout: 8000,
   });
-  await conn.query("SET time_zone = '+08:00'");
-  await conn.query('SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci');
-  const dbName = String(cfg.database || 'approval').replace(/[^A-Za-z0-9_]/g, '');
-  try {
-    await conn.query(
-      `CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-    );
-  } catch (e) {
-    if (!/ER_DBACCESS_DENIED|ER_SPECIFIC_ACCESS_DENIED|ER_DB_CREATE_EXISTS/i.test(e.code || e.message || '')) {
-      throw e;
-    }
-  }
-  await conn.query(`USE \`${dbName}\``);
-  return conn;
+
+  return pool;
 }
 
-if (workerData && workerData.readyLock) {
-  const lock = new Int32Array(workerData.readyLock);
-  Atomics.store(lock, 0, 1);
-  Atomics.notify(lock, 0);
-}
+(async () => {
+  try {
+    const p = await getPool();
+    await p.query('SELECT 1');
+  } catch (err) {
+    console.error('[db:mysql-worker] pool startup error:', err.message);
+  } finally {
+    if (workerData && workerData.readyLock) {
+      const lock = new Int32Array(workerData.readyLock);
+      Atomics.store(lock, 0, 1);
+      Atomics.notify(lock, 0);
+    }
+  }
+})();
 
 parentPort.on('message', async (msg) => {
   const { method, sql, params, lock, port, table } = msg;
   try {
-    const c = await getConn();
+    const p = await getPool();
     let result;
     if (method === 'exec') {
-      if (sql && String(sql).trim()) await c.query(sql);
+      if (sql && String(sql).trim()) await p.query(sql);
       result = { ok: true };
     } else if (method === 'run') {
-      const [res] = await c.execute(sql, params || []);
+      const [res] = await p.execute(sql, params || []);
       result = {
         changes: Number(res.affectedRows || 0),
         lastInsertRowid: Number(res.insertId || 0),
       };
     } else if (method === 'get') {
-      const [rows] = await c.execute(sql, params || []);
+      const [rows] = await p.execute(sql, params || []);
       result = rows[0];
     } else if (method === 'all') {
-      const [rows] = await c.execute(sql, params || []);
+      const [rows] = await p.execute(sql, params || []);
       result = rows;
     } else if (method === 'showCreate') {
-      const [rows] = await c.query(`SHOW CREATE TABLE \`${String(table).replace(/[^A-Za-z0-9_]/g, '')}\``);
+      const [rows] = await p.query(`SHOW CREATE TABLE \`${String(table).replace(/[^A-Za-z0-9_]/g, '')}\``);
       result = rows[0] && rows[0]['Create Table'] ? rows[0]['Create Table'] : '';
     } else if (method === 'close') {
-      if (conn) await conn.end();
-      conn = null;
+      if (pool) await pool.end().catch(() => {});
+      pool = null;
       result = { ok: true };
     } else {
       throw new Error('未知 MySQL worker 方法：' + method);

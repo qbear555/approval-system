@@ -93,7 +93,7 @@ async function main() {
   const cleanupCmd = `rm -f ${REMOTE_DIR}/temp_deploy_nas.tar.gz`;
   const unpackRes = await execRemote(
     conn,
-    `tar -xzf ${REMOTE_DIR}/temp_deploy_nas.tar.gz -C ${REMOTE_DIR} && ${cleanupCmd}`,
+    `rm -rf ${REMOTE_DIR}/public/assets && tar -xzf ${REMOTE_DIR}/temp_deploy_nas.tar.gz -C ${REMOTE_DIR} && ${cleanupCmd}`,
     true
   );
   if (unpackRes.c !== 0) {

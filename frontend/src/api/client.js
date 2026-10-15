@@ -55,6 +55,12 @@ export async function apiRequest(endpoint, options = {}) {
       throw new Error('登入憑證已過期，請重新登入');
     }
 
+    // 自動更新滑動憑證（Sliding Session）
+    const renewedToken = res.headers.get('x-renewed-token') || res.headers.get('X-Renewed-Token');
+    if (renewedToken) {
+      localStorage.setItem('approval_token', renewedToken);
+    }
+
     if (expectBlob || returnMeta) {
       if (!res.ok) {
         const data = await res.json().catch(() => null);

@@ -54,6 +54,27 @@ function authMiddleware(req, res, next) {
   }
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+
+    // 滑動工作階段（Sliding Session）：有效期限小於 24 小時（86400 秒）時自動簽發新權杖
+    if (req.user && req.user.exp) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const remainingSec = req.user.exp - nowSec;
+      if (remainingSec > 0 && remainingSec < 86400) {
+        try {
+          const renewed = signToken({
+            id: req.user.id,
+            username: req.user.username,
+            role: req.user.role,
+            name: req.user.name,
+          });
+          res.setHeader('X-Renewed-Token', renewed);
+          res.setHeader('Access-Control-Expose-Headers', 'X-Renewed-Token, Content-Disposition');
+        } catch {
+          /* ignore token renewal error */
+        }
+      }
+    }
+
     next();
   } catch {
     return res.status(401).json({ error: '登入已過期，請重新登入' });

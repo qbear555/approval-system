@@ -1017,7 +1017,11 @@ const PORT = process.env.PORT || 3847;
 // 反向代理／HTTPS 時正確辨識 req.protocol（OnlyOffice 同源腳本用）
 app.set('trust proxy', 1);
 
-app.use(cors());
+app.use(
+  cors({
+    exposedHeaders: ['X-Renewed-Token', 'Content-Disposition'],
+  })
+);
 
 /** 安全標頭（內網也套用；OnlyOffice 啟用時放行文件伺服器） */
 const OO_DOCS_URL = String(process.env.ONLYOFFICE_DOCS_URL || '').replace(/\/$/, '');
@@ -1037,8 +1041,16 @@ function onlyOfficeCspExtras(docsUrl) {
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Access-Control-Expose-Headers', 'X-Renewed-Token, Content-Disposition');
+
+  // HSTS 嚴格傳輸安全標頭（HTTPS 環境自動生效）
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+
   // Document Server 自己的 HTML／JS 不能套簽核 CSP（缺 unsafe-eval／wasm 會空白）
   if (onlyoffice.isEnabled() && onlyoffice.isDocsProxyPath(req.url || req.path)) {
     return next();
@@ -1070,12 +1082,12 @@ app.use((req, res, next) => {
 app.use(onlyoffice.createDocsProxy());
 app.use(express.json({ limit: '2mb' }));
 
-app.get(['/health', '/api/health'], (req, res) => {
+app.get(['/health', '/api/health'], async (req, res) => {
   try {
-    db.prepare('SELECT 1 AS ok').get();
+    await db.getAsync('SELECT 1 AS ok');
     res.json({ ok: true, status: 'ok' });
   } catch (e) {
-    res.status(503).json({ ok: false, status: 'db_error' });
+    res.status(503).json({ ok: false, status: 'db_error', message: e.message });
   }
 });
 
@@ -4171,54 +4183,50 @@ function isRequestRelatedToUser(row, userId) {
   return false;
 }
 
-app.get('/api/requests', authMiddleware, (req, res) => {
+app.get('/api/requests', authMiddleware, async (req, res) => {
   const filter = req.query.filter || 'related'; // related | mine | pending_me | done | all
   const uid = req.user.id;
   let rows;
 
   if (filter === 'mine') {
     // 本人申請或我代申請的單
-    rows = db
-      .prepare(
-        `SELECT r.*, w.name AS workflow_name, u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
-         WHERE r.requester_id = ? OR r.submitted_by = ?
-         ORDER BY r.updated_at DESC`
-      )
-      .all(uid, uid);
+    rows = await db.allAsync(
+      `SELECT r.*, w.name AS workflow_name, u.name AS requester_name
+       FROM approval_requests r
+       JOIN workflows w ON w.id = r.workflow_id
+       JOIN users u ON u.id = r.requester_id
+       WHERE r.requester_id = ? OR r.submitted_by = ?
+       ORDER BY r.updated_at DESC`,
+      uid,
+      uid
+    );
   } else if (filter === 'pending_finance_confirm') {
     // 待財務部授信額度建檔確認（總經理已核准，財務部尚未點確認）
-    rows = db
-      .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
-         WHERE r.status = 'approved'
-           AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-           AND r.id NOT IN (
-             SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
-           )
-         ORDER BY r.completed_at DESC, r.updated_at DESC`
-      )
-      .all();
+    rows = await db.allAsync(
+      `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
+              u.name AS requester_name
+       FROM approval_requests r
+       JOIN workflows w ON w.id = r.workflow_id
+       JOIN users u ON u.id = r.requester_id
+       WHERE r.status = 'approved'
+         AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
+         AND r.id NOT IN (
+           SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
+         )
+       ORDER BY r.completed_at DESC, r.updated_at DESC`
+    );
   } else if (filter === 'pending_me') {
     // 待我簽核（使用送出時步驟快照，勿用流程模板）
-    const allPending = db
-      .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
-         WHERE r.status = 'pending'
-         ORDER BY r.updated_at DESC`
-      )
-      .all();
-    rows = allPending.filter((r) => {
+    const allPending = await db.allAsync(
+      `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
+              u.name AS requester_name
+       FROM approval_requests r
+       JOIN workflows w ON w.id = r.workflow_id
+       JOIN users u ON u.id = r.requester_id
+       WHERE r.status = 'pending'
+       ORDER BY r.updated_at DESC`
+    );
+    rows = (allPending || []).filter((r) => {
       const steps = loadStepsForRequest(r);
       const step = findStepByOrder(steps, r.current_step);
       return canUserApproveStep(uid, step, r.id);
@@ -4226,49 +4234,46 @@ app.get('/api/requests', authMiddleware, (req, res) => {
 
     // 財務部：併入待建檔確認的已核准信用額度單
     if (isFinanceUser(req.user)) {
-      const finReqs = db
-        .prepare(
-          `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                  u.name AS requester_name
-           FROM approval_requests r
-           JOIN workflows w ON w.id = r.workflow_id
-           JOIN users u ON u.id = r.requester_id
-           WHERE r.status = 'approved'
-             AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-             AND r.id NOT IN (
-               SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
-             )
-           ORDER BY r.completed_at DESC, r.updated_at DESC`
-        )
-        .all();
-      const existingIds = new Set(rows.map((x) => x.id));
-      for (const fr of finReqs) {
-        if (!existingIds.has(fr.id)) rows.push(fr);
-      }
-    }
-
-    // 申請人待確認財務建檔
-    const ackReqs = db
-      .prepare(
+      const finReqs = await db.allAsync(
         `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
                 u.name AS requester_name
          FROM approval_requests r
          JOIN workflows w ON w.id = r.workflow_id
          JOIN users u ON u.id = r.requester_id
          WHERE r.status = 'approved'
-           AND r.requester_id = ?
            AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-           AND r.id IN (
+           AND r.id NOT IN (
              SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
            )
-           AND r.id NOT IN (
-             SELECT request_id FROM approval_actions WHERE step_name = '申請人建檔確認'
-           )
          ORDER BY r.completed_at DESC, r.updated_at DESC`
-      )
-      .all(uid);
+      );
+      const existingIds = new Set(rows.map((x) => x.id));
+      for (const fr of (finReqs || [])) {
+        if (!existingIds.has(fr.id)) rows.push(fr);
+      }
+    }
+
+    // 申請人待確認財務建檔
+    const ackReqs = await db.allAsync(
+      `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
+              u.name AS requester_name
+       FROM approval_requests r
+       JOIN workflows w ON w.id = r.workflow_id
+       JOIN users u ON u.id = r.requester_id
+       WHERE r.status = 'approved'
+         AND r.requester_id = ?
+         AND (IFNULL(w.name, '') LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
+         AND r.id IN (
+           SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
+         )
+         AND r.id NOT IN (
+           SELECT request_id FROM approval_actions WHERE step_name = '申請人建檔確認'
+         )
+       ORDER BY r.completed_at DESC, r.updated_at DESC`,
+      uid
+    );
     const existingIdsAck = new Set(rows.map((x) => x.id));
-    for (const ar of ackReqs) {
+    for (const ar of (ackReqs || [])) {
       if (!existingIdsAck.has(ar.id)) rows.push(ar);
     }
 
@@ -4298,47 +4303,43 @@ app.get('/api/requests', authMiddleware, (req, res) => {
     }));
   } else if (filter === 'done') {
     // 已結案：預設僅本人相關；records_all／leave_delete（請假）／管理員可擴大範圍
-    const allDone = db
-      .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
-         WHERE r.status IN ('approved', 'rejected', 'cancelled')
-         ORDER BY r.completed_at DESC, r.updated_at DESC
-         LIMIT 800`
-      )
-      .all();
+    const allDone = await db.allAsync(
+      `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
+              u.name AS requester_name
+       FROM approval_requests r
+       JOIN workflows w ON w.id = r.workflow_id
+       JOIN users u ON u.id = r.requester_id
+       WHERE r.status IN ('approved', 'rejected', 'cancelled')
+       ORDER BY r.completed_at DESC, r.updated_at DESC
+       LIMIT 800`
+    );
     const seeAll =
       req.user.role === 'admin' || userHasPermission(uid, 'records_all');
     const seeAllLeave = canDeleteLeaveRequests(req.user);
     rows = seeAll
       ? allDone
-      : allDone.filter(
+      : (allDone || []).filter(
           (r) =>
             isRequestRelatedToUser(r, uid) ||
             (seeAllLeave && isLeaveApprovalRequest(r))
         );
   } else {
     // related / all：預設僅本人相關；records_all／leave_delete（請假）／管理員可擴大範圍
-    const candidates = db
-      .prepare(
-        `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
-                u.name AS requester_name
-         FROM approval_requests r
-         JOIN workflows w ON w.id = r.workflow_id
-         JOIN users u ON u.id = r.requester_id
-         ORDER BY r.updated_at DESC
-         LIMIT 800`
-      )
-      .all();
+    const candidates = await db.allAsync(
+      `SELECT r.*, w.name AS workflow_name, w.steps_json, r.steps_snapshot_json,
+              u.name AS requester_name
+       FROM approval_requests r
+       JOIN workflows w ON w.id = r.workflow_id
+       JOIN users u ON u.id = r.requester_id
+       ORDER BY r.updated_at DESC
+       LIMIT 800`
+    );
     const seeAll =
       req.user.role === 'admin' || userHasPermission(uid, 'records_all');
     const seeAllLeave = canDeleteLeaveRequests(req.user);
     rows = seeAll
       ? candidates
-      : candidates.filter(
+      : (candidates || []).filter(
           (r) =>
             isRequestRelatedToUser(r, uid) ||
             (seeAllLeave && isLeaveApprovalRequest(r))
@@ -7090,77 +7091,97 @@ app.post('/api/requests/bulk-delete', authMiddleware, (req, res) => {
   });
 });
 
-// Dashboard stats
-app.get('/api/stats', authMiddleware, (req, res) => {
-  const uid = req.user.id;
-  const minePending = db
-    .prepare(`SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'pending'`)
-    .get(uid).c;
-  const mineDone = db
-    .prepare(`SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'approved'`)
-    .get(uid).c;
-  // 必須用 steps_snapshot（實際解析後簽核人），不可只用流程模板
-  const allPending = db
-    .prepare(
-      `SELECT r.*, w.steps_json, r.steps_snapshot_json FROM approval_requests r
-       JOIN workflows w ON w.id = r.workflow_id WHERE r.status = 'pending'`
-    )
-    .all();
-  const pendingMe = allPending.filter((r) => {
-    const steps = loadStepsForRequest(r);
-    const step = findStepByOrder(steps, r.current_step);
-    return canUserApproveStep(uid, step, r.id);
-  }).length;
-  const users = db.prepare(`SELECT COUNT(*) AS c FROM users WHERE active = 1`).get().c;
-  const workflows = db.prepare(`SELECT COUNT(*) AS c FROM workflows WHERE active = 1`).get().c;
-  const isFinance = isFinanceUser(req.user);
-  const pendingFinanceConfirm = isFinance
-    ? db
-        .prepare(
-          `SELECT COUNT(*) AS c FROM approval_requests r
-           JOIN workflows w ON w.id = r.workflow_id
-           WHERE r.status = 'approved'
-             AND (w.name LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-             AND r.id NOT IN (
-               SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
-             )`
-        )
-        .get().c
-    : 0;
-  const pendingApplicantAck = db
-    .prepare(
-      `SELECT COUNT(*) AS c FROM approval_requests r
-       JOIN workflows w ON w.id = r.workflow_id
-       WHERE r.status = 'approved'
-         AND r.requester_id = ?
-         AND (w.name LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
-         AND r.id IN (
-           SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
-         )
-         AND r.id NOT IN (
-           SELECT request_id FROM approval_actions WHERE step_name = '申請人建檔確認'
-         )`
-    )
-    .get(uid).c;
+// Dashboard stats (Parallel Async Non-blocking)
+app.get('/api/stats', authMiddleware, async (req, res) => {
+  try {
+    const uid = req.user.id;
+    const isFinance = isFinanceUser(req.user);
 
-  const pendingFinalNotify = getPendingFinalNotifyCount(uid);
+    const [
+      minePendingRow,
+      mineDoneRow,
+      allPending,
+      usersRow,
+      workflowsRow,
+      pendingFinanceConfirmRow,
+      pendingApplicantAckRow,
+    ] = await Promise.all([
+      db.getAsync(
+        `SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'pending'`,
+        uid
+      ),
+      db.getAsync(
+        `SELECT COUNT(*) AS c FROM approval_requests WHERE requester_id = ? AND status = 'approved'`,
+        uid
+      ),
+      db.allAsync(
+        `SELECT r.*, w.steps_json, r.steps_snapshot_json FROM approval_requests r
+         JOIN workflows w ON w.id = r.workflow_id WHERE r.status = 'pending'`
+      ),
+      db.getAsync(`SELECT COUNT(*) AS c FROM users WHERE active = 1`),
+      db.getAsync(`SELECT COUNT(*) AS c FROM workflows WHERE active = 1`),
+      isFinance
+        ? db.getAsync(
+            `SELECT COUNT(*) AS c FROM approval_requests r
+             JOIN workflows w ON w.id = r.workflow_id
+             WHERE r.status = 'approved'
+               AND (w.name LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
+               AND r.id NOT IN (
+                 SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
+               )`
+          )
+        : Promise.resolve({ c: 0 }),
+      db.getAsync(
+        `SELECT COUNT(*) AS c FROM approval_requests r
+         JOIN workflows w ON w.id = r.workflow_id
+         WHERE r.status = 'approved'
+           AND r.requester_id = ?
+           AND (w.name LIKE '%信用額度%' OR r.title LIKE '%信用額度%')
+           AND r.id IN (
+             SELECT request_id FROM approval_actions WHERE step_name = '財務部額度建檔確認'
+           )
+           AND r.id NOT IN (
+             SELECT request_id FROM approval_actions WHERE step_name = '申請人建檔確認'
+           )`,
+        uid
+      ),
+    ]);
 
-  res.json({
-    stats: {
-      minePending,
-      mineDone,
-      pendingMe:
-        pendingMe +
-        (isFinance ? pendingFinanceConfirm : 0) +
-        pendingApplicantAck +
+    const minePending = Number(minePendingRow?.c || 0);
+    const mineDone = Number(mineDoneRow?.c || 0);
+    const users = Number(usersRow?.c || 0);
+    const workflows = Number(workflowsRow?.c || 0);
+    const pendingFinanceConfirm = Number(pendingFinanceConfirmRow?.c || 0);
+    const pendingApplicantAck = Number(pendingApplicantAckRow?.c || 0);
+
+    const pendingMe = (allPending || []).filter((r) => {
+      const steps = loadStepsForRequest(r);
+      const step = findStepByOrder(steps, r.current_step);
+      return canUserApproveStep(uid, step, r.id);
+    }).length;
+
+    const pendingFinalNotify = getPendingFinalNotifyCount(uid);
+
+    res.json({
+      stats: {
+        minePending,
+        mineDone,
+        pendingMe:
+          pendingMe +
+          (isFinance ? pendingFinanceConfirm : 0) +
+          pendingApplicantAck +
+          pendingFinalNotify,
+        pendingFinanceConfirm,
+        pendingApplicantAck,
         pendingFinalNotify,
-      pendingFinanceConfirm,
-      pendingApplicantAck,
-      pendingFinalNotify,
-      users,
-      workflows,
-    },
-  });
+        users,
+        workflows,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching dashboard stats:', err);
+    res.status(500).json({ error: '無法取得統計資料' });
+  }
 });
 
 // SPA fallback
