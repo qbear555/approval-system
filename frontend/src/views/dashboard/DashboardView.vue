@@ -57,9 +57,9 @@
           >
             <span v-if="activeAnnouncements.length > 1" class="ann-item-badge" aria-hidden="true">{{ idx + 1 }}</span>
             <div class="ann-item-body">
-              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                 <strong class="ann-item-title">{{ ann.title || '公司公告' }}</strong>
-                <span v-if="ann.hasFile" class="badge" style="font-size:0.75rem;padding:1px 6px;background:#e0f2fe;color:#0369a1;border-radius:4px">📎 含附件</span>
+                <span v-if="ann.hasFile" class="badge" style="font-size:0.85rem;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:6px;font-weight:600">📎 含附件</span>
               </div>
               <p v-if="ann.body" class="ann-item-text">{{ ann.body }}</p>
             </div>
