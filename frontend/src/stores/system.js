@@ -13,16 +13,24 @@ export const useSystemStore = defineStore('system', {
   actions: {
     async fetchPublicSettings() {
       try {
-        const res = await apiRequest('/api/system/branding');
+        let res = null;
+        try {
+          res = await apiRequest('/api/system/settings');
+        } catch {
+          res = await apiRequest('/api/system/branding');
+        }
         if (res) {
           if (res.companyName) this.companyName = res.companyName;
           if (res.logoUrl) this.logoUrl = res.logoUrl;
           if (res.versionLabel) this.version = res.versionLabel;
           else if (res.fullVersion) this.version = res.fullVersion;
           else if (res.version) this.version = `v${res.version}`;
+          this.applyBranding(res);
+        } else {
+          this.applyBranding();
         }
       } catch {
-        // keep defaults
+        this.applyBranding();
       }
     },
 
@@ -32,7 +40,10 @@ export const useSystemStore = defineStore('system', {
       const href = this.logoUrl || '/img/argo-logo.png';
       ['app-favicon', 'app-favicon-shortcut', 'app-favicon-apple'].forEach((id) => {
         const el = document.getElementById(id);
-        if (el) el.href = href;
+        if (el) {
+          el.href = href;
+          el.type = 'image/png';
+        }
       });
     },
 

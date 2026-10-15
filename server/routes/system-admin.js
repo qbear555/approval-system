@@ -416,8 +416,10 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
 
   /** 品牌設定：GET 公開讀取 */
   app.get('/api/system/branding', (req, res) => {
+    const pub = systemSettings.getPublicSettings();
     res.json({
-      companyName: systemSettings.getCompanyName(),
+      companyName: pub.companyName || systemSettings.getCompanyName(),
+      logoUrl: pub.logoUrl,
       hasLogo: systemSettings.hasLogo(),
     });
   });

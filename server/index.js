@@ -1121,6 +1121,21 @@ app.get(['/v2', '/v2/*'], (req, res) => {
   res.redirect(301, subPath + query);
 });
 
+// 瀏覽器分頁 Favicon 圖標路由（保證回傳圖檔，絕不回傳 HTML 造成破圖）
+app.get('/favicon.ico', (req, res) => {
+  try {
+    const custom = systemSettings.getLogoFilePath();
+    if (custom && fs.existsSync(custom)) {
+      return res.sendFile(custom);
+    }
+  } catch {}
+  const icoPath = path.join(__dirname, '..', 'public', 'favicon.ico');
+  if (fs.existsSync(icoPath)) {
+    return res.sendFile(icoPath);
+  }
+  return res.sendFile(path.join(__dirname, '..', 'public', 'img', 'argo-logo.png'));
+});
+
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'checkbox', 'user', 'table', 'grid'];
