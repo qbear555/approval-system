@@ -163,7 +163,8 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
       const si = Number.isFinite(slot) && slot >= 0 ? Math.floor(slot) : 0;
       const all = systemSettings.getAnnouncementsPublic();
       const ann = all[si] || all[0];
-      if (!ann || !ann.active || !ann.hasFile) {
+      const isAdmin = req.user && req.user.role === 'admin';
+      if (!ann || (!ann.active && !isAdmin) || !ann.hasFile) {
         return res.status(404).json({ error: '目前沒有可下載的公告附件' });
       }
       const info = systemSettings.getAnnouncementFilePath(si);

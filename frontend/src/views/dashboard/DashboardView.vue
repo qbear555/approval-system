@@ -57,7 +57,10 @@
           >
             <span v-if="activeAnnouncements.length > 1" class="ann-item-badge" aria-hidden="true">{{ idx + 1 }}</span>
             <div class="ann-item-body">
-              <strong class="ann-item-title">{{ ann.title || '公司公告' }}</strong>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <strong class="ann-item-title">{{ ann.title || '公司公告' }}</strong>
+                <span v-if="ann.hasFile" class="badge" style="font-size:0.75rem;padding:1px 6px;background:#e0f2fe;color:#0369a1;border-radius:4px">📎 含附件</span>
+              </div>
               <p v-if="ann.body" class="ann-item-text">{{ ann.body }}</p>
             </div>
             <span class="btn outline sm ann-item-btn">查看</span>
@@ -188,19 +191,11 @@
       </div>
     </div>
 
-    <div v-if="openAnn" class="modal" @click.self="openAnn = null">
-      <div class="modal-backdrop" @click="openAnn = null"></div>
-      <div class="modal-panel" style="max-width:560px;width:100%">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0">{{ openAnn.title || '公司公告' }}</h3>
-          <button type="button" class="btn ghost sm" @click="openAnn = null">✕</button>
-        </div>
-        <p style="white-space:pre-wrap;line-height:1.6">{{ openAnn.body || '（無內容）' }}</p>
-        <div class="form-actions" style="justify-content:flex-end">
-          <button type="button" class="btn primary" @click="openAnn = null">關閉</button>
-        </div>
-      </div>
-    </div>
+    <AnnouncementModal
+      v-if="openAnn"
+      :announcement="openAnn"
+      @close="openAnn = null"
+    />
 
     <div v-if="showFavModal" class="modal">
       <div class="modal-backdrop" @click="showFavModal = false"></div>
@@ -245,6 +240,7 @@ import { useToastStore } from '@/stores/toast';
 import { getWorkflowIcon, getCategoryClass } from '@/lib/format';
 import { getFavWorkflowIds, saveFavWorkflowIds, resetFavWorkflowIds } from '@/lib/favorites';
 import RequestTable from '@/components/requests/RequestTable.vue';
+import AnnouncementModal from '@/components/admin/AnnouncementModal.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();

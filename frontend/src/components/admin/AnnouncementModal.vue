@@ -1,39 +1,151 @@
 <template>
-  <div class="modal">
+  <div class="modal" @click.self="$emit('close')">
     <div class="modal-backdrop" @click="$emit('close')"></div>
-    <div class="modal-panel wide">
-      <h3 style="margin-top:0">📢 {{ announcement.title || '公司公告' }}</h3>
-      <p v-if="announcement.body" style="white-space:pre-wrap">{{ announcement.body }}</p>
-      <p v-else class="muted">（無內文）</p>
-      <div v-if="announcement.hasFile" style="padding:14px;background:#f8fafc;border:1px solid var(--border);border-radius:10px">
-        <strong>{{ announcement.originalName || '附件' }}</strong>
-        <div class="form-actions">
-          <button type="button" class="btn primary sm" @click="viewFile">開啟檢視</button>
+    <div class="modal-panel wide" style="max-width: 780px; width: 100%; max-height: 90vh; display: flex; flex-direction: column;">
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 12px;">
+        <div>
+          <h3 style="margin: 0 0 4px 0; color: var(--text-heading, #0f172a); font-size: 1.25rem;">
+            📢 {{ announcement.title || '公司公告' }}
+          </h3>
+          <span v-if="announcement.updatedAt" class="muted" style="font-size: 0.8rem;">
+            發布時間：{{ formatDateTime(announcement.updatedAt) }}
+          </span>
         </div>
-        <iframe v-if="previewUrl && isPdf" :src="previewUrl" title="附件預覽" style="width:100%;height:420px;border:0"></iframe>
-        <img v-else-if="previewUrl && isImg" :src="previewUrl" alt="附件預覽" style="max-width:100%" />
+        <button type="button" class="btn ghost sm" style="font-size: 1.2rem; line-height: 1;" @click="$emit('close')">✕</button>
       </div>
-      <div class="form-actions"><button type="button" class="btn outline" @click="$emit('close')">關閉</button></div>
+
+      <!-- Body & Content (Scrollable) -->
+      <div style="overflow-y: auto; flex: 1; padding-right: 4px;">
+        <p v-if="announcement.body" style="white-space: pre-wrap; line-height: 1.7; margin: 0 0 16px 0; color: var(--text-main, #334155); font-size: 0.95rem;">
+          {{ announcement.body }}
+        </p>
+        <p v-else class="muted" style="margin: 0 0 16px 0;">（無內文）</p>
+
+        <!-- Attachment Box -->
+        <div v-if="announcement.hasFile" class="announcement-attachment-box" style="background: #f8fafc; border: 1px solid var(--border, #e2e8f0); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+              <span style="font-size: 1.35rem; line-height: 1;">{{ getFileIcon(fileName) }}</span>
+              <strong style="word-break: break-all; color: var(--text-heading, #0f172a); font-size: 0.95rem;">
+                {{ fileName }}
+              </strong>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button
+                v-if="canPreview"
+                type="button"
+                class="btn primary sm"
+                :disabled="loading"
+                @click="loadPreview(true)"
+              >
+                {{ loading ? '載入中...' : (previewUrl ? '重新整理預覽' : '線上檢視') }}
+              </button>
+              <button
+                v-if="previewUrl"
+                type="button"
+                class="btn outline sm"
+                title="在新分頁開啟"
+                @click="openInNewTab"
+              >
+                另開分頁 ↗
+              </button>
+              <button
+                type="button"
+                class="btn outline sm"
+                :disabled="downloading"
+                @click="downloadFile"
+              >
+                {{ downloading ? '下載中...' : '下載檔案 ⬇' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Preview Frame / Image -->
+          <div v-if="loading" style="text-align: center; padding: 24px; color: var(--text-muted, #64748b);">
+            <div style="font-size: 1.5rem; margin-bottom: 6px;">⏳</div>
+            <div>正在讀取附件內容，請稍候...</div>
+          </div>
+
+          <div v-else-if="previewUrl" style="margin-top: 12px;">
+            <iframe
+              v-if="isPdf"
+              :src="previewUrl"
+              title="附件預覽"
+              style="width: 100%; height: 500px; border: 1px solid var(--border, #cbd5e1); border-radius: 8px; background: #fff;"
+            ></iframe>
+            <div v-else-if="isImg" style="text-align: center; background: #fff; padding: 10px; border-radius: 8px; border: 1px solid var(--border, #cbd5e1);">
+              <img :src="previewUrl" alt="附件預覽" style="max-width: 100%; max-height: 500px; border-radius: 6px; display: inline-block;" />
+            </div>
+          </div>
+
+          <div v-else-if="!canPreview" class="muted" style="font-size: 0.85rem; margin-top: 6px; padding: 6px 0;">
+            💡 此檔案格式（{{ fileExt }}）建議直接點擊「下載檔案」檢視。
+          </div>
+          <div v-else-if="previewError" class="text-danger" style="font-size: 0.85rem; margin-top: 6px;">
+            ⚠️ {{ previewError }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="form-actions" style="justify-content: flex-end; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border, #e2e8f0);">
+        <button type="button" class="btn primary" @click="$emit('close')">關閉</button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onBeforeUnmount, ref } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { apiRequest } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
+import { formatDateTime } from '@/lib/format';
 
 const props = defineProps({
   announcement: { type: Object, required: true },
 });
 defineEmits(['close']);
+
 const toast = useToastStore();
 const previewUrl = ref('');
 const isPdf = ref(false);
 const isImg = ref(false);
+const loading = ref(false);
+const downloading = ref(false);
+const previewError = ref('');
 
-async function viewFile() {
+const fileName = computed(() => {
+  return props.announcement.originalName || props.announcement.file || '公告附件';
+});
+
+const fileExt = computed(() => {
+  const parts = String(fileName.value).split('.');
+  return parts.length > 1 ? parts.pop().toUpperCase() : '檔案';
+});
+
+const canPreview = computed(() => {
+  const name = String(fileName.value).toLowerCase();
+  return /\.pdf$/i.test(name) || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
+});
+
+function getFileIcon(name = '') {
+  const ext = (String(name).split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return '📕';
+  if (['xls', 'xlsx', 'csv'].includes(ext)) return '📊';
+  if (['doc', 'docx'].includes(ext)) return '📘';
+  if (['ppt', 'pptx'].includes(ext)) return '📙';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return '🖼️';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
+  if (['txt', 'md'].includes(ext)) return '📄';
+  return '📎';
+}
+
+async function loadPreview(isUserClick = false) {
+  if (!props.announcement.hasFile) return;
   try {
+    loading.value = true;
+    previewError.value = '';
     const slot = Number(props.announcement.slot) || 0;
     const meta = await apiRequest(`/api/announcement/file?inline=1&slot=${slot}`, {
       expectBlob: true,
@@ -41,15 +153,62 @@ async function viewFile() {
     });
     if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
     previewUrl.value = URL.createObjectURL(meta.blob);
-    const name = String(meta.filename || props.announcement.originalName || '');
+
+    const name = String(meta.filename || fileName.value || '');
     const ct = String(meta.blob?.type || '').toLowerCase();
     isPdf.value = ct.includes('pdf') || /\.pdf$/i.test(name);
-    isImg.value = ct.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(name);
-    if (!isPdf.value && !isImg.value) window.open(previewUrl.value, '_blank', 'noopener');
+    isImg.value = ct.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
+
+    if (!isPdf.value && !isImg.value && isUserClick) {
+      window.open(previewUrl.value, '_blank', 'noopener');
+    }
   } catch (err) {
-    toast.error(err.message || '附件開啟失敗');
+    previewError.value = err.message || '附件載入失敗';
+    if (isUserClick) {
+      toast.error(err.message || '附件載入失敗');
+    }
+  } finally {
+    loading.value = false;
   }
 }
+
+function openInNewTab() {
+  if (previewUrl.value) {
+    window.open(previewUrl.value, '_blank', 'noopener');
+  } else {
+    loadPreview(true);
+  }
+}
+
+async function downloadFile() {
+  try {
+    downloading.value = true;
+    const slot = Number(props.announcement.slot) || 0;
+    const meta = await apiRequest(`/api/announcement/file?slot=${slot}`, {
+      expectBlob: true,
+      returnMeta: true,
+    });
+    const url = URL.createObjectURL(meta.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = meta.filename || fileName.value || '公告附件';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    toast.error(err.message || '下載失敗');
+  } finally {
+    downloading.value = false;
+  }
+}
+
+onMounted(() => {
+  // 自動載入 PDF 或圖片的預覽
+  if (props.announcement.hasFile && canPreview.value) {
+    loadPreview(false);
+  }
+});
 
 onBeforeUnmount(() => {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
