@@ -5,7 +5,7 @@ export const useSystemStore = defineStore('system', {
   state: () => ({
     companyName: '線上簽核系統',
     logoUrl: '/img/argo-logo.png',
-    version: 'v1.1.0',
+    version: 'v1.2.0',
     pendingCount: 0,
     stats: null,
   }),

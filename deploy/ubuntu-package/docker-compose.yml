@@ -6,7 +6,7 @@
 services:
   approval-system:
     build: .
-    image: approval-system:1.0
+    image: approval-system:1.2
     container_name: approval-system
     restart: unless-stopped
     ports:

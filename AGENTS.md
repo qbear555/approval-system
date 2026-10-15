@@ -126,6 +126,19 @@
 
 ---
 
+## 版號管理規範 (Version Rule)
+
+- **Vue 3 現代版基準版號**：`1.2`（`1.2.0`）。
+- **升版條件（必守）**：**以後若是有修改或新增程式部署超過 100 個檔案，版號一律 +0.1**（例如：`1.2` → `1.3`）。
+- **升版同步項目**：
+  - `package.json`（`"version": "X.Y.0"`）
+  - `frontend/package.json`（`"version": "X.Y.0"`）
+  - `frontend/src/stores/system.js`（`version: 'vX.Y.0'`）
+  - `docker-compose.yml`（`image: approval-system:X.Y`）
+  - 各平台 Docker 範本（`one-click-packages/NAS/`、`one-click-packages/Ubuntu/`、`deploy/ubuntu-package/` 之 `image: approval-system:X.Y`）
+
+---
+
 ## 執行任務規範：顯示進度條與即時反饋
 
 在執行任何任務、長耗時作業、批次處理、資料同步、移轉或背景指令時，必須遵循以下進度顯示規範：
