@@ -39,7 +39,8 @@
 
 ## 變更順序（強制：NAS 為主）
 
-> **⚠️ 2026-08 起調整：所有指令以 NAS 正式站為主，變動後同步本機與一鍵包**
+> **⚠️ 2026-08 起調整：所有指令以 NAS 正式站為主，變動後同步本機與一鍵包**  
+> **⚠️ 2026-10 約定註記：以後「本機系統」一律指 WSL 中的 Ubuntu 簽核系統（`/opt/approval-system/`，Docker 容器 `approval-system`，HTTP 3847 / HTTPS 3848）。未來所有「同步到本機」一律必須更新並重啟此 Ubuntu 簽核系統。**
 
 ### 新標準流程
 
@@ -47,16 +48,15 @@
    - 正式站：https://192.168.99.220:3848  
    - 外部網域：https://catshome.tw:3848  
    - 一律 `NAS_SKIP_DB=1`，**不覆寫**正式 `data/`、mail、LINE 密鑰  
-2. **NAS 確認 OK 後**，同步程式碼到本機：  
+2. **NAS 確認 OK 後**，同步程式碼到本機與 Ubuntu 簽核系統：  
    ```bash
-   # 方式一：一鍵腳本（NAS → 本機 → 一鍵包）
+   # 方式一：一鍵腳本（NAS → 本機代碼庫 → 本機 Ubuntu 容器 → 一鍵包）
    從NAS同步到本機.bat
 
-   # 方式二：只拉程式碼
-   set NAS_PASS=***
-   node scripts/pull-nas-code.js
+   # 方式二：手動同步本機 Ubuntu 簽核系統
+   node scripts/sync-ubuntu-local.js
    ```
-3. **重啟本機服務**使變更生效（`從NAS同步到本機.bat` 會自動執行）  
+3. **重啟本機服務使變更生效**（即更新與重啟 WSL Ubuntu Docker 容器，`從NAS同步到本機.bat` 會自動執行）  
 4. **同步一鍵安裝包三平台**：`scripts/sync-oneclick-packages.ps1`  
 5. 視需要推 GitHub  
 
@@ -91,8 +91,8 @@
    - 產品「備份資料」產出在 `data/backups/`，屬營運資料，**同步／部署一律保留**。  
 4. **NAS 部署**：更新程式時預設 `NAS_SKIP_DB=1`，保留正式資料與備份。
 5. **HTTPS**：
-   - NAS / Ubuntu Docker：HTTP `3847` + HTTPS `3848`
-   - Windows 便攜版／本機：HTTP `3847`（2026-08 起由 8080 改為 3847，與 NAS 一致）
+   - NAS / Ubuntu Docker / 本機系統（WSL Ubuntu）：HTTP `3847` + HTTPS `3848`
+   - Windows 便攜版：HTTP `3847`
 6. **時區**：一律 `Asia/Taipei`。`TZ` 必須在**行程啟動前**設定才對 SQLite 生效
    （`datetime('now','localtime')` 於啟動時綁定時區，程式內改 `process.env.TZ` 無效）。
    Docker 由 `docker-compose.yml` / `Dockerfile` 設定；Windows 由各啟動 `.bat` 設定。

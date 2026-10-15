@@ -3,7 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 echo.
 echo  ========================================
-echo    NAS → 本機 → 一鍵安裝包  同步
+echo    NAS → 本機 (WSL Ubuntu) → 一鍵安裝包  同步
 echo    來源: 192.168.99.220
 echo  ========================================
 echo.
@@ -16,7 +16,7 @@ if "%NAS_PASS%"=="" (
 )
 
 echo.
-echo [1/3] 從 NAS 拉取程式碼到本機...
+echo [1/3] 從 NAS 拉取程式碼到本機代碼庫...
 node scripts\pull-nas-code.js
 if errorlevel 1 (
   echo [ERR] 從 NAS 拉取程式碼失敗
@@ -26,11 +26,11 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/3] 重啟本機簽核系統...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($p in 8080,3847,8443,3848) { Get-NetTCPConnection -LocalPort $p -State Listen -EA SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -EA SilentlyContinue } }" >nul 2>&1
-timeout /t 2 /nobreak >nul
-start "" /b wscript "%~dp0start-always.vbs"
-echo 本機服務已重啟（背景執行）
+echo [2/3] 同步並重啟本機簽核系統（WSL Ubuntu 容器 /opt/approval-system）...
+node scripts\sync-ubuntu-local.js
+if errorlevel 1 (
+  echo [WARN] 本機 WSL Ubuntu 同步失敗，請手動檢查 WSL 與 Docker 狀態
+)
 
 echo.
 echo [3/3] 同步到一鍵安裝包三平台...
@@ -45,8 +45,8 @@ set NAS_PASS=
 echo.
 echo  ========================================
 echo    ✅ 同步完成！
-echo    本機: http://127.0.0.1:8080/
-echo    NAS:  https://192.168.99.220:3848/
+echo    本機系統 (WSL Ubuntu): http://127.0.0.1:3847/
+echo    NAS 正式站:            https://192.168.99.220:3848/
 echo  ========================================
 echo.
 pause
