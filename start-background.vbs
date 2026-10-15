@@ -12,12 +12,15 @@ rc = sh.Run("powershell -NoProfile -Command ""exit (Get-NetTCPConnection -LocalP
 If rc > 0 Then already = True
 
 If Not already Then
-  If fso.FileExists(bat) Then
+  ' 優先啟動 WSL Ubuntu (Docker 容器簽核系統)
+  sh.Run "wsl.exe -d Ubuntu-26.04 -u root --exec /bin/true", 0, True
+  WScript.Sleep 2500
+  rc = sh.Run("powershell -NoProfile -Command ""exit (Get-NetTCPConnection -LocalPort " & port & " -State Listen -EA SilentlyContinue | Measure-Object).Count""", 0, True)
+  If rc > 0 Then already = True
+  
+  If Not already And fso.FileExists(bat) Then
     sh.Run """" & bat & """", 0, False
     WScript.Sleep 2500
-  Else
-    MsgBox "找不到 start-hidden.bat", 16, "線上簽核系統"
-    WScript.Quit 1
   End If
 End If
 
