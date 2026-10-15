@@ -201,7 +201,7 @@
 
       <RequestTimeline :request="request" />
 
-      <div v-if="canApprove" class="card">
+      <div v-if="canApprove" id="approval-process-section" class="card">
         <h3>
           簽核處理 — {{ currentStep?.name || '' }}
           <span v-if="detail.actingAsProxy?.principal?.name" class="muted" style="font-weight:500;font-size:0.9rem">
@@ -244,6 +244,24 @@
         <p v-if="canReturn" class="muted" style="font-size:0.85rem;margin:10px 0 0;line-height:1.45">
           點擊「退回」可選擇退回給<strong>申請人修改補件</strong>，或退回給先前的<strong>特定簽核關卡</strong>重新審查。
         </p>
+      </div>
+
+      <!-- 行動端專屬吸底操作列 (小螢幕浮動固定，方便單手簽核) -->
+      <div v-if="canApprove && !embedded" class="mobile-approval-dock">
+        <div class="dock-content">
+          <button type="button" class="btn success dock-btn" :disabled="busy" @click="doAction('approve')">
+            ✅ 核准
+          </button>
+          <button type="button" class="btn danger dock-btn" :disabled="busy" @click="doAction('reject')">
+            ❌ 駁回
+          </button>
+          <button v-if="canReturn" type="button" class="btn warning dock-btn" :disabled="busy" @click="openReturn">
+            ↩ 退回
+          </button>
+          <button type="button" class="btn outline dock-btn" :disabled="busy" @click="scrollToSignArea">
+            ✍️ 意見
+          </button>
+        </div>
       </div>
     </template>
 
@@ -953,6 +971,13 @@ async function openOffice(att) {
   }
 }
 
+function scrollToSignArea() {
+  const el = document.getElementById('approval-process-section');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 watch(requestId, () => loadDetail());
 
 onMounted(async () => {
@@ -1029,5 +1054,46 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   padding: 20px;
   width: min(560px, 92vw);
+}
+
+.mobile-approval-dock {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-approval-dock {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 990;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid #cbd5e1;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.08);
+  }
+  .mobile-approval-dock .dock-content {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  .mobile-approval-dock .dock-btn {
+    flex: 1;
+    padding: 10px 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+  .request-detail-panel {
+    padding-bottom: 76px;
+  }
 }
 </style>

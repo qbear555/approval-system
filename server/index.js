@@ -60,6 +60,7 @@ const registerWorkflowRoutes = require('./routes/workflows');
 const registerBackupRoutes = require('./routes/backups');
 const auditLog = require('./audit-log');
 const slaCron = require('./sla-cron');
+const previewService = require('./preview-service');
 const fs = require('fs');
 const os = require('os');
 const multer = require('multer');
@@ -5697,6 +5698,143 @@ app.get('/api/attachments/:id', authMiddleware, async (req, res) => {
     res.setHeader('Content-Type', att.mime_type);
   }
   fs.createReadStream(abs).pipe(res);
+});
+
+/** 附件預覽資訊 */
+app.get('/api/attachments/:id/preview-info', authMiddleware, (req, res) => {
+  const att = db
+    .prepare(`SELECT * FROM request_attachments WHERE id = ?`)
+    .get(Number(req.params.id));
+  if (!att) return res.status(404).json({ error: '找不到附件' });
+
+  const detail = getRequestDetail(att.request_id);
+  if (!detail) return res.status(404).json({ error: '找不到簽核單' });
+  const seeAll =
+    req.user.role === 'admin' || userHasPermission(req.user.id, 'records_all');
+  if (!seeAll && !isRequestRelatedToUser(detail, req.user.id)) {
+    return res.status(403).json({ error: '無權檢視此附件' });
+  }
+
+  const previewType = previewService.getPreviewType(att);
+  const cacheKey = previewService.getCacheKey(att);
+  const cachePath = path.join(previewService.CACHE_DIR, cacheKey);
+  const hasPdfCache = fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0;
+
+  res.json({
+    ok: true,
+    id: att.id,
+    previewType,
+    hasPdfCache,
+    originalName: att.original_name,
+    sizeBytes: att.size_bytes,
+    onlyOfficeEnabled: onlyoffice.isEnabled(),
+  });
+});
+
+/** 試算表 (Excel/CSV) 極速解析與表格資料 */
+app.get('/api/attachments/:id/sheet-data', authMiddleware, (req, res) => {
+  const att = db
+    .prepare(`SELECT * FROM request_attachments WHERE id = ?`)
+    .get(Number(req.params.id));
+  if (!att) return res.status(404).json({ error: '找不到附件' });
+
+  const detail = getRequestDetail(att.request_id);
+  if (!detail) return res.status(404).json({ error: '找不到簽核單' });
+  const seeAll =
+    req.user.role === 'admin' || userHasPermission(req.user.id, 'records_all');
+  if (!seeAll && !isRequestRelatedToUser(detail, req.user.id)) {
+    return res.status(403).json({ error: '無權檢視此附件' });
+  }
+
+  try {
+    const data = previewService.parseSpreadsheet(att);
+    res.json({ ok: true, ...data });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || '試算表解析失敗' });
+  }
+});
+
+/** 附件即時預覽串流 (PDF/圖片/Office轉換PDF) */
+app.get('/api/attachments/:id/preview', authMiddleware, async (req, res) => {
+  const att = db
+    .prepare(`SELECT * FROM request_attachments WHERE id = ?`)
+    .get(Number(req.params.id));
+  if (!att) return res.status(404).json({ error: '找不到附件' });
+
+  const detail = getRequestDetail(att.request_id);
+  if (!detail) return res.status(404).json({ error: '找不到簽核單' });
+  const seeAll =
+    req.user.role === 'admin' || userHasPermission(req.user.id, 'records_all');
+  if (!seeAll && !isRequestRelatedToUser(detail, req.user.id)) {
+    return res.status(403).json({ error: '無權檢視此附件' });
+  }
+
+  const pType = previewService.getPreviewType(att);
+
+  // 1. 原生 PDF 或圖片：直接串流原檔
+  if (pType === 'pdf' || pType === 'image') {
+    const abs = previewService.resolveAttachmentPath(att);
+    if (!abs) return res.status(404).json({ error: '實體檔案不存在' });
+    const ext = path.extname(abs).toLowerCase();
+    res.setHeader('Content-Disposition', 'inline; filename="preview' + ext + '"');
+    if (ext === '.pdf') res.setHeader('Content-Type', 'application/pdf');
+    else if (ext === '.png') res.setHeader('Content-Type', 'image/png');
+    else if (ext === '.jpg' || ext === '.jpeg') res.setHeader('Content-Type', 'image/jpeg');
+    else if (ext === '.gif') res.setHeader('Content-Type', 'image/gif');
+    else if (ext === '.webp') res.setHeader('Content-Type', 'image/webp');
+    return fs.createReadStream(abs).pipe(res);
+  }
+
+  // 2. 請求試算表 JSON 結構
+  if (req.query.format === 'json' || req.query.type === 'sheet') {
+    try {
+      const data = previewService.parseSpreadsheet(att);
+      return res.json({ ok: true, type: 'sheet', ...data });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  }
+
+  // 3. Office 文件 (Word, Excel, PPT) 轉換 PDF 快取串流
+  if (pType === 'doc' || pType === 'sheet' || pType === 'slide') {
+    try {
+      const conv = await previewService.convertOfficeToPdf(att, onlyoffice);
+      if (conv.ok && conv.pdfPath && fs.existsSync(conv.pdfPath)) {
+        res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
+        res.setHeader('Content-Type', 'application/pdf');
+        return fs.createReadStream(conv.pdfPath).pipe(res);
+      }
+    } catch (err) {
+      console.warn('[preview] convertOfficeToPdf error:', err.message);
+    }
+
+    // 若轉換失敗且為試算表，自動引導至 Sheet 模式
+    if (pType === 'sheet') {
+      try {
+        const data = previewService.parseSpreadsheet(att);
+        return res.json({ ok: true, type: 'sheet', ...data });
+      } catch (e) {
+        /* fallback to download */
+      }
+    }
+
+    return res.status(422).json({
+      ok: false,
+      fallback: pType === 'sheet' ? 'sheet' : 'download',
+      error: '線上轉換暫時無法使用，請使用下載或 OnlyOffice 完整編輯器開啟',
+    });
+  }
+
+  // 4. 純文字檔案
+  if (pType === 'text') {
+    const abs = previewService.resolveAttachmentPath(att);
+    if (abs && fs.existsSync(abs)) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return fs.createReadStream(abs).pipe(res);
+    }
+  }
+
+  res.status(415).json({ error: '此格式不支援線上預覽，請使用下載開啟' });
 });
 
 /**

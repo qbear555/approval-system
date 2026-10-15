@@ -2,7 +2,7 @@
   <div v-if="list.length" class="attachment-list">
     <h3 v-if="title" style="margin-top:20px">{{ title }}</h3>
     <p v-if="onlyOfficeEnabled" class="muted" style="font-size:0.82rem;margin:0 0 8px">
-      {{ canEdit ? 'Word／Excel 可「線上編輯」後自動回存（需 OnlyOffice）。' : '簽核已完成，附件僅供「線上檢視」，無法再修改。' }}
+      {{ canEdit ? 'Word／Excel 支援秒開預覽，亦可「線上編輯」後自動回存。' : '簽核已完成，附件供「線上檢視」，無法再修改。' }}
     </p>
     <ul style="margin:0;padding-left:18px">
       <li v-for="a in list" :key="a.id" style="margin:6px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
@@ -10,9 +10,11 @@
         <span v-if="a.source_request_id" class="tag" style="background:#ecfdf5;color:#047857">
           已核准申請單 #{{ a.source_request_id }}
         </span>
-        <button v-if="isPreviewable(a)" type="button" class="btn outline sm" @click="open(a)">線上檢視</button>
+        <button v-if="isPreviewable(a)" type="button" class="btn outline sm" @click="open(a)">
+          👁️ 線上檢視
+        </button>
         <button v-if="onlyOfficeEnabled && isOffice(a.original_name)" type="button" class="btn outline sm" @click="$emit('office', a)">
-          {{ canEdit ? '線上編輯' : '線上檢視' }}
+          {{ canEdit ? '✏️ 線上編輯' : '📄 完整檢視' }}
         </button>
         <span class="muted" style="font-size:0.82rem">
           {{ a.size_bytes ? ` · ${fmtSize(a.size_bytes)}` : '' }}
@@ -47,7 +49,13 @@ function isOffice(name) {
 function isPreviewable(a) {
   const n = String(a.original_name || '');
   const m = String(a.mime_type || '').toLowerCase();
-  return m.includes('pdf') || /\.pdf$/i.test(n) || m.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(n);
+  return (
+    m.includes('pdf') ||
+    /\.pdf$/i.test(n) ||
+    m.startsWith('image/') ||
+    /\.(png|jpe?g|gif|webp|bmp)$/i.test(n) ||
+    /\.(docx?|xlsx?|pptx?|odt|ods|odp|csv|txt)$/i.test(n)
+  );
 }
 
 function fmtSize(n) {
@@ -58,10 +66,6 @@ function fmtSize(n) {
 }
 
 function open(a) {
-  if (props.onlyOfficeEnabled && isOffice(a.original_name)) {
-    emit('office', a);
-    return;
-  }
   if (!openAttachmentViewer(a.id, a.original_name || '')) {
     window.open(`/api/attachments/${a.id}`, '_blank', 'noopener');
   }

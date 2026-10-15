@@ -16,3 +16,11 @@ app.use(createPinia());
 app.use(router);
 
 app.mount('#app');
+
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[PWA] SW register failed:', err);
+    });
+  });
+}

@@ -199,11 +199,12 @@ async function open(attId, reqId = null, onDone = null) {
       throw new Error('找不到 OnlyOffice 容器節點');
     }
 
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
     const cfg = {
       ...data.config,
       width: '100%',
       height: '100%',
-      type: 'desktop',
+      type: isMobile ? 'mobile' : 'desktop',
       events: {
         onAppReady: () => {
           loading.value = false;
@@ -318,6 +319,20 @@ defineExpose({ open, close: closeEditor });
 @keyframes oo-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 768px) {
+  :deep(.modal-panel-oo) {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+  .oo-editor-bar {
+    padding: 8px 12px;
   }
 }
 </style>
