@@ -92,7 +92,7 @@ function getPendingApproverIds(requestId, step) {
 
 /** 依單據目前步驟通知簽核人 */
 
-const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'checkbox', 'user'];
+const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'checkbox', 'user', 'table', 'grid'];
 
 /** 申請單列表共用的 SELECT／JOIN（後面接 WHERE／ORDER BY） */
 

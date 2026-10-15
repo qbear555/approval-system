@@ -88,6 +88,7 @@ function adLabelPdf(key, adFlat) {
 function formatDisplayValue(val) {
   if (val == null || val === '') return '—';
   if (typeof val === 'boolean') return val ? '是' : '否';
+  if (Array.isArray(val)) return '（見下方明細表）';
   if (typeof val === 'object') {
     // 自繪表格物件不直接 JSON 顯示
     if (Array.isArray(val.cells)) return '（見附表）';
@@ -98,6 +99,9 @@ function formatDisplayValue(val) {
     }
   }
   let s = String(val);
+  if (s.trim().startsWith('[') && s.includes('{') && s.trim().endsWith(']')) {
+    return '（見下方明細表）';
+  }
   // 富文字 HTML → 純文字（表格改由欄位下方繪製，此處只留文字）
   if (/<\/?(p|div|br|table|span|b|strong|font|u|i|em)\b/i.test(s)) {
     s = /<table/i.test(s) ? richHtmlBodyPlain(s) : richHtmlToPlain(s);

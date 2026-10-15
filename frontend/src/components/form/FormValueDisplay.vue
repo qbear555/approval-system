@@ -19,6 +19,50 @@
     </table>
     <span v-else>—</span>
   </div>
+  <div v-else-if="kind === 'dynamic_grid'" class="form-value-block">
+    <div style="overflow-x: auto;">
+      <table class="form-view-table dynamic-grid-view">
+        <thead>
+          <tr>
+            <th style="width: 2.5rem; text-align: center;">#</th>
+            <th
+              v-for="col in gridColumns"
+              :key="col.id"
+              :style="{ textAlign: isColNumeric(col) ? 'right' : 'left' }"
+            >
+              {{ col.label }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, ri) in gridRows" :key="ri">
+            <td style="text-align: center; color: #64748b; font-size: 0.85rem;">{{ ri + 1 }}</td>
+            <td
+              v-for="col in gridColumns"
+              :key="col.id"
+              :style="{ textAlign: isColNumeric(col) ? 'right' : 'left' }"
+            >
+              {{ isColNumeric(col) ? formatGridNumber(row[col.id]) : (row[col.id] || '—') }}
+            </td>
+          </tr>
+        </tbody>
+        <tfoot v-if="hasGridSums">
+          <tr style="background: #f8fafc; font-weight: 600;">
+            <td colspan="2" style="text-align: center; color: #475569;">合計</td>
+            <td
+              v-for="col in gridColumns.slice(1)"
+              :key="'sum-' + col.id"
+              :style="{ textAlign: isColNumeric(col) ? 'right' : 'left' }"
+            >
+              <span v-if="shouldSumGridCol(col)">
+                {{ formatGridNumber(gridSums[col.id]) }}
+              </span>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
   <div v-else-if="kind === 'rich'" class="rich-view" v-html="richHtml"></div>
   <div v-else-if="kind === 'table'" class="form-value-block">
     <table class="form-view-table">
@@ -63,8 +107,83 @@ const props = defineProps({
 const followupRows = computed(() => parseFollowupItems(props.value));
 const table = computed(() => normalizeFormTable(props.formData?.[`${props.field?.id}__table`]));
 
+const gridRows = computed(() => {
+  const val = props.value;
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string' && val.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return [];
+});
+
+const DEFAULT_GRID_COLUMNS = [
+  { id: 'item', label: '項目/品名', type: 'text' },
+  { id: 'spec', label: '規格/說明', type: 'text' },
+  { id: 'qty', label: '數量', type: 'number' },
+  { id: 'price', label: '單價', type: 'number' },
+  { id: 'subtotal', label: '小計', type: 'calc' },
+];
+
+const gridColumns = computed(() => {
+  if (Array.isArray(props.field?.columns) && props.field.columns.length > 0) {
+    return props.field.columns;
+  }
+  const first = gridRows.value[0];
+  if (first && typeof first === 'object') {
+    return Object.keys(first).map((k) => ({
+      id: k,
+      label: k,
+      type: typeof first[k] === 'number' ? 'number' : 'text',
+    }));
+  }
+  return DEFAULT_GRID_COLUMNS;
+});
+
+function isColNumeric(col) {
+  return col.type === 'number' || col.type === 'calc' || !!col.formula;
+}
+
+function shouldSumGridCol(col) {
+  if (col.sum === false) return false;
+  return col.type === 'number' || col.type === 'calc' || !!col.formula || col.sum === true;
+}
+
+function formatGridNumber(num) {
+  const n = Number(num);
+  if (!Number.isFinite(n)) return '0';
+  return new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 }).format(n);
+}
+
+const gridSums = computed(() => {
+  const sums = {};
+  for (const c of gridColumns.value) {
+    if (shouldSumGridCol(c)) {
+      sums[c.id] = gridRows.value.reduce((acc, r) => {
+        const val = Number(r[c.id] || 0);
+        return acc + (Number.isFinite(val) ? val : 0);
+      }, 0);
+    }
+  }
+  return sums;
+});
+
+const hasGridSums = computed(() => {
+  return gridColumns.value.some((c) => shouldSumGridCol(c));
+});
+
 const kind = computed(() => {
-  if (props.field?.type === 'table' || props.field?.id === 'welfare_items') return 'welfare';
+  if (props.field?.id === 'welfare_items') return 'welfare';
+  if (
+    props.field?.type === 'table' ||
+    props.field?.type === 'grid' ||
+    Array.isArray(props.value) ||
+    (typeof props.value === 'string' && props.value.trim().startsWith('[') && props.value.includes('{'))
+  ) {
+    if (gridRows.value.length > 0) return 'dynamic_grid';
+  }
   if (props.field?.id === 'followup_items') return 'followup';
   const raw = props.value == null || props.value === '' ? '' : String(props.value);
   if (

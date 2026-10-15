@@ -83,6 +83,7 @@ export function fieldColSpan(field) {
   if (
     field?.type === 'textarea' ||
     field?.type === 'table' ||
+    field?.type === 'grid' ||
     field?.id === 'welfare_items' ||
     field?.id === 'followup_items' ||
     field?.id === 'attendee_ids' ||

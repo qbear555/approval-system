@@ -646,7 +646,48 @@ function normalizeEmbeddedTable(raw) {
 
 function getFormFieldTable(formData, fieldId) {
   if (!formData || !fieldId) return null;
-  return normalizeEmbeddedTable(formData[`${fieldId}__table`]);
+  if (formData[`${fieldId}__table`]) {
+    return normalizeEmbeddedTable(formData[`${fieldId}__table`]);
+  }
+  const val = formData[fieldId];
+  let rows = null;
+  if (Array.isArray(val)) {
+    rows = val;
+  } else if (typeof val === 'string' && val.trim().startsWith('[') && val.includes('{')) {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) rows = parsed;
+    } catch {}
+  }
+  if (rows && rows.length > 0 && typeof rows[0] === 'object') {
+    const COL_LABELS = {
+      item: '項目/品名',
+      name: '名稱',
+      spec: '規格/說明',
+      qty: '數量',
+      price: '單價',
+      subtotal: '小計',
+      amount: '金額',
+      total: '總額',
+      note: '備註',
+      remark: '備註',
+      date: '日期',
+      desc: '說明',
+    };
+    const keys = Object.keys(rows[0]).filter((k) => !k.startsWith('_'));
+    if (keys.length > 0) {
+      const headerRow = keys.map((k) => COL_LABELS[k] || k);
+      const dataRows = rows.map((r) =>
+        keys.map((k) => (r[k] != null ? String(r[k]) : ''))
+      );
+      return {
+        header: true,
+        cols: keys.length,
+        cells: [headerRow, ...dataRows],
+      };
+    }
+  }
+  return null;
 }
 
 /**

@@ -246,8 +246,27 @@ function notifyCurrentApprovers(detail, kind, fromName) {
     return;
   }
   const steps = detail.steps || [];
-  const step = findStepByOrder(steps, detail.current_step);
-  if (!step) {
+
+  // 取得目前所有待簽步驟（支援 v2 平行會簽分支，多關卡同時 pending）
+  let pendingSteps = [];
+  try {
+    const nodeRows = db.prepare(
+      `SELECT node_id FROM request_node_states WHERE request_id = ? AND state = 'pending'`
+    ).all(detail.id);
+    if (nodeRows && nodeRows.length > 0) {
+      const nodeIds = new Set(nodeRows.map(r => r.node_id));
+      pendingSteps = steps.filter(s => nodeIds.has(s.nodeId) || nodeIds.has(`n${s.order}`));
+    }
+  } catch {
+    /* fallback to linear */
+  }
+
+  if (!pendingSteps.length) {
+    const step = findStepByOrder(steps, detail.current_step);
+    if (step) pendingSteps.push(step);
+  }
+
+  if (!pendingSteps.length) {
     console.warn(
       '[mail:approver] skip: step not found',
       detail.id,
@@ -258,37 +277,40 @@ function notifyCurrentApprovers(detail, kind, fromName) {
     );
     return;
   }
-  // 會簽中：只通知尚未核准者；進入新步驟時全員都尚未核准
-  const targetIds =
-    kind === 'remind' || step.mode !== 'all'
-      ? step.approverIds || []
-      : getPendingApproverIds(detail.id, step);
-  const emails = getUserEmailsByIds(targetIds);
-  if (!emails.length) {
-    console.warn(
-      '[mail:approver] skip: no emails',
-      detail.id,
-      'step',
-      step.order,
-      step.name,
-      'ids',
-      targetIds
-    );
-  }
-  fireAndForgetMail(
-    kind === 'remind' ? 'remind' : 'approver',
-    mail.sendApproverMails(detail, step, emails, kind, fromName)
-  );
-  // LINE：依 username 推播（成員需先在 LINE 官方帳號綁定簽核帳號）
-  const usernames = getUsernamesByIds(targetIds);
-  if (usernames.length) {
-    fireAndForgetLine(
+
+  for (const step of pendingSteps) {
+    // 會簽中：只通知尚未核准者；進入新步驟時全員都尚未核准
+    const targetIds =
+      kind === 'remind' || step.mode !== 'all'
+        ? step.approverIds || []
+        : getPendingApproverIds(detail.id, step);
+    const emails = getUserEmailsByIds(targetIds);
+    if (!emails.length) {
+      console.warn(
+        '[mail:approver] skip: no emails',
+        detail.id,
+        'step',
+        step.order,
+        step.name,
+        'ids',
+        targetIds
+      );
+    }
+    fireAndForgetMail(
       kind === 'remind' ? 'remind' : 'approver',
-      lineNotify.notifyApproversLine(detail, usernames, kind, {
-        actorName: fromName,
-        baseUrl: getAppBaseUrl(),
-      })
+      mail.sendApproverMails(detail, step, emails, kind, fromName)
     );
+    // LINE：依 username 推播（成員需先在 LINE 官方帳號綁定簽核帳號）
+    const usernames = getUsernamesByIds(targetIds);
+    if (usernames.length) {
+      fireAndForgetLine(
+        kind === 'remind' ? 'remind' : 'approver',
+        lineNotify.notifyApproversLine(detail, usernames, kind, {
+          actorName: fromName,
+          baseUrl: getAppBaseUrl(),
+        })
+      );
+    }
   }
 }
 

@@ -159,10 +159,16 @@ function drawStandardWorkflowForm(ctx, request) {
         ],
         rowH
       );
-      // 富文字／內嵌表格
+      // 富文字／內嵌表格／動態子表格
       if (
         (typeof formData[f.id] === 'string' && /<table/i.test(formData[f.id])) ||
-        formData[`${f.id}__table`]
+        formData[`${f.id}__table`] ||
+        Array.isArray(formData[f.id]) ||
+        f.type === 'table' ||
+        f.type === 'grid' ||
+        (typeof formData[f.id] === 'string' &&
+          formData[f.id].trim().startsWith('[') &&
+          formData[f.id].includes('{'))
       ) {
         appendFieldTable(kit, ctx, formData, f.id, '');
       }

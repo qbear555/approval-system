@@ -59,6 +59,7 @@ const registerReportRoutes = require('./routes/reports');
 const registerWorkflowRoutes = require('./routes/workflows');
 const registerBackupRoutes = require('./routes/backups');
 const auditLog = require('./audit-log');
+const slaCron = require('./sla-cron');
 const fs = require('fs');
 const os = require('os');
 const multer = require('multer');
@@ -1118,8 +1119,7 @@ app.get(['/v2', '/v2/*'], (req, res) => {
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// ---------- helpers ----------
-const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'checkbox', 'user'];
+const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'checkbox', 'user', 'table', 'grid'];
 
 /** 出勤可選時間範圍（請假起迄與前端一致） */
 const WORK_TIME_START_MIN = 9 * 60; // 09:00
@@ -3076,8 +3076,25 @@ registerSystemAdminRoutes(app, {
   builtinAdminOnly,
   userHasPermission,
   uploadPackage,
-  packageUploadError,
-  parseUploadedPackage,
+});
+
+// ---------- 簽核逾時 SLA 自動催辦管理 API ----------
+app.get('/api/system/sla/status', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const result = await slaCron.runSlaCheck();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system/sla/check', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const result = await slaCron.runSlaCheck(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- Users ----------
@@ -7249,6 +7266,11 @@ listenDual(server, PORT, '線上簽核系統 HTTP', [
       deployLog.recordOnStartup();
     } catch (e) {
       console.warn('[deploy-log] 記錄失敗', e.message);
+    }
+    try {
+      slaCron.startSlaScheduler();
+    } catch (e) {
+      console.warn('[sla] 啟動失敗', e.message);
     }
   })
   .catch((err) => {

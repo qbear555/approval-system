@@ -9,7 +9,8 @@
     field-id="attendee_ids"
     title="與會人員"
   />
-  <WelfareLedgerField v-else-if="field.type === 'table' || field.id === 'welfare_items'" :field="field" />
+  <WelfareLedgerField v-else-if="field.id === 'welfare_items'" :field="field" />
+  <DynamicGridField v-else-if="field.type === 'table' || field.type === 'grid'" :field="field" />
   <HandlingFeeField v-else-if="field.id === 'handling_fee'" :field="field" />
   <RichTextField v-else-if="field.type === 'textarea' && useRich" :field="field" />
   <DateTimeField v-else-if="field.type === 'datetime'" :field="field" />
@@ -103,6 +104,7 @@ import PeoplePickField from './fields/PeoplePickField.vue';
 import RichTextField from './fields/RichTextField.vue';
 import VoidTargetField from './fields/VoidTargetField.vue';
 import WelfareLedgerField from './fields/WelfareLedgerField.vue';
+import DynamicGridField from './fields/DynamicGridField.vue';
 
 const props = defineProps({
   field: { type: Object, required: true },
