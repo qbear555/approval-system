@@ -495,6 +495,73 @@
     </div>
 
     <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <h3 style="margin:0 0 4px">🤖 地端 AI 簽核智慧審查（Ollama）</h3>
+          <p class="muted" style="margin:0;font-size:0.9rem">
+            整合本機 WSL Ubuntu / Ollama 模型（如 Qwen 2.5 7B），提供簽核防呆、合規檢核與案件速覽。
+          </p>
+        </div>
+        <div>
+          <span v-if="aiStatus.reachable" class="tag" style="background:#ecfdf5;color:#047857;font-weight:600">
+            🟢 Ollama 連線正常 (v{{ aiStatus.version || '0.40+' }})
+          </span>
+          <span v-else-if="aiStatus.checked" class="tag" style="background:#fef2f2;color:#b91c1c;font-weight:600">
+            🔴 無法連線至 Ollama
+          </span>
+        </div>
+      </div>
+
+      <form class="form-grid" @submit.prevent="onSaveAiSettings">
+        <div class="field check-row-box">
+          <label class="check-row">
+            <input type="checkbox" v-model="aiForm.aiEnabled" />
+            <span><strong>啟用 AI 簽核審查功能</strong></span>
+          </label>
+        </div>
+
+        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label>AI 服務提供者</label>
+            <select v-model="aiForm.aiProvider">
+              <option value="ollama">Ollama (地端私有部署)</option>
+              <option value="openai">OpenAI 相容 API</option>
+            </select>
+          </div>
+          <div>
+            <label>API 服務位址 (Base URL)</label>
+            <input v-model="aiForm.aiBaseUrl" placeholder="http://127.0.0.1:11434" />
+          </div>
+        </div>
+
+        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label>審查模型名稱 (Model)</label>
+            <input v-model="aiForm.aiModel" placeholder="qwen2.5:7b" />
+          </div>
+          <div>
+            <label>API Key (地端 Ollama 免填)</label>
+            <input type="password" v-model="aiForm.aiApiKey" placeholder="選填，地端 Ollama 留空即可" />
+          </div>
+        </div>
+
+        <div v-if="aiStatus.models && aiStatus.models.length" style="margin-bottom:8px">
+          <span class="muted" style="font-size:0.85rem">本機已安裝模型：</span>
+          <span v-for="m in aiStatus.models" :key="m" class="tag" style="margin-left:6px;cursor:pointer" @click="aiForm.aiModel = m">
+            {{ m }}
+          </span>
+        </div>
+
+        <div class="form-actions" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="submit" class="btn primary" :disabled="aiSaving">儲存 AI 設定</button>
+          <button type="button" class="btn outline" :disabled="aiTesting" @click="onTestAiConnection">
+            {{ aiTesting ? '連線檢測中...' : '測試 AI 連線' }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
       <h3>系統設定完整包</h3>
       <p class="muted" style="margin-top:0;line-height:1.55">
         一次匯出／匯入：部門、成員、簽核流程與申請表、Email 設定。
@@ -613,6 +680,17 @@ const mailCfg = ref({
 });
 const mailPass = ref('');
 
+const aiForm = reactive({
+  aiEnabled: true,
+  aiProvider: 'ollama',
+  aiBaseUrl: 'http://127.0.0.1:11434',
+  aiModel: 'qwen2.5:7b',
+  aiApiKey: '',
+});
+const aiStatus = ref({ checked: false, reachable: false });
+const aiSaving = ref(false);
+const aiTesting = ref(false);
+
 const announcementsAdmin = ref([emptyAnn(), { ...emptyAnn(), slot: 1 }]);
 const deployLogHtml = ref('<p class="muted" style="margin:0">載入自動部署紀錄中…</p>');
 const deployCardHtml = computed(() => `<h3>自動部署修改紀錄</h3>${deployLogHtml.value}`);
@@ -679,6 +757,26 @@ async function loadData() {
     if (!mailCfg.value.fromName) mailCfg.value.fromName = brandForm.companyName || '線上簽核系統';
   } catch {
     mailCfg.value = { enabled: false, ready: false };
+  }
+
+  // AI settings & status
+  try {
+    const aiData = await apiRequest('/api/ai/settings');
+    if (aiData && aiData.settings) {
+      aiForm.aiEnabled = aiData.settings.aiEnabled !== false;
+      aiForm.aiProvider = aiData.settings.aiProvider || 'ollama';
+      aiForm.aiBaseUrl = aiData.settings.aiBaseUrl || 'http://127.0.0.1:11434';
+      aiForm.aiModel = aiData.settings.aiModel || 'qwen2.5:7b';
+      aiForm.aiApiKey = aiData.settings.aiApiKey || '';
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const st = await apiRequest('/api/ai/status');
+    aiStatus.value = { checked: true, ...st };
+  } catch {
+    aiStatus.value = { checked: true, reachable: false };
   }
 
   // Deploy logs
@@ -1121,6 +1219,46 @@ async function onTestMail() {
     toast.success(`測試信已寄出${mode}`);
   } catch (err) {
     toast.error(err.message || '測試信寄送失敗');
+  }
+}
+
+async function onSaveAiSettings() {
+  aiSaving.value = true;
+  try {
+    await apiRequest('/api/ai/settings', {
+      method: 'POST',
+      body: {
+        aiEnabled: aiForm.aiEnabled,
+        aiProvider: aiForm.aiProvider,
+        aiBaseUrl: aiForm.aiBaseUrl,
+        aiModel: aiForm.aiModel,
+        aiApiKey: aiForm.aiApiKey,
+      },
+    });
+    toast.success('AI 設定已儲存');
+    await onTestAiConnection();
+  } catch (err) {
+    toast.error(err.message || '儲存失敗');
+  } finally {
+    aiSaving.value = false;
+  }
+}
+
+async function onTestAiConnection() {
+  aiTesting.value = true;
+  try {
+    const st = await apiRequest('/api/ai/status');
+    aiStatus.value = { checked: true, ...st };
+    if (st.reachable) {
+      toast.success(`AI 連線成功！Ollama ${st.version ? 'v' + st.version : ''} 已就緒，模型數：${st.models?.length || 0}`);
+    } else {
+      toast.error(`無法連線至 Ollama：${st.error || '連線逾時'}`);
+    }
+  } catch (err) {
+    aiStatus.value = { checked: true, reachable: false, error: err.message };
+    toast.error(err.message || 'AI 服務連線測試失敗');
+  } finally {
+    aiTesting.value = false;
   }
 }
 

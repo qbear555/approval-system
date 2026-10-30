@@ -100,3 +100,11 @@ export function fetchOnlyOfficeStatus() {
 export function fetchOnlyOfficeEditor(attachmentId) {
   return apiRequest(`/api/onlyoffice/editor/${attachmentId}`);
 }
+
+export function analyzeRequestWithAi(id) {
+  return apiRequest(`/api/ai/analyze-request/${id}`, { method: 'POST' });
+}
+
+export function fetchAiStatus() {
+  return apiRequest('/api/ai/status');
+}

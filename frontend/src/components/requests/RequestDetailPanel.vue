@@ -134,6 +134,19 @@
             <span v-if="isProxySubmit" class="tag" style="background:#e0e7ff;color:#3730a3;margin-left:6px">代申請</span>
             <span v-if="canApprove && detail.actingAsProxy" class="tag" style="background:#fef3c7;color:#92400e;margin-left:6px">代簽</span>
           </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button
+              v-if="request.status !== 'draft'"
+              type="button"
+              class="btn outline sm ai-toggle-btn"
+              :disabled="aiLoading"
+              @click="showAiCard ? (showAiCard = false) : triggerAiAudit(false)"
+            >
+              <span v-if="aiLoading" class="ai-spin">⚡</span>
+              <span v-else>🤖</span>
+              <span>{{ aiLoading ? 'AI 分析中…' : (showAiCard ? '收合 AI 審查' : 'AI 簽核審查') }}</span>
+            </button>
+          </div>
         </div>
 
         <ol v-if="steps.length" class="vue-flow-steps">
@@ -165,6 +178,68 @@
           <dd v-if="currentStep">{{ currentStep.name }}</dd>
           <dt>Email 通知</dt><dd>{{ emailNotifyText(request) }}</dd>
         </dl>
+
+        <!-- 🤖 AI 簽核智慧審查面板 -->
+        <div v-if="showAiCard" class="ai-audit-panel">
+          <div class="ai-header">
+            <div class="ai-title">
+              <span class="ai-icon">🤖</span>
+              <span>AI 簽核智慧審查</span>
+              <span v-if="aiModelName" class="tag ai-model-tag">{{ aiModelName }}</span>
+              <span v-if="aiDuration" class="tag ai-time-tag">耗時 {{ aiDuration }} 秒</span>
+              <span v-if="aiFromCache" class="tag ai-cache-tag">⚡ 快取結果</span>
+            </div>
+            <div class="ai-actions">
+              <button
+                v-if="aiReport && canApprove"
+                type="button"
+                class="btn outline xs"
+                style="color:#047857;border-color:#6ee7b7;background:#f0fdf4;"
+                title="將 AI 審查建議帶入簽核意見"
+                @click="applyAiAdviceToComment"
+              >
+                📋 帶入審查意見
+              </button>
+              <button
+                type="button"
+                class="btn outline xs"
+                :disabled="aiLoading"
+                title="重新向地端 Ollama 請求最新分析"
+                @click="triggerAiAudit(true)"
+              >
+                🔄 重新分析
+              </button>
+              <button
+                type="button"
+                class="btn outline xs"
+                style="padding: 2px 8px;"
+                title="收合"
+                @click="showAiCard = false"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <!-- Loading -->
+          <div v-if="aiLoading" class="ai-loading-box">
+            <div class="ai-pulse-icon">🧠⚡</div>
+            <div class="ai-loading-title">AI 正在進行智慧審查分析…</div>
+            <div class="ai-loading-desc">
+              由本機 WSL Ubuntu RTX 5080 (Ollama) 地端加速運算中，正在比對表單內容、防呆條件與簽核歷程…
+            </div>
+          </div>
+
+          <!-- Error -->
+          <div v-else-if="aiError" class="ai-error-box">
+            <div style="font-weight:600;color:#b91c1c">⚠️ AI 審查暫時無法完成</div>
+            <div style="font-size:0.88rem;color:#7f1d1d;margin-top:4px">{{ aiError }}</div>
+            <button type="button" class="btn outline xs" style="margin-top:8px" @click="triggerAiAudit(true)">重試</button>
+          </div>
+
+          <!-- Content -->
+          <div v-else-if="aiReport" class="ai-content-box" v-html="formattedAiContent"></div>
+        </div>
 
         <div v-if="usePdfFormView" class="pdf-form-view">
           <div class="pdf-form-toolbar">
@@ -231,6 +306,16 @@
           <label>簽核意見</label>
           <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
             <button v-for="p in phrases" :key="p" type="button" class="btn outline xs" @click="comment = p">{{ p }}</button>
+            <button
+              v-if="aiReport"
+              type="button"
+              class="btn outline xs"
+              style="color:#047857;border-color:#6ee7b7;background:#f0fdf4;"
+              title="將 AI 審核建議帶入簽核意見"
+              @click="applyAiAdviceToComment"
+            >
+              🤖 帶入 AI 建議
+            </button>
           </div>
           <textarea v-model="comment" rows="3" placeholder="選填意見（駁回／退回時建議填寫）…"></textarea>
         </div>
@@ -304,6 +389,7 @@ import {
   uploadRequestAttachments,
   fetchRequestPdf,
   fetchOnlyOfficeStatus,
+  analyzeRequestWithAi,
 } from '@/api/requests';
 import { apiRequest } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
@@ -360,6 +446,13 @@ const pickLoading = ref(false);
 const pickList = ref([]);
 const pickIds = ref([]);
 const phrases = ref(resolveCommentPhrases(auth.user));
+const showAiCard = ref(false);
+const aiLoading = ref(false);
+const aiReport = ref('');
+const aiError = ref('');
+const aiModelName = ref('');
+const aiDuration = ref(0);
+const aiFromCache = ref(false);
 
 const requestId = computed(() => Number(props.requestId || route.params.id || 0));
 const request = computed(() => detail.value.request || null);
@@ -545,6 +638,19 @@ const headerButtons = computed(() => {
     });
   }
   if (r.status !== 'draft') {
+    out.push({
+      id: 'ai-audit',
+      label: aiLoading.value ? '🤖 AI 分析中…' : (showAiCard.value ? '🤖 收合 AI' : '🤖 AI 審核'),
+      cls: 'btn outline',
+      title: '使用地端 AI (Ollama) 進行簽核防呆與案件速覽分析',
+      run: () => {
+        if (showAiCard.value && aiReport.value) {
+          showAiCard.value = false;
+        } else {
+          triggerAiAudit(false);
+        }
+      },
+    });
     out.push({ id: 'clone', label: '📑 複製為新申請', cls: 'btn outline', run: cloneRequest });
   }
   if (detail.value.canDelete) {
@@ -567,6 +673,13 @@ async function loadDetail() {
   }
   loading.value = true;
   error.value = '';
+  showAiCard.value = false;
+  aiLoading.value = false;
+  aiReport.value = '';
+  aiError.value = '';
+  aiModelName.value = '';
+  aiDuration.value = 0;
+  aiFromCache.value = false;
   try {
     await usersStore.fetch();
     const data = await fetchRequest(id);
@@ -592,6 +705,142 @@ async function loadDetail() {
     loading.value = false;
   }
 }
+
+async function triggerAiAudit(force = false) {
+  const id = requestId.value;
+  if (!id) return;
+  showAiCard.value = true;
+  if (aiReport.value && !force) {
+    return;
+  }
+  aiLoading.value = true;
+  aiError.value = '';
+  try {
+    const res = await analyzeRequestWithAi(id, force);
+    const content = res?.report || res?.analysis;
+    if (content) {
+      aiReport.value = content;
+      aiModelName.value = res.model || '';
+      aiDuration.value = res.durationSec ?? (res.durationMs ? Number((res.durationMs / 1000).toFixed(1)) : 0);
+      aiFromCache.value = !!res.cached;
+    } else {
+      aiError.value = '未取得分析內容';
+    }
+  } catch (err) {
+    aiError.value = err.message || 'AI 智慧審核連線失敗，請確認地端 Ollama 服務是否正常運作';
+  } finally {
+    aiLoading.value = false;
+  }
+}
+
+function applyAiAdviceToComment() {
+  if (!aiReport.value) return;
+  const adviceMatch = aiReport.value.match(/💡【簽核主管審查建議】[\s\S]*$/);
+  let text = '';
+  if (adviceMatch) {
+    text = adviceMatch[0]
+      .replace(/💡【簽核主管審查建議】/, '')
+      .replace(/\*\*|__/g, '')
+      .replace(/^[\s\-\*]+/gm, '')
+      .trim();
+  } else {
+    text = aiReport.value.replace(/\*\*|__/g, '').trim();
+  }
+  if (text) {
+    comment.value = comment.value ? `${comment.value}\n${text}` : text;
+    toast.success('已將 AI 審核建議帶入簽核意見');
+    const el = document.getElementById('approval-process-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+const formattedAiContent = computed(() => {
+  if (!aiReport.value) return '';
+  const text = escapeHtml(aiReport.value);
+  const lines = text.split('\n');
+  let html = '';
+  let inList = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    if (!line) {
+      if (inList) {
+        html += '</ul>';
+        inList = false;
+      }
+      continue;
+    }
+
+    line = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    line = line.replace(/(🟢\s*低風險)/g, '<span class="ai-risk-badge ai-risk-low">$1</span>');
+    line = line.replace(/(🟡\s*中風險)/g, '<span class="ai-risk-badge ai-risk-mid">$1</span>');
+    line = line.replace(/(🔴\s*高風險)/g, '<span class="ai-risk-badge ai-risk-high">$1</span>');
+
+    if (line.includes('📌【案件速覽】') || line.includes('📌 案件速覽')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<div class="ai-section-title ai-title-summary"><span class="ai-sec-icon">📌</span> 案件速覽</div>`;
+      continue;
+    }
+    if (line.includes('🔍【合規與防呆檢核】') || line.includes('🔍 合規與防呆檢核')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<div class="ai-section-title ai-title-audit"><span class="ai-sec-icon">🔍</span> 合規與防呆檢核</div>`;
+      continue;
+    }
+    if (line.includes('💡【簽核主管審查建議】') || line.includes('💡 簽核主管審查建議')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<div class="ai-section-title ai-title-advice"><span class="ai-sec-icon">💡</span> 簽核主管審查建議</div>`;
+      continue;
+    }
+    if (/^###?\s+(.+)/.test(line)) {
+      if (inList) { html += '</ul>'; inList = false; }
+      const title = line.replace(/^###?\s+/, '');
+      html += `<div class="ai-subheading">${title}</div>`;
+      continue;
+    }
+
+    if (/^[\-\*]\s+(.+)/.test(line)) {
+      if (!inList) {
+        html += '<ul class="ai-list">';
+        inList = true;
+      }
+      const itemContent = line.replace(/^[\-\*]\s+/, '');
+      html += `<li>${itemContent}</li>`;
+      continue;
+    }
+
+    if (/^\d+\.\s+(.+)/.test(line)) {
+      if (!inList) {
+        html += '<ol class="ai-ordered-list">';
+        inList = true;
+      }
+      const itemContent = line.replace(/^\d+\.\s+/, '');
+      html += `<li>${itemContent}</li>`;
+      continue;
+    }
+
+    if (inList) {
+      html += '</ul>';
+      inList = false;
+    }
+
+    html += `<p class="ai-p">${line}</p>`;
+  }
+
+  if (inList) {
+    html += '</ul>';
+  }
+
+  return html;
+});
 
 function resetStepForm() {
   const fields = stripSpecialLeaveHoursFields(detail.value.currentStep?.approverFields || []);
@@ -1108,5 +1357,194 @@ onBeforeUnmount(() => {
   .request-detail-panel {
     padding-bottom: 76px;
   }
+}
+
+/* AI 智慧審核面板樣式 */
+.ai-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f5f3ff;
+  border-color: #c4b5fd;
+  color: #6d28d9;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.ai-toggle-btn:hover {
+  background: #ede9fe;
+  border-color: #8b5cf6;
+}
+.ai-spin {
+  display: inline-block;
+  animation: ai-spin-kf 1s linear infinite;
+}
+@keyframes ai-spin-kf {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.ai-audit-panel {
+  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
+  border: 1.5px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.06);
+}
+.ai-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #dbeafe;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ai-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.05rem;
+  color: #1e3a8a;
+  font-weight: 700;
+}
+.ai-icon {
+  font-size: 1.2rem;
+}
+.ai-model-tag {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.ai-time-tag {
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.ai-cache-tag {
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-loading-box {
+  text-align: center;
+  padding: 28px 16px;
+}
+.ai-pulse-icon {
+  font-size: 2.2rem;
+  display: inline-block;
+  animation: ai-pulse-kf 1.5s ease-in-out infinite;
+}
+@keyframes ai-pulse-kf {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+.ai-loading-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #1e40af;
+  margin-top: 10px;
+}
+.ai-loading-desc {
+  font-size: 0.88rem;
+  color: #64748b;
+  margin-top: 6px;
+  max-width: 520px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.5;
+}
+
+.ai-error-box {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.ai-content-box {
+  color: #1e293b;
+  font-size: 0.93rem;
+  line-height: 1.6;
+}
+:deep(.ai-section-title) {
+  font-size: 0.98rem;
+  font-weight: 700;
+  margin: 16px 0 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+:deep(.ai-section-title:first-child) {
+  margin-top: 0;
+}
+:deep(.ai-title-summary) {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-left: 4px solid #0284c7;
+}
+:deep(.ai-title-audit) {
+  background: #fef3c7;
+  color: #92400e;
+  border-left: 4px solid #f59e0b;
+}
+:deep(.ai-title-advice) {
+  background: #ecfdf5;
+  color: #065f46;
+  border-left: 4px solid #10b981;
+}
+:deep(.ai-subheading) {
+  font-weight: 600;
+  color: #334155;
+  margin: 10px 0 6px;
+}
+:deep(.ai-list), :deep(.ai-ordered-list) {
+  margin: 6px 0 12px 20px;
+  padding: 0;
+}
+:deep(.ai-list li), :deep(.ai-ordered-list li) {
+  margin-bottom: 4px;
+}
+:deep(.ai-p) {
+  margin: 4px 0 8px;
+}
+:deep(.ai-risk-badge) {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+:deep(.ai-risk-low) {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+:deep(.ai-risk-mid) {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+:deep(.ai-risk-high) {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
 }
 </style>

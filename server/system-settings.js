@@ -28,6 +28,12 @@ const DEFAULTS = {
   // 備份 ZIP AES-256 加密（密碼僅伺服器端）
   backupEncryptEnabled: false,
   backupEncryptPass: '',
+  // AI 智慧輔助設定（Ollama / OpenAI 相容 API）
+  aiEnabled: true,
+  aiProvider: 'ollama',
+  aiBaseUrl: 'http://127.0.0.1:11434',
+  aiModel: 'qwen2.5:7b',
+  aiApiKey: '',
   // 總覽公告（最多 2 則；slot 0 亦鏡像到下方舊欄位以相容）
   announcements: null, // 載入時正規化為長度 2 的陣列
   announcementEnabled: false,
@@ -520,6 +526,8 @@ function getPublicSettings() {
     hasCustomLogo: !!(s.logoFile && fs.existsSync(path.join(BRAND_DIR, s.logoFile))),
     // 公開端只回「是否啟用簽章」，不回傳憑證／密碼
     pdfSignEnabled: !!s.pdfSignEnabled,
+    // AI 智慧助理啟用狀態
+    aiEnabled: s.aiEnabled !== false,
     // 版本宣告：主版號 + 自動建置指紋（改程式後重啟即變）
     version: ver.version,
     fullVersion: ver.fullVersion,
@@ -559,6 +567,13 @@ function getAdminSettings() {
       enabled: !!s.backupEncryptEnabled,
       hasPass: backupHasPass,
       ready: !!s.backupEncryptEnabled && backupHasPass,
+    },
+    ai: {
+      enabled: s.aiEnabled !== false,
+      provider: s.aiProvider || 'ollama',
+      baseUrl: s.aiBaseUrl || 'http://127.0.0.1:11434',
+      model: s.aiModel || 'qwen2.5:7b',
+      hasApiKey: !!(s.aiApiKey && String(s.aiApiKey).trim().length > 0),
     },
     announcement: getAnnouncementPublic(),
     announcements: getAnnouncementsPublic(),
@@ -611,6 +626,28 @@ function updateSettings(patch = {}) {
     String(patch.backupEncryptPass) !== ''
   ) {
     cur.backupEncryptPass = String(patch.backupEncryptPass).slice(0, 200);
+  }
+  // AI 智慧助理設定更新
+  if (patch.aiEnabled !== undefined) {
+    cur.aiEnabled = !!patch.aiEnabled;
+  }
+  if (patch.aiProvider !== undefined) {
+    cur.aiProvider = String(patch.aiProvider || 'ollama').trim();
+  }
+  if (patch.aiBaseUrl !== undefined) {
+    cur.aiBaseUrl = String(patch.aiBaseUrl || '').trim();
+  }
+  if (patch.aiModel !== undefined) {
+    cur.aiModel = String(patch.aiModel || '').trim();
+  }
+  if (patch.aiApiKeyClear) {
+    cur.aiApiKey = '';
+  } else if (
+    patch.aiApiKey !== undefined &&
+    patch.aiApiKey !== null &&
+    String(patch.aiApiKey).trim() !== ''
+  ) {
+    cur.aiApiKey = String(patch.aiApiKey).trim();
   }
   return saveRaw(cur);
 }

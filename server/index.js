@@ -61,6 +61,7 @@ const registerBackupRoutes = require('./routes/backups');
 const registerAuthRoutes = require('./routes/auth');
 const registerUserRoutes = require('./routes/users');
 const registerAttachmentRoutes = require('./routes/attachments');
+const registerAiRoutes = require('./routes/ai');
 const auditLog = require('./audit-log');
 const slaCron = require('./sla-cron');
 const previewService = require('./preview-service');
@@ -4268,6 +4269,12 @@ registerAttachmentRoutes(app, {
   pdfSign,
   writeApprovalPdf,
   UPLOAD_DIR,
+});
+
+// ---------- AI 智慧輔助服務（Ollama / OpenAI 相容 - Modular Route）----------
+registerAiRoutes(app, {
+  authMiddleware,
+  adminOnly,
 });
 
 
