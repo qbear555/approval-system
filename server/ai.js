@@ -1060,8 +1060,10 @@ function toTaiwanTerms(str) {
     [/部门/g, '部門'],
     [/单号/g, '單號'],
     [/申请人/g, '申請人'],
+    [/总金额/g, '總金額'],
     [/总计/g, '總計'],
     [/金额/g, '金額'],
+    [/币别/g, '幣別'],
     [/件数/g, '件數'],
     [/平均耗时/g, '平均耗時'],
     [/天数/g, '天數'],
@@ -1082,41 +1084,63 @@ async function askApprovalAnalytics({ question, user }) {
 
   const isMySQL = db.client === 'mysql' || process.env.DB_CLIENT === 'mysql';
   const dialectRule = isMySQL
-    ? '當前資料庫為 MySQL。日期計算請使用 NOW() - INTERVAL 30 DAY 或 DATE_SUB(NOW(), INTERVAL 30 DAY)。'
-    : "當前資料庫為 SQLite。日期計算請使用 datetime('now', '-30 days', 'localtime') 或 date('now', '-30 days')。";
+    ? `當前資料庫為 MySQL / MariaDB。
+- 日期計算：
+  * 「近30天」: ar.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+  * 「本季/近90天/當季」: ar.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY) 或 (QUARTER(ar.created_at) = QUARTER(NOW()) AND YEAR(ar.created_at) = YEAR(NOW()))
+  * 「本月」: ar.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
+- 金額提取（amount 存於 form_data JSON，若字串含逗號請替換後轉數字）：
+  SUM(CAST(REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ar.form_data, '$.amount')), '0'), ',', '') AS DECIMAL(15,2)))
+- 幣別提取（預設 NTD）：
+  COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ar.form_data, '$.currency')), 'NTD')`
+    : `當前資料庫為 SQLite。
+- 日期計算：
+  * 「近30天」: ar.created_at >= datetime('now', '-30 days', 'localtime')
+  * 「本季/近90天/當季」: ar.created_at >= datetime('now', '-90 days', 'localtime')
+  * 「本月」: ar.created_at >= date('now', 'start of month')
+- 金額提取：
+  SUM(CAST(COALESCE(json_extract(ar.form_data, '$.amount'), 0) AS NUMERIC))
+- 幣別提取：
+  COALESCE(json_extract(ar.form_data, '$.currency'), 'NTD')`;
 
   const schemaContext = `
 資料庫類型：${isMySQL ? 'MySQL' : 'SQLite'}。
-主要資料表結構說明：
+主要資料表結構與業務規則說明：
 1. approval_requests (簽核申請單)
    - id (單號, 整數主鍵)
    - workflow_id (對應 workflows.id)
    - title (申請主旨)
-   - form_data (JSON 字串，包含金額 amount 等欄位)
-   - requester_id (對應 users.id)
-   - status ('pending' 簽核中, 'approved' 已核准, 'rejected' 已駁回, 'returned' 退回)
+   - form_data (JSON 字串，包含 amount 金額、currency 幣別如 NTD/USD/JPY、vendor 廠商、item_name 品項名稱)
+   - requester_id (對應 users.id 申請人)
+   - status ('pending' 簽核中, 'approved' 已核准生效, 'rejected' 已駁回退回, 'draft' 草稿)
    - current_step (當前步驟序號)
    - created_at (送件時間，格式 'YYYY-MM-DD HH:MM:SS')
-   - completed_at (完成時間)
+   - completed_at (結案時間)
 
 2. workflows (簽核流程定義)
    - id (流程編號)
-   - name (流程名稱，例如：請假申請、費用報銷、物品請購申請)
-   - category (分類，例如：人事、總務、財務)
+   - name (流程名稱，例如：'請購申請(原物品採購單)', '支付申請(付款給廠商等)', '費用報支', '請假申請', '一般簽呈')
+   - category (流程分類，系統真實分類為：'財務採購', '人事差勤', '業務行政', '一般簽呈', '資訊總務'，請勿發明不存在的分類如'採購部')
    - active (1 啟用, 0 停用)
+
+★ 業務查詢關鍵對應：
+- 採購、請購、請款、付款、支出相關流程：
+  對應 workflows.category = '財務採購' 或 w.name LIKE '%請購%' OR w.name LIKE '%採購%' OR w.name LIKE '%支付%' OR w.name LIKE '%費用%'。
+- 核准單據：ar.status = 'approved'。
+- 若查詢涉及金額加總，請務必將金額與幣別呈現（或 GROUP BY 幣別），避免將 NTD、USD、JPY 混加。
 
 3. users (員工與主管帳號)
    - id (使用者編號)
    - username (帳號)
    - name (姓名)
    - role ('admin', 'general', 'manager')
-   - department (所屬部門名稱，字串，例如：管理部、財務部、業務部、技術部、採購部)
+   - department (所屬部門名稱，字串，例如：管理部、財務部、業務部、技術部、品保部)
 
-4. approval_actions (簽核動作紀錄)
+4. approval_actions (簽核動作歷程紀錄，非必要請勿 JOIN；單據是否核准直接以 approval_requests.status = 'approved' 為準，避免 JOIN actions 造成金額重複累加)
    - id (流水號)
    - request_id (對應 approval_requests.id)
    - actor_id (操作人 users.id)
-   - action_type ('approve' 核准, 'reject' 駁回, 'return' 退回, 'cosign' 會簽)
+   - action ('submit' 送出, 'approve' 關卡核准, 'reject' 駁回, 'return' 退回, 'cosign' 會簽)
    - comment (簽核意見說明)
    - created_at (動作時間)
 `;
@@ -1131,17 +1155,29 @@ ${schemaContext}
 【使用者問題】
 「${question}」
 
-【嚴格規則】
+【嚴格規則與指引】
 1. 只允許輸出單一條以 SELECT 開頭的查詢語句，絕不可包含任何 INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, REPLACE 或分號多重語句。
 2. 查詢結果最多限制 50 筆（使用 LIMIT 50）。
 3. 欄位命名請使用有意義的「台灣繁體企業專用」別名：
    - 流程/工作流一律使用「流程名稱」或「簽核流程」，★絕對禁止使用「程序名稱」或「程序」等非台灣用語！
-   - 單據一律使用「申請單號」、「主旨」、「申請人」、「部門」、「申請件數」、「狀態」。
+   - 單據欄位請使用「申請單號」、「主旨」、「申請人」、「部門」、「申請件數」、「核准件數」、「狀態」、「幣別」、「總金額」、「金額」。
 4. 日期語法規範：${dialectRule}
-5. 請嚴格將產出的 SQL 放在 \`\`\`sql 程式碼區塊中，勿輸出多餘解釋。
+5. 統計「核准」、「通過」時，★直接使用 ar.status = 'approved'，勿隨意 JOIN approval_actions 以免單據金額因多關卡審核而重複加總！
+6. 請款/採購/報銷等金額統計範例架構：
+   SELECT 
+     w.name AS 流程名稱,
+     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ar.form_data, '$.currency')), 'NTD') AS 幣別,
+     COUNT(ar.id) AS 核准件數,
+     SUM(CAST(REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ar.form_data, '$.amount')), '0'), ',', '') AS DECIMAL(15,2))) AS 總金額
+   FROM approval_requests ar
+   JOIN workflows w ON ar.workflow_id = w.id
+   WHERE ar.status = 'approved' AND (w.category = '財務採購' OR w.name LIKE '%請購%' OR w.name LIKE '%採購%' OR w.name LIKE '%支付%' OR w.name LIKE '%費用%')
+   GROUP BY w.name, 幣別
+   ORDER BY 總金額 DESC
+7. 請嚴格將產出的 SQL 放在 \`\`\`sql 程式碼區塊中，勿輸出多餘解釋。
 `;
 
-  const sqlMessages = [
+const sqlMessages = [
     { role: 'system', content: '你是專業 SQL 資料分析專家。只輸出合法純淨的 SELECT 查詢語句。' },
     { role: 'user', content: sqlPrompt },
   ];
@@ -1202,7 +1238,8 @@ ${JSON.stringify(previewData, null, 2)}
 \`\`\`
 
 請針對上述查詢結果，以企業高階幕僚口吻，為主管產出 2~4 點條理清晰的「📊 戰情數據洞察解讀」：
-- 簡要提煉核心數據結論（例如：哪個部門最多、總計金額、佔比、異常狀況等）
+- 簡要提煉核心數據結論（例如：總計金額、幣別、件數分佈、佔比、流程分類、各部門狀況等）
+- 若查詢結果為 0 筆，請明確說明當前條件下尚無符合單據或金額，並提供可能原因（如：該日期區間無已核准單據、流程名稱或篩選維度）及後續排查建議。
 - 請使用繁體中文，格式俐落清晰。
 `;
 
