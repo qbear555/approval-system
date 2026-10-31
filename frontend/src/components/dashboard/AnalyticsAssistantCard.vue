@@ -5,7 +5,7 @@
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:1.35rem">🧠</span>
           <h3 style="margin:0;font-size:1.15rem;color:#1e1b4b">企業簽核戰情 AI 智慧問答</h3>
-          <span class="badge" style="background:#e0e7ff;color:#4338ca;font-weight:600;font-size:0.75rem;padding:2px 8px">Text-to-SQL & BI</span>
+          <span class="badge" style="background:#e0e7ff;color:#4338ca;font-weight:600;font-size:0.75rem;padding:2px 8px">BI 戰情洞察</span>
         </div>
         <p style="margin:4px 0 0;font-size:0.88rem;color:#475569">
           直接輸入自然語言問題，由地端 AI 自動查詢簽核資料庫並產出統計表格與經營決策洞察報告。
@@ -55,7 +55,7 @@
       <div style="font-size:1.8rem;margin-bottom:8px;animation:ai-spin 2s infinite linear">🧠</div>
       <div style="font-weight:600;color:#334155;font-size:0.95rem">AI 正在進行戰情分析…</div>
       <div style="font-size:0.85rem;color:#64748b;margin-top:4px">
-        正在解析自然語言問題、生成安全讀取 SQL 並調度地端模型產出管理洞察…
+        正在解析自然語言問題、查詢資料庫並調度地端模型產出決策洞察…
       </div>
     </div>
 
@@ -96,38 +96,6 @@
       <div v-else-if="!historyData.error" class="muted" style="text-align:center;padding:16px;background:#f8fafc;border-radius:6px;font-size:0.88rem">
         查詢成功，但無符合條件的數據記錄。
       </div>
-
-      <!-- 產生的安全 SQL 顯示（支援折疊收合與一鍵複製） -->
-      <div v-if="cleanedSql" style="border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;overflow:hidden">
-        <div
-          style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;user-select:none"
-          @click="showSqlDetails = !showSqlDetails"
-        >
-          <div style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
-            <span style="font-weight:600;color:#475569">安全讀取 SQL</span>
-            <span style="font-size:0.75rem;color:#6366f1">
-              {{ showSqlDetails ? '▴ 收起' : '▾ 查看查詢指令' }}
-            </span>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <button
-              type="button"
-              class="btn outline xs"
-              style="padding:2px 8px;font-size:0.75rem"
-              title="複製 SQL 查詢語句"
-              @click.stop="copySql"
-            >
-              {{ copied ? '已複製 ✓' : '📋 複製 SQL' }}
-            </button>
-            <span class="tag xs" style="background:#e0f2fe;color:#0369a1">唯讀查詢保護</span>
-          </div>
-        </div>
-        <div v-if="showSqlDetails" style="padding:10px 14px;border-top:1px solid #e2e8f0;background:#ffffff">
-          <code style="display:block;white-space:pre-wrap;word-break:break-all;font-family:Consolas, Monaco, monospace;font-size:0.82rem;color:#0f172a;line-height:1.5">
-            {{ cleanedSql }}
-          </code>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -150,14 +118,6 @@ const errorMessage = ref('');
 const historyData = ref(null);
 const executionTime = ref(0);
 const totalRows = ref(0);
-const showSqlDetails = ref(false);
-const copied = ref(false);
-
-const cleanedSql = computed(() => {
-  let s = historyData.value?.sql || '';
-  // 繁體台灣慣用語防呆：替換「程序名稱」為「流程名稱」
-  return s.replace(/程序名稱/g, '流程名稱').replace(/程序/g, '流程');
-});
 
 const displayColumns = computed(() => {
   return historyData.value?.columns || [];
@@ -202,16 +162,6 @@ function formatCellValue(val) {
     return val.toLocaleString();
   }
   return String(val);
-}
-
-function copySql() {
-  if (!cleanedSql.value) return;
-  navigator.clipboard.writeText(cleanedSql.value).then(() => {
-    copied.value = true;
-    setTimeout(() => {
-      copied.value = false;
-    }, 2000);
-  });
 }
 </script>
 
