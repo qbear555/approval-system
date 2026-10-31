@@ -503,8 +503,8 @@
           </p>
         </div>
         <div>
-          <span v-if="aiStatus.reachable" class="tag" style="background:#ecfdf5;color:#047857;font-weight:600">
-            🟢 Ollama 連線正常 (v{{ aiStatus.version || '0.40+' }})
+          <span v-if="aiStatus.reachable || aiStatus.ok" class="tag" style="background:#ecfdf5;color:#047857;font-weight:600">
+            🟢 Ollama 連線正常 ({{ aiStatus.currentModel || '就緒' }})
           </span>
           <span v-else-if="aiStatus.checked" class="tag" style="background:#fef2f2;color:#b91c1c;font-weight:600">
             🔴 無法連線至 Ollama
@@ -531,6 +531,9 @@
           <div>
             <label>API 服務位址 (Base URL)</label>
             <input v-model="aiForm.aiBaseUrl" placeholder="http://127.0.0.1:11434" />
+            <span class="muted" style="font-size:0.8rem;display:block;margin-top:4px">
+              💡 若簽核系統部署於 NAS Docker，連線本機電腦請填寫電腦 LAN IP（例如 <code>http://192.168.99.100:11434</code>）
+            </span>
           </div>
         </div>
 
@@ -762,21 +765,22 @@ async function loadData() {
   // AI settings & status
   try {
     const aiData = await apiRequest('/api/ai/settings');
-    if (aiData && aiData.settings) {
-      aiForm.aiEnabled = aiData.settings.aiEnabled !== false;
-      aiForm.aiProvider = aiData.settings.aiProvider || 'ollama';
-      aiForm.aiBaseUrl = aiData.settings.aiBaseUrl || 'http://127.0.0.1:11434';
-      aiForm.aiModel = aiData.settings.aiModel || 'qwen2.5:7b';
-      aiForm.aiApiKey = aiData.settings.aiApiKey || '';
+    if (aiData) {
+      const s = aiData.settings || aiData;
+      aiForm.aiEnabled = (s.aiEnabled !== undefined ? s.aiEnabled : s.enabled) !== false;
+      aiForm.aiProvider = s.aiProvider || s.provider || 'ollama';
+      aiForm.aiBaseUrl = s.aiBaseUrl || s.baseUrl || 'http://127.0.0.1:11434';
+      aiForm.aiModel = s.aiModel || s.model || 'qwen2.5:7b';
+      aiForm.aiApiKey = s.aiApiKey || s.apiKey || '';
     }
   } catch {
     /* ignore */
   }
   try {
     const st = await apiRequest('/api/ai/status');
-    aiStatus.value = { checked: true, ...st };
+    aiStatus.value = { checked: true, ...st, reachable: Boolean(st && (st.ok || st.reachable)) };
   } catch {
-    aiStatus.value = { checked: true, reachable: false };
+    aiStatus.value = { checked: true, reachable: false, ok: false };
   }
 
   // Deploy logs
@@ -1236,7 +1240,12 @@ async function onSaveAiSettings() {
       },
     });
     toast.success('AI 設定已儲存');
-    await onTestAiConnection();
+    await loadData();
+    if (aiStatus.value.reachable || aiStatus.value.ok) {
+      toast.success(`AI 連線正常，可用模型：${aiStatus.value.models?.join(', ') || '無'}`);
+    } else {
+      toast.warning(`設定已儲存，但目前無法連線至 AI 服務：${aiStatus.value.error || '連線逾時'}`);
+    }
   } catch (err) {
     toast.error(err.message || '儲存失敗');
   } finally {
@@ -1248,9 +1257,9 @@ async function onTestAiConnection() {
   aiTesting.value = true;
   try {
     const st = await apiRequest('/api/ai/status');
-    aiStatus.value = { checked: true, ...st };
-    if (st.reachable) {
-      toast.success(`AI 連線成功！Ollama ${st.version ? 'v' + st.version : ''} 已就緒，模型數：${st.models?.length || 0}`);
+    aiStatus.value = { checked: true, ...st, reachable: Boolean(st && (st.ok || st.reachable)) };
+    if (st.reachable || st.ok) {
+      toast.success(`AI 連線成功！${st.currentModel ? '模型 [' + st.currentModel + '] ' : ''}已就緒（可用模型：${st.models?.join(', ') || '無'}）`);
     } else {
       toast.error(`無法連線至 Ollama：${st.error || '連線逾時'}`);
     }
