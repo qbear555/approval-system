@@ -727,7 +727,11 @@ async function triggerAiAudit(force = false) {
       aiError.value = '未取得分析內容';
     }
   } catch (err) {
-    aiError.value = err.message || 'AI 智慧審核連線失敗，請確認地端 Ollama 服務是否正常運作';
+    let msg = err.message || 'AI 智慧審核連線失敗，請確認地端 Ollama 服務是否正常運作';
+    if (msg.includes('ECONNREFUSED')) {
+      msg = `${msg}（若在 NAS 正式環境，請至「系統設定」確認 AI 服務位址是否指向運行模型之主機）`;
+    }
+    aiError.value = msg;
   } finally {
     aiLoading.value = false;
   }

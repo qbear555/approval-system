@@ -13,13 +13,16 @@ const db = require('./db');
  * 取得當前 AI 設定
  */
 function getAiConfig() {
-  let settings = {};
+  let ai = {};
   try {
-    settings = systemSettings.getAdminSettings ? systemSettings.getAdminSettings() : {};
+    if (systemSettings.getAiInternalConfig) {
+      ai = systemSettings.getAiInternalConfig();
+    } else if (systemSettings.getAdminSettings) {
+      ai = systemSettings.getAdminSettings().ai || {};
+    }
   } catch {
-    settings = {};
+    ai = {};
   }
-  const ai = settings.ai || {};
   return {
     enabled: ai.enabled !== false,
     baseUrl: String(ai.baseUrl || process.env.AI_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, ''),
@@ -173,7 +176,11 @@ async function sendChatRequest({ messages, temperature = 0.2, maxTokens = 1200 }
     );
 
     req.on('error', (err) => {
-      reject(new Error(`AI 服務請求失敗: ${err.message}`));
+      let msg = err.message;
+      if (err.code === 'ECONNREFUSED') {
+        msg = `無法連線至 AI 服務 (${config.baseUrl})。若在 NAS 正式環境，請確認「系統設定」中的 AI 服務端點是否指向運行模型之主機（如本機 PC IP 或 NAS 本地 Ollama 容器）。`;
+      }
+      reject(new Error(`AI 服務請求失敗: ${msg}`));
     });
     req.on('timeout', () => {
       req.destroy();

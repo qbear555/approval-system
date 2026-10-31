@@ -31,6 +31,13 @@ module.exports = function registerAiRoutes(app, { authMiddleware, adminOnly }) {
         baseUrl: config.baseUrl,
         model: config.model,
         hasApiKey: !!(config.apiKey && config.apiKey.length > 0),
+        settings: {
+          aiEnabled: config.enabled,
+          aiProvider: config.provider,
+          aiBaseUrl: config.baseUrl,
+          aiModel: config.model,
+          hasApiKey: !!(config.apiKey && config.apiKey.length > 0),
+        },
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -42,7 +49,14 @@ module.exports = function registerAiRoutes(app, { authMiddleware, adminOnly }) {
    */
   app.post('/api/ai/settings', authMiddleware, adminOnly, async (req, res) => {
     try {
-      const { enabled, provider, baseUrl, model, apiKey, clearApiKey } = req.body || {};
+      const body = req.body || {};
+      const enabled = body.aiEnabled !== undefined ? body.aiEnabled : body.enabled;
+      const provider = body.aiProvider !== undefined ? body.aiProvider : body.provider;
+      const baseUrl = body.aiBaseUrl !== undefined ? body.aiBaseUrl : body.baseUrl;
+      const model = body.aiModel !== undefined ? body.aiModel : body.model;
+      const apiKey = body.aiApiKey !== undefined ? body.aiApiKey : body.apiKey;
+      const clearApiKey = body.clearApiKey || body.aiApiKeyClear;
+
       const patch = {};
       if (enabled !== undefined) patch.aiEnabled = !!enabled;
       if (provider !== undefined) patch.aiProvider = String(provider).trim();

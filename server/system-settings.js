@@ -190,6 +190,11 @@ function loadRaw() {
         const announcements = loadAnnouncementsFromRaw(raw);
         return syncLegacyAnnounceFields(announcements);
       })(),
+      aiEnabled: raw.aiEnabled !== undefined ? !!raw.aiEnabled : DEFAULTS.aiEnabled,
+      aiProvider: raw.aiProvider ? String(raw.aiProvider).trim() : DEFAULTS.aiProvider,
+      aiBaseUrl: raw.aiBaseUrl != null ? String(raw.aiBaseUrl).trim() : DEFAULTS.aiBaseUrl,
+      aiModel: raw.aiModel ? String(raw.aiModel).trim() : DEFAULTS.aiModel,
+      aiApiKey: raw.aiApiKey != null ? String(raw.aiApiKey).trim() : '',
       updatedAt: raw.updatedAt || null,
     };
   } catch {
@@ -246,6 +251,11 @@ function saveRaw(settings) {
       }
       return syncLegacyAnnounceFields(items);
     })(),
+    aiEnabled: cur.aiEnabled !== undefined ? !!cur.aiEnabled : DEFAULTS.aiEnabled,
+    aiProvider: cur.aiProvider ? String(cur.aiProvider).trim() : DEFAULTS.aiProvider,
+    aiBaseUrl: cur.aiBaseUrl != null ? String(cur.aiBaseUrl).trim() : DEFAULTS.aiBaseUrl,
+    aiModel: cur.aiModel ? String(cur.aiModel).trim() : DEFAULTS.aiModel,
+    aiApiKey: cur.aiApiKey != null ? String(cur.aiApiKey).trim() : '',
     updatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(payload, null, 2), 'utf8');
@@ -666,6 +676,18 @@ function getBackupEncryptConfig() {
   };
 }
 
+/** 供伺服器端內部發送請求之完整 AI 設定（含 apiKey） */
+function getAiInternalConfig() {
+  const s = loadRaw();
+  return {
+    enabled: s.aiEnabled !== false,
+    provider: s.aiProvider || 'ollama',
+    baseUrl: s.aiBaseUrl || 'http://127.0.0.1:11434',
+    model: s.aiModel || 'qwen2.5:7b',
+    apiKey: s.aiApiKey || '',
+  };
+}
+
 function getPdfSignConfig() {
   const s = loadRaw();
   const hasCert = !!(
@@ -1012,6 +1034,7 @@ module.exports = {
   clearPdfSignCert,
   createSelfSignedPdfSignCert,
   getBackupEncryptConfig,
+  getAiInternalConfig,
   DEFAULT_LOGO_URL,
   DEFAULT_COMPANY_NAME,
   BRAND_DIR,
