@@ -67,11 +67,11 @@
     <!-- 結果展示 -->
     <div v-if="historyData && !loading" class="analytics-results" style="display:flex;flex-direction:column;gap:14px">
       <!-- 洞察報告區 -->
-      <div v-if="historyData.summary" class="insight-box" style="padding:14px 18px;background:#eef2ff;border-left:4px solid #6366f1;border-radius:6px;font-size:0.92rem;line-height:1.7;color:#1e1b4b">
+      <div v-if="displaySummary" class="insight-box" style="padding:14px 18px;background:#eef2ff;border-left:4px solid #6366f1;border-radius:6px;font-size:0.92rem;line-height:1.7;color:#1e1b4b">
         <div style="font-weight:700;color:#3730a3;margin-bottom:6px;display:flex;align-items:center;gap:6px">
           <span>📊 戰情決策洞察</span>
         </div>
-        <div style="white-space:pre-wrap">{{ historyData.summary }}</div>
+        <div style="white-space:pre-wrap">{{ displaySummary }}</div>
       </div>
 
       <!-- 數據表格 -->
@@ -79,14 +79,14 @@
         <table class="data" style="width:100%;margin:0;font-size:0.88rem">
           <thead>
             <tr style="background:#f1f5f9;position:sticky;top:0;z-index:2">
-              <th v-for="col in historyData.columns" :key="col" style="padding:8px 12px;font-weight:600;color:#334155;border-bottom:1px solid #cbd5e1">
-                {{ col }}
+              <th v-for="col in displayColumns" :key="col" style="padding:8px 12px;font-weight:600;color:#334155;border-bottom:1px solid #cbd5e1">
+                {{ formatColumnTitle(col) }}
               </th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(row, rIdx) in historyData.rows" :key="rIdx" :style="rIdx % 2 === 1 ? 'background:#f8fafc' : ''">
-              <td v-for="col in historyData.columns" :key="col" style="padding:8px 12px;border-bottom:1px solid #f1f5f9;color:#1e293b">
+              <td v-for="col in displayColumns" :key="col" style="padding:8px 12px;border-bottom:1px solid #f1f5f9;color:#1e293b">
                 {{ formatCellValue(row[col]) }}
               </td>
             </tr>
@@ -97,20 +97,43 @@
         查詢成功，但無符合條件的數據記錄。
       </div>
 
-      <!-- 產生的安全 SQL 顯示 -->
-      <div v-if="historyData.sql" style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:0.8rem;color:#64748b">
-        <div>
-          <span style="font-weight:600;color:#475569">安全讀取 SQL：</span>
-          <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#0f172a;font-family:monospace">{{ historyData.sql }}</code>
+      <!-- 產生的安全 SQL 顯示（支援折疊收合與一鍵複製） -->
+      <div v-if="cleanedSql" style="border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;overflow:hidden">
+        <div
+          style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;user-select:none"
+          @click="showSqlDetails = !showSqlDetails"
+        >
+          <div style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+            <span style="font-weight:600;color:#475569">安全讀取 SQL</span>
+            <span style="font-size:0.75rem;color:#6366f1">
+              {{ showSqlDetails ? '▴ 收起' : '▾ 查看查詢指令' }}
+            </span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button
+              type="button"
+              class="btn outline xs"
+              style="padding:2px 8px;font-size:0.75rem"
+              title="複製 SQL 查詢語句"
+              @click.stop="copySql"
+            >
+              {{ copied ? '已複製 ✓' : '📋 複製 SQL' }}
+            </button>
+            <span class="tag xs" style="background:#e0f2fe;color:#0369a1">唯讀查詢保護</span>
+          </div>
         </div>
-        <span class="tag xs" style="background:#e0f2fe;color:#0369a1">唯讀查詢保護</span>
+        <div v-if="showSqlDetails" style="padding:10px 14px;border-top:1px solid #e2e8f0;background:#ffffff">
+          <code style="display:block;white-space:pre-wrap;word-break:break-all;font-family:Consolas, Monaco, monospace;font-size:0.82rem;color:#0f172a;line-height:1.5">
+            {{ cleanedSql }}
+          </code>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { askAiAnalytics } from '@/api/requests';
 
 const quickPrompts = [
@@ -127,6 +150,28 @@ const errorMessage = ref('');
 const historyData = ref(null);
 const executionTime = ref(0);
 const totalRows = ref(0);
+const showSqlDetails = ref(false);
+const copied = ref(false);
+
+const cleanedSql = computed(() => {
+  let s = historyData.value?.sql || '';
+  // 繁體台灣慣用語防呆：替換「程序名稱」為「流程名稱」
+  return s.replace(/程序名稱/g, '流程名稱').replace(/程序/g, '流程');
+});
+
+const displayColumns = computed(() => {
+  return historyData.value?.columns || [];
+});
+
+const displaySummary = computed(() => {
+  let s = historyData.value?.summary || historyData.value?.insightText || '';
+  return s.replace(/程序名稱/g, '流程名稱').replace(/程序/g, '流程');
+});
+
+function formatColumnTitle(col) {
+  if (col === '程序名稱' || col === '程序') return '流程名稱';
+  return col;
+}
 
 function selectPrompt(p) {
   questionInput.value = p.replace(/^[^\s]+\s*/, '');
@@ -157,6 +202,16 @@ function formatCellValue(val) {
     return val.toLocaleString();
   }
   return String(val);
+}
+
+function copySql() {
+  if (!cleanedSql.value) return;
+  navigator.clipboard.writeText(cleanedSql.value).then(() => {
+    copied.value = true;
+    setTimeout(() => {
+      copied.value = false;
+    }, 2000);
+  });
 }
 </script>
 

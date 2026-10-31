@@ -1045,19 +1045,54 @@ ${summaryItems.join('\n')}
 /**
  * Phase 3: 自然語言簽核戰情智慧問答 (Text-to-SQL + 數據洞察)
  */
+
+// 繁體中文與台灣企業簽核慣用語字典
+function toTaiwanTerms(str) {
+  if (!str) return str;
+  const dict = [
+    [/程序名稱/g, '流程名稱'],
+    [/程序/g, '流程'],
+    [/签核流程/g, '簽核流程'],
+    [/流程名称/g, '流程名稱'],
+    [/申请件数/g, '申請件數'],
+    [/申请量/g, '申請件數'],
+    [/状态/g, '狀態'],
+    [/部门/g, '部門'],
+    [/单号/g, '單號'],
+    [/申请人/g, '申請人'],
+    [/总计/g, '總計'],
+    [/金额/g, '金額'],
+    [/件数/g, '件數'],
+    [/平均耗时/g, '平均耗時'],
+    [/天数/g, '天數'],
+    [/时间/g, '時間'],
+    [/完成时间/g, '完成時間'],
+  ];
+  let res = str;
+  for (const [re, val] of dict) {
+    res = res.replace(re, val);
+  }
+  return res;
+}
+
 async function askApprovalAnalytics({ question, user }) {
   if (!question || !String(question).trim()) {
     throw new Error('請提供查詢問題內容');
   }
 
+  const isMySQL = db.client === 'mysql' || process.env.DB_CLIENT === 'mysql';
+  const dialectRule = isMySQL
+    ? '當前資料庫為 MySQL。日期計算請使用 NOW() - INTERVAL 30 DAY 或 DATE_SUB(NOW(), INTERVAL 30 DAY)。'
+    : "當前資料庫為 SQLite。日期計算請使用 datetime('now', '-30 days', 'localtime') 或 date('now', '-30 days')。";
+
   const schemaContext = `
-資料庫類型：相容 MySQL 與 SQLite 標準 SQL 語法。
+資料庫類型：${isMySQL ? 'MySQL' : 'SQLite'}。
 主要資料表結構說明：
 1. approval_requests (簽核申請單)
    - id (單號, 整數主鍵)
    - workflow_id (對應 workflows.id)
-   - title (主旨)
-   - form_data (JSON 字串，包含 amount 等欄位)
+   - title (申請主旨)
+   - form_data (JSON 字串，包含金額 amount 等欄位)
    - requester_id (對應 users.id)
    - status ('pending' 簽核中, 'approved' 已核准, 'rejected' 已駁回, 'returned' 退回)
    - current_step (當前步驟序號)
@@ -1066,33 +1101,29 @@ async function askApprovalAnalytics({ question, user }) {
 
 2. workflows (簽核流程定義)
    - id (流程編號)
-   - name (流程名稱，例如：請假申請、費用報支、請購申請)
+   - name (流程名稱，例如：請假申請、費用報銷、物品請購申請)
    - category (分類，例如：人事、總務、財務)
-   - is_active (1 啟用, 0 停用)
+   - active (1 啟用, 0 停用)
 
 3. users (員工與主管帳號)
    - id (使用者編號)
    - username (帳號)
    - name (姓名)
    - role ('admin', 'general', 'manager')
-   - department_id (對應 departments.id)
+   - department (所屬部門名稱，字串，例如：管理部、財務部、業務部、技術部、採購部)
 
-4. departments (組織部門)
-   - id (部門編號)
-   - name (部門名稱，例如：管理部、財務部、業務部、技術部)
-
-5. approval_actions (簽核動作紀錄)
+4. approval_actions (簽核動作紀錄)
    - id (流水號)
    - request_id (對應 approval_requests.id)
    - actor_id (操作人 users.id)
-   - action_type ('approve', 'reject', 'return', 'cosign')
-   - comment (意見說明)
+   - action_type ('approve' 核准, 'reject' 駁回, 'return' 退回, 'cosign' 會簽)
+   - comment (簽核意見說明)
    - created_at (動作時間)
 `;
 
   const sqlPrompt = `
 你是一位精通 SQL 數據庫分析的企業商業智慧（BI）專家。
-請依據使用者的自然語言提問，產出一條高效、語法嚴謹且相容 MySQL/SQLite 的唯讀 SELECT SQL 查詢語句。
+請依據使用者的自然語言提問，產出一條高效、語法嚴謹且相容當前資料庫的唯讀 SELECT SQL 查詢語句。
 
 【資料庫結構】
 ${schemaContext}
@@ -1103,8 +1134,11 @@ ${schemaContext}
 【嚴格規則】
 1. 只允許輸出單一條以 SELECT 開頭的查詢語句，絕不可包含任何 INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, REPLACE 或分號多重語句。
 2. 查詢結果最多限制 50 筆（使用 LIMIT 50）。
-3. 欄位命名請使用有意義的繁體中文別名（例如：SELECT d.name AS 部門, COUNT(*) AS 件數）。
-4. 請嚴格將產出的 SQL 放在 \`\`\`sql 程式碼區塊中，勿輸出多餘解釋。
+3. 欄位命名請使用有意義的「台灣繁體企業專用」別名：
+   - 流程/工作流一律使用「流程名稱」或「簽核流程」，★絕對禁止使用「程序名稱」或「程序」等非台灣用語！
+   - 單據一律使用「申請單號」、「主旨」、「申請人」、「部門」、「申請件數」、「狀態」。
+4. 日期語法規範：${dialectRule}
+5. 請嚴格將產出的 SQL 放在 \`\`\`sql 程式碼區塊中，勿輸出多餘解釋。
 `;
 
   const sqlMessages = [
@@ -1122,13 +1156,16 @@ ${schemaContext}
   }
 
   // 安全防護驗證：只允許純 SELECT
-  const sanitized = generatedSql.replace(/\s+/g, ' ').trim();
+  let sanitized = generatedSql.replace(/\s+/g, ' ').trim();
   if (!/^SELECT\s+/i.test(sanitized)) {
     throw new Error('產生的查詢不符合唯讀安全規範（必須為 SELECT）');
   }
   if (/;\s*\S+/i.test(sanitized) || /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|CREATE)\b/i.test(sanitized)) {
     throw new Error('偵測到潛在不安全的 SQL 指令，已予以攔截');
   }
+
+  sanitized = toTaiwanTerms(sanitized);
+  generatedSql = toTaiwanTerms(generatedSql);
 
   // 執行查詢
   let queryRows = [];
@@ -1142,6 +1179,16 @@ ${schemaContext}
     generatedSql = fallbackSql;
   }
 
+  // 正規化查詢結果鍵值為繁體中文
+  if (queryRows.length > 0) {
+    queryRows = queryRows.map(row => {
+      const newRow = {};
+      for (const [k, v] of Object.entries(row)) {
+        newRow[toTaiwanTerms(k)] = v;
+      }
+      return newRow;
+    });
+  }
   const columns = queryRows.length > 0 ? Object.keys(queryRows[0]) : [];
 
   // 將查詢結果回傳給 AI 撰寫「數據洞察摘要」
