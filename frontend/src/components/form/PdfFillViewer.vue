@@ -11,7 +11,15 @@
         <button v-if="pageCount > 1" type="button" class="btn sm outline" :disabled="page >= pageCount" @click="page++">▶</button>
       </div>
     </div>
-    <div v-if="error" class="error-msg" style="padding:12px">{{ error }}</div>
+    <div v-if="error" class="error-msg" style="padding:14px 16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;margin-bottom:12px;line-height:1.6">
+      <div style="font-weight:600;font-size:0.95rem;margin-bottom:4px;display:flex;align-items:center;gap:6px">
+        <span>⚠️ 紙本底圖載入提示</span>
+      </div>
+      <div style="font-size:0.88rem;color:#7f1d1d">{{ error }}</div>
+      <div style="font-size:0.82rem;color:#991b1b;margin-top:6px">
+        💡 提示：您可直接於下方「表單欄位」填寫資料送出，不影響正常簽核流程。
+      </div>
+    </div>
     <div v-else class="pdf-fill-stage">
       <div class="pdf-fill-page">
         <canvas ref="canvasEl"></canvas>
@@ -144,7 +152,12 @@ async function draw() {
       });
     }
   } catch (e) {
-    error.value = e.message || '紙本底圖載入失敗';
+    const raw = e && (e.message || String(e));
+    if (raw.includes('Missing PDF') || raw.includes('404') || raw.includes('找不到底圖檔案')) {
+      error.value = '無法載入此流程指定的紙本底圖檔案（伺服器無此檔案）。若您是管理員，請至「表單與流程管理」重新上傳底圖 PDF。';
+    } else {
+      error.value = raw || '紙本底圖載入失敗';
+    }
   }
 }
 

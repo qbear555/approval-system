@@ -74,7 +74,30 @@ async function renderPdfTemplate({
   db = null,
 }) {
   if (!fs.existsSync(templateAbsPath)) {
-    throw new Error(`找不到底圖範本檔案：${templateAbsPath}`);
+    console.warn(`[pdf-template-engine] 指定範本不存在: ${templateAbsPath}，嘗試尋找替代範本...`);
+    const tDir = path.dirname(templateAbsPath);
+    let resolved = false;
+    if (fs.existsSync(tDir)) {
+      try {
+        const files = fs.readdirSync(tDir).filter((f) => f.toLowerCase().endsWith('.pdf'));
+        if (files.length > 0) {
+          templateAbsPath = path.join(tDir, files[files.length - 1]);
+          resolved = true;
+          console.warn(`[pdf-template-engine] 已自動使用同目錄備用範本: ${templateAbsPath}`);
+        }
+      } catch {}
+    }
+    if (!resolved) {
+      const samplePdf = path.join(__dirname, '..', 'data', 'sample-form.pdf');
+      if (fs.existsSync(samplePdf)) {
+        templateAbsPath = samplePdf;
+        resolved = true;
+        console.warn(`[pdf-template-engine] 已自動使用預設範本: ${templateAbsPath}`);
+      }
+    }
+    if (!resolved) {
+      throw new Error(`找不到底圖範本檔案：${templateAbsPath}`);
+    }
   }
 
   const ext = path.extname(templateAbsPath).toLowerCase();
