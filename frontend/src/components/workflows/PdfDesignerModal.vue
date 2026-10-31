@@ -13,8 +13,11 @@
               📁 上傳底圖
               <input type="file" accept=".pdf,.png,.jpg,.jpeg" class="hidden" @change="onUpload" />
             </label>
-            <button type="button" class="tool-btn accent" :disabled="scanning" @click="scan">
-              {{ scanning ? '掃描中…' : '✨ 智慧掃描' }}
+            <button type="button" class="tool-btn accent" :disabled="scanning" :title="'利用 AI 辨識紙本底圖中的欄位與簽章，並推薦排版與 Schema'" @click="scan">
+              {{ scanning ? '🤖 AI 分析排版中…' : '🤖✨ AI 智慧掃描' }}
+            </button>
+            <button v-if="aiScanResult" type="button" class="tool-btn" style="background:#e0e7ff;color:#3730a3;font-weight:600" title="查看最近一次 AI 掃描建議與匯出" @click="showAiScanModal = true">
+              📋 查看 AI 建議
             </button>
             <button type="button" class="tool-btn" :disabled="page <= 1" @click="changePage(-1)">◀</button>
             <span class="zoom-val">第 {{ page }} / {{ pageCount }} 頁</span>
@@ -154,6 +157,60 @@
           </div>
         </aside>
       </div>
+
+      <!-- AI 掃描建議預覽彈窗 -->
+      <div v-if="showAiScanModal" class="ai-scan-modal-backdrop" @click.self="showAiScanModal = false">
+        <div class="ai-scan-modal-card">
+          <div class="ai-scan-modal-header">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:1.4rem">🤖✨</span>
+              <div>
+                <h3 style="margin:0;font-size:1.1rem">AI 智慧掃描排版結果</h3>
+                <span class="muted" style="font-size:0.85rem">
+                  已識別出 {{ aiScanResult?.fields?.length || 0 }} 個欄位與簽章格
+                </span>
+              </div>
+            </div>
+            <button type="button" class="btn sm outline" @click="showAiScanModal = false">✕</button>
+          </div>
+
+          <div class="ai-scan-modal-body">
+            <div class="ai-meta-banner">
+              <div><strong>建議表單名稱：</strong>{{ aiScanResult?.workflowName || '自訂表單' }}</div>
+              <div><strong>建議表單分類：</strong><span class="field-type-tag">{{ aiScanResult?.category || '一般簽呈' }}</span></div>
+              <div v-if="aiScanResult?.description" class="muted" style="margin-top:4px;font-size:0.85rem">
+                說明：{{ aiScanResult.description }}
+              </div>
+            </div>
+
+            <div style="margin-top:14px">
+              <strong style="font-size:0.9rem">識別欄位與簽核格清單：</strong>
+              <div class="ai-fields-list">
+                <div v-for="(f, i) in aiScanResult?.fields || []" :key="i" class="ai-field-chip">
+                  <span class="ai-field-seq">{{ i + 1 }}</span>
+                  <span class="ai-field-name">{{ f.name }}</span>
+                  <span class="ai-field-type" :class="'type-' + f.type">{{ f.type }}</span>
+                  <span v-if="f.required" style="color:#ef4444;font-size:0.75rem">*必填</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ai-scan-modal-footer">
+            <button type="button" class="btn outline" style="display:inline-flex;align-items:center;gap:4px" @click="exportAiScanResult">
+              <span>📥</span> 匯出 AI 建議排版 (JSON)
+            </button>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn outline" @click="applyAiScanResult(false)">
+                ➕ 追加至現有畫布
+              </button>
+              <button type="button" class="btn primary" @click="applyAiScanResult(true)">
+                ✨ 覆蓋套用至畫布
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </Teleport>
 </template>
@@ -161,6 +218,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { apiRequest } from '@/api/client';
+import { useToastStore } from '@/stores/toast';
 import { getPdfjs } from '@/lib/pdfjs';
 import {
   PAGE_W,
@@ -187,6 +245,7 @@ const props = defineProps({
   layout: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits(['close', 'save']);
+const toast = useToastStore();
 
 const DIRS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const PAPER_TYPES = [
@@ -208,6 +267,8 @@ const page = ref(1);
 const pageCount = ref(1);
 const scanning = ref(false);
 const fileLabel = ref('');
+const showAiScanModal = ref(false);
+const aiScanResult = ref(null);
 const objects = reactive([]);
 const fields = reactive([]);
 const selectedId = ref('');
@@ -612,6 +673,60 @@ async function onUpload(ev) {
 async function scan() {
   scanning.value = true;
   try {
+    // 1. 優先使用地端 AI 進行視覺與文字結構排版分析
+    let textItems = [];
+    if (pdfPage) {
+      try {
+        const textContent = await pdfPage.getTextContent();
+        textItems = (textContent.items || [])
+          .map((item) => ({
+            text: String(item.str || '').trim(),
+            x: Math.round(item.transform[4]),
+            y: Math.round(item.transform[5]),
+            w: Math.round(item.width),
+            h: Math.round(item.height),
+          }))
+          .filter((it) => it.text);
+      } catch (err) {
+        console.warn('[AI] 提取 PDF 文字結構失敗:', err);
+      }
+    }
+
+    let imageBase64 = null;
+    if (canvasEl.value) {
+      try {
+        imageBase64 = canvasEl.value.toDataURL('image/jpeg', 0.85);
+      } catch (e) {
+        console.warn('[AI] 擷取畫布底圖失敗:', e);
+      }
+    }
+
+    if (imageBase64 || textItems.length > 0) {
+      try {
+        const aiRes = await apiRequest('/api/ai/scan-form', {
+          method: 'POST',
+          body: {
+            imageBase64,
+            textItems,
+            width: canvasEl.value?.width || 595,
+            height: canvasEl.value?.height || 842,
+            page: page.value,
+          },
+        });
+
+        if (aiRes && aiRes.success && Array.isArray(aiRes.fields) && aiRes.fields.length > 0) {
+          aiScanResult.value = aiRes;
+          showAiScanModal.value = true;
+          fileLabel.value = `AI 識別 ${aiRes.fields.length} 個欄位/簽章`;
+          toast.success(`AI 掃描完成！識別出 ${aiRes.fields.length} 個欄位`);
+          return;
+        }
+      } catch (aiErr) {
+        console.warn('[AI] 智慧掃描失敗，回退至本地特徵檢測:', aiErr);
+      }
+    }
+
+    // 2. 本地回退檢測
     let found = [];
     if (pdfPage && pdfViewport) found = await detectPdfWidgets(pdfPage, pdfViewport, page.value);
     if (!found.length && canvasEl.value) {
@@ -619,14 +734,66 @@ async function scan() {
     }
     if (!found.length) {
       fileLabel.value = '沒有掃到可建立的欄位';
+      toast.warning('未能自動識別欄位，您可使用右側面板手動新增');
       return;
     }
     fields.push(...found);
     selectedId.value = found[found.length - 1].id;
     fileLabel.value = `已掃描 ${found.length} 個欄位`;
+    toast.success(`已檢測並建立 ${found.length} 個欄位`);
+  } catch (err) {
+    toast.error(err.message || '掃描失敗');
   } finally {
     scanning.value = false;
   }
+}
+
+function exportAiScanResult() {
+  if (!aiScanResult.value) return;
+  const jsonStr = JSON.stringify(aiScanResult.value, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `AI掃描建議排版_${aiScanResult.value.workflowName || '表單'}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast.success('已匯出 AI 建議排版 JSON 檔案');
+}
+
+function applyAiScanResult(overwrite = false) {
+  if (!aiScanResult.value) return;
+  const newFields = (aiScanResult.value.fields || []).map((f) =>
+    newPaperField({
+      name: f.name,
+      type: f.type,
+      rx: f.rx,
+      ry: f.ry,
+      rw: f.rw,
+      rh: f.rh,
+      required: f.required,
+      options: f.options,
+      page: page.value,
+    })
+  );
+
+  if (props.mode === 'objects') {
+    if (overwrite) {
+      objects.splice(0, objects.length, ...(aiScanResult.value.canvasObjects || []));
+    } else {
+      objects.push(...(aiScanResult.value.canvasObjects || []));
+    }
+  } else {
+    if (overwrite) {
+      fields.splice(0, fields.length, ...newFields);
+    } else {
+      fields.push(...newFields);
+    }
+    if (newFields.length) selectedId.value = newFields[newFields.length - 1].id;
+  }
+
+  showAiScanModal.value = false;
+  toast.success(`已套用 AI 建議排版（共 ${newFields.length} 個欄位與簽章格）`);
 }
 
 function save() {
@@ -781,4 +948,106 @@ onMounted(async () => {
 .table-tools { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .check { flex-direction: row !important; align-items: center; }
 .hidden { display: none; }
+
+/* AI Scan Modal */
+.ai-scan-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.ai-scan-modal-card {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 620px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  color: #1e293b;
+}
+.ai-scan-modal-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+}
+.ai-scan-modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+.ai-meta-banner {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  color: #166534;
+}
+.ai-fields-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.ai-field-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+.ai-field-seq {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+.ai-field-name {
+  font-weight: 500;
+}
+.ai-field-type {
+  font-size: 0.75rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #334155;
+}
+.ai-field-type.type-signature {
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 600;
+}
+.ai-field-type.type-date {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+.ai-field-type.type-number {
+  background: #dcfce7;
+  color: #15803d;
+}
+.ai-scan-modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border, #e2e8f0);
+  background: #f8fafc;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 </style>

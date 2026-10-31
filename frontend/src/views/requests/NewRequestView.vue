@@ -192,7 +192,17 @@
           </div>
 
           <div v-if="needTitle" class="field">
-            <label>{{ isExpenseWorkflow(selected) ? '主旨 *（費用報支）' : '主旨 *（一般簽呈）' }}</label>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <label style="margin:0">{{ isExpenseWorkflow(selected) ? '主旨 *（費用報支）' : '主旨 *（一般簽呈）' }}</label>
+              <button
+                type="button"
+                class="btn sm outline"
+                style="padding:2px 8px;font-size:0.78rem;border-color:#818cf8;color:#4338ca;background:#eef2ff;display:inline-flex;align-items:center;gap:4px"
+                @click="openPolishModal('title')"
+              >
+                <span>✨</span> AI 潤飾主旨
+              </button>
+            </div>
             <input
               v-model="title"
               maxlength="200"
@@ -202,8 +212,18 @@
           </div>
 
           <div v-if="selected" id="custom-form-area">
-            <div class="form-section-title">
-              <strong>流程表單</strong><span class="muted">依所選流程自動顯示</span>
+            <div class="form-section-title" style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <strong>流程表單</strong><span class="muted" style="margin-left:6px">依所選流程自動顯示</span>
+              </div>
+              <button
+                type="button"
+                class="btn sm outline"
+                style="padding:2px 8px;font-size:0.78rem;border-color:#818cf8;color:#4338ca;background:#eef2ff;display:inline-flex;align-items:center;gap:4px"
+                @click="openPolishModal('form')"
+              >
+                <span>✨</span> AI 潤飾事由/說明
+              </button>
             </div>
             <PdfFillViewer
               v-if="pdfTemplate"
@@ -382,12 +402,115 @@
       @close="showPicker = false"
       @confirm="onPickedApproved"
     />
+
+    <!-- AI 潤飾公文彈窗 -->
+    <Teleport to="body">
+      <div v-if="showPolishModal" class="ai-polish-modal-backdrop" @click.self="showPolishModal = false">
+        <div class="ai-polish-modal-card">
+          <div class="ai-polish-modal-header">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:1.3rem">✨</span>
+              <div>
+                <h3 style="margin:0;font-size:1.05rem">AI 公文事由智慧潤飾</h3>
+                <span class="muted" style="font-size:0.82rem">自動將簡短草稿擴充潤飾為規範的商務簽呈公文格式</span>
+              </div>
+            </div>
+            <button type="button" class="btn sm outline" @click="showPolishModal = false">✕</button>
+          </div>
+
+          <div class="ai-polish-modal-body">
+            <!-- 目標與風格選擇 -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+              <div>
+                <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:4px">套用目標欄位</label>
+                <select v-model="polishTarget" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid #cbd5e1">
+                  <option value="title">主旨（{{ isExpenseWorkflow(selected) ? '費用報支' : '簽呈主旨' }}）</option>
+                  <option v-for="(val, key) in formData" :key="key" :value="key">
+                    表單欄位：{{ key }}
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:4px">潤飾風格</label>
+                <select v-model="polishStyle" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid #cbd5e1">
+                  <option value="formal">🏢 正式公文簽呈（主旨、原由、效益、預算）</option>
+                  <option value="bullet">📑 條列式重點（清晰條列清單）</option>
+                  <option value="concise">💡 精煉摘要（30~50 字精準核心）</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- 草稿輸入 -->
+            <div style="margin-bottom:12px">
+              <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:4px">
+                原始草稿或想法：
+              </label>
+              <textarea
+                v-model="polishInput"
+                rows="4"
+                style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:0.88rem;line-height:1.5"
+                placeholder="例如：請款買3台電腦給新進同仁用，舊的太慢常當機，約15萬元。"
+              ></textarea>
+            </div>
+
+            <!-- 潤飾進行中 -->
+            <div v-if="polishing" style="text-align:center;padding:16px;background:#f8fafc;border-radius:8px;margin-bottom:12px">
+              <div class="spinner-sm" style="margin:0 auto 8px"></div>
+              <strong style="color:#4338ca">RTX 5080 AI 正在為您潤飾公文格式…</strong>
+              <div class="muted" style="font-size:0.82rem;margin-top:4px">條理化重組背景原由、預期效益與規範請核語句</div>
+            </div>
+
+            <!-- 潤飾成果對照 -->
+            <div v-if="polishResult && !polishing" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <label style="font-size:0.85rem;font-weight:600;color:#1e40af">
+                  ✨ AI 潤飾建議內容：
+                </label>
+                <button
+                  type="button"
+                  class="btn sm outline"
+                  style="font-size:0.75rem;padding:2px 8px"
+                  @click="polishInput = polishResult"
+                >
+                  複製到草稿重新潤飾
+                </button>
+              </div>
+              <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;font-size:0.88rem;line-height:1.6;white-space:pre-wrap;color:#166534">
+                {{ polishResult }}
+              </div>
+            </div>
+          </div>
+
+          <div class="ai-polish-modal-footer">
+            <button type="button" class="btn outline" @click="showPolishModal = false">取消</button>
+            <button
+              v-if="!polishResult"
+              type="button"
+              class="btn primary"
+              :disabled="polishing || !polishInput.trim()"
+              @click="startPolish"
+            >
+              {{ polishing ? '潤飾中…' : '✨ 開始 AI 潤飾' }}
+            </button>
+            <button
+              v-else
+              type="button"
+              class="btn primary"
+              @click="applyPolishedText"
+            >
+              ✅ 採用此內容並填入
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { apiRequest } from '@/api/client';
 import { createRequest, deleteAttachment, fetchLeavePrincipals, fetchRequest, fetchRequestPdf, updateRequest } from '@/api/requests';
 import FormFields from '@/components/form/FormFields.vue';
 import PdfFillViewer from '@/components/form/PdfFillViewer.vue';
@@ -461,6 +584,69 @@ const notifyOn = ref(true);
 const notifyApproved = ref(true);
 const notifyRejected = ref(false);
 const notifyStep = ref(false);
+
+// AI 公文事由潤飾
+const showPolishModal = ref(false);
+const polishTarget = ref('title');
+const polishInput = ref('');
+const polishStyle = ref('formal');
+const polishing = ref(false);
+const polishResult = ref(null);
+
+function openPolishModal(target = 'title') {
+  polishResult.value = null;
+  if (target === 'title') {
+    polishTarget.value = 'title';
+    polishInput.value = title.value || '';
+  } else {
+    const textKey = Object.keys(formData.value).find((k) =>
+      /reason|desc|memo|note|事由|說明|備註/i.test(k)
+    ) || Object.keys(formData.value)[0] || 'title';
+    polishTarget.value = textKey;
+    polishInput.value = formData.value[textKey] ? String(formData.value[textKey]) : (title.value || '');
+  }
+  showPolishModal.value = true;
+}
+
+async function startPolish() {
+  if (!polishInput.value.trim()) {
+    toast.error('請先輸入欲潤飾的草稿內容');
+    return;
+  }
+  polishing.value = true;
+  try {
+    const res = await apiRequest('/api/ai/polish-text', {
+      method: 'POST',
+      body: {
+        text: polishInput.value.trim(),
+        style: polishStyle.value,
+        workflowName: selected.value?.name || '',
+        category: selected.value?.category || '',
+      },
+    });
+    if (res && res.success && res.polishedText) {
+      polishResult.value = res.polishedText;
+      toast.success('AI 潤飾完成！');
+    } else {
+      throw new Error(res.error || '潤飾失敗');
+    }
+  } catch (err) {
+    toast.error(err.message || 'AI 潤飾失敗');
+  } finally {
+    polishing.value = false;
+  }
+}
+
+function applyPolishedText() {
+  if (!polishResult.value) return;
+  if (polishTarget.value === 'title') {
+    title.value = polishResult.value;
+  } else {
+    formData.value[polishTarget.value] = polishResult.value;
+  }
+  showPolishModal.value = false;
+  toast.success('已採用 AI 潤飾內容！');
+}
 
 const workflows = computed(() => wfStore.active);
 const categories = computed(() => sortedWorkflowCategories(workflows.value));
@@ -972,5 +1158,61 @@ onMounted(async () => {
 .new-req-step-arrow {
   color: #94a3b8;
   font-size: 0.85rem;
+}
+
+/* AI Polish Modal */
+.ai-polish-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.ai-polish-modal-card {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 580px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  color: #1e293b;
+}
+.ai-polish-modal-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+}
+.ai-polish-modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+.ai-polish-modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.spinner-sm {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

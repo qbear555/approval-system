@@ -114,4 +114,73 @@ module.exports = function registerAiRoutes(app, { authMiddleware, adminOnly }) {
       res.status(500).json({ error: err.message || 'AI 審核分析失敗' });
     }
   });
+
+  /**
+   * 智慧掃描紙本表單／PDF，生成推薦欄位定義與畫布排版
+   */
+  app.post('/api/ai/scan-form', authMiddleware, async (req, res) => {
+    try {
+      const { imageBase64, textItems, width, height, page } = req.body || {};
+      if (!imageBase64 && (!Array.isArray(textItems) || !textItems.length)) {
+        return res.status(400).json({ error: '請提供表單底圖或文字結構資料以供 AI 分析' });
+      }
+
+      const result = await ai.scanFormLayout({
+        imageBase64,
+        textItems,
+        width: Number(width) || 595,
+        height: Number(height) || 842,
+        page: Number(page) || 1,
+      });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] scan-form failed:', err);
+      res.status(500).json({ error: err.message || 'AI 掃描表單排版失敗' });
+    }
+  });
+
+  /**
+   * 智慧辨識電子發票／收據／支出憑證，提取品項與金額明細
+   */
+  app.post('/api/ai/parse-invoice', authMiddleware, async (req, res) => {
+    try {
+      const { imageBase64, textContent, columns } = req.body || {};
+      if (!imageBase64 && !textContent) {
+        return res.status(400).json({ error: '請提供發票/收據圖檔或文字內容' });
+      }
+
+      const result = await ai.parseInvoiceOrReceipt({
+        imageBase64,
+        textContent,
+        columns: Array.isArray(columns) ? columns : [],
+      });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] parse-invoice failed:', err);
+      res.status(500).json({ error: err.message || 'AI 發票收據辨識失敗' });
+    }
+  });
+
+  /**
+   * 申請事由與公文簽呈一鍵 AI 潤飾擴充
+   */
+  app.post('/api/ai/polish-text', authMiddleware, async (req, res) => {
+    try {
+      const { text, style, workflowName, category } = req.body || {};
+      if (!text || !String(text).trim()) {
+        return res.status(400).json({ error: '請提供欲潤飾之事由草稿內容' });
+      }
+
+      const result = await ai.polishApplicationText({
+        text: String(text).trim(),
+        style: style || 'formal',
+        workflowName: workflowName || '',
+        category: category || '',
+      });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] polish-text failed:', err);
+      res.status(500).json({ error: err.message || 'AI 潤飾公文失敗' });
+    }
+  });
 };

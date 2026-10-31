@@ -1086,7 +1086,8 @@ app.use((req, res, next) => {
 
 // OnlyOffice 靜態資源同源代理（須在 static 之前，避免 HTTPS 混合內容）
 app.use(onlyoffice.createDocsProxy());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 app.get(['/health', '/api/health'], async (req, res) => {
   try {

@@ -118,25 +118,274 @@
     </div>
 
     <div class="grid-toolbar" style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-      <button type="button" class="btn sm outline" style="display: inline-flex; align-items: center; gap: 4px;" @click="addRow">
-        <span>➕</span> 新增一列
-      </button>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <button type="button" class="btn sm outline" style="display: inline-flex; align-items: center; gap: 4px;" @click="addRow">
+          <span>➕</span> 新增一列
+        </button>
+        <button
+          type="button"
+          class="btn sm outline"
+          style="display: inline-flex; align-items: center; gap: 4px; border-color: #818cf8; color: #4338ca; background: #eef2ff; font-weight: 500;"
+          title="上傳發票/收據圖檔或貼上內容，由 AI 自動解析品項與金額帶入表格"
+          @click="openOcrModal"
+        >
+          <span>🧾✨</span> AI 發票/收據辨識帶入
+        </button>
+      </div>
       <div v-if="grandTotal != null" class="grand-total-banner" style="font-size: 0.95rem; font-weight: 600; color: #1e3a8a; background: #eff6ff; padding: 4px 12px; border-radius: 6px; border: 1px solid #bfdbfe;">
         總計金額：NT$ {{ formatNumber(grandTotal) }}
       </div>
     </div>
+
+    <!-- AI 發票/憑證辨識彈窗 -->
+    <Teleport to="body">
+      <div v-if="showOcrModal" class="ai-ocr-modal-backdrop" @click.self="showOcrModal = false">
+        <div class="ai-ocr-modal-card">
+          <div class="ai-ocr-modal-header">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:1.3rem">🧾✨</span>
+              <div>
+                <h3 style="margin:0;font-size:1.05rem">AI 發票／收據明細自動辨識</h3>
+                <span class="muted" style="font-size:0.82rem">支援電子發票、統編收據、高鐵機票與支出憑證</span>
+              </div>
+            </div>
+            <button type="button" class="btn sm outline" @click="showOcrModal = false">✕</button>
+          </div>
+
+          <div class="ai-ocr-modal-body">
+            <!-- 來源選擇標籤 -->
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+              <button
+                type="button"
+                class="btn sm"
+                :class="ocrTab === 'file' ? 'primary' : 'outline'"
+                @click="ocrTab = 'file'"
+              >
+                📁 上傳發票圖檔/PDF
+              </button>
+              <button
+                type="button"
+                class="btn sm"
+                :class="ocrTab === 'text' ? 'primary' : 'outline'"
+                @click="ocrTab = 'text'"
+              >
+                📝 貼上發票文字
+              </button>
+            </div>
+
+            <!-- 檔案上傳區 -->
+            <div v-if="ocrTab === 'file'">
+              <div
+                class="ai-drop-zone"
+                @click="fileInputRef?.click()"
+                @dragover.prevent
+                @drop.prevent="onDropFile"
+              >
+                <input
+                  ref="fileInputRef"
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.pdf"
+                  class="hidden"
+                  @change="onFileSelected"
+                />
+                <div v-if="!selectedFile" style="text-align:center">
+                  <div style="font-size:1.8rem;margin-bottom:4px">📄</div>
+                  <strong style="color:#4338ca">點擊選取或拖曳發票/收據檔案至此</strong>
+                  <div class="muted" style="font-size:0.8rem;margin-top:4px">支援 JPG, PNG, PDF 憑證圖檔</div>
+                </div>
+                <div v-else style="text-align:center">
+                  <span style="font-size:1.4rem">📎</span>
+                  <div style="font-weight:600;margin-top:2px">{{ selectedFile.name }}</div>
+                  <div class="muted" style="font-size:0.8rem">{{ (selectedFile.size / 1024).toFixed(1) }} KB</div>
+                  <button type="button" class="btn sm outline" style="margin-top:6px" @click.stop="selectedFile = null">重選檔案</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 文字貼上區 -->
+            <div v-else>
+              <textarea
+                v-model="pasteText"
+                rows="4"
+                style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-size:0.88rem"
+                placeholder="例如：統一發票 AA-88991234 日期 2026-10-25 賣方順發3C 統編23891024 1.螢幕x2 $9000 2.傳輸線x2 $600 總計 10080"
+              ></textarea>
+            </div>
+
+            <!-- 辨識中進度 -->
+            <div v-if="parsing" style="text-align:center;padding:16px;background:#f8fafc;border-radius:8px;margin-top:12px">
+              <div class="spinner-sm" style="margin:0 auto 8px"></div>
+              <strong style="color:#4338ca">RTX 5080 AI 智慧分析發票憑證中…</strong>
+              <div class="muted" style="font-size:0.82rem;margin-top:4px">正在辨識品項明細、單價數量與稅額</div>
+            </div>
+
+            <!-- 辨識成果預覽 -->
+            <div v-if="parsedResult && !parsing" style="margin-top:14px">
+              <div class="ai-invoice-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                  <strong style="color:#1e40af;font-size:0.95rem">
+                    {{ parsedResult.sellerName || '憑證品項' }}
+                  </strong>
+                  <span class="tag" style="background:#dbeafe;color:#1e40af;font-weight:600">
+                    {{ parsedResult.invoiceNo || '無發票號' }}
+                  </span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.84rem;color:#475569">
+                  <div><strong>開立日期：</strong>{{ parsedResult.date || '未標註' }}</div>
+                  <div><strong>賣方統編：</strong>{{ parsedResult.sellerTaxId || '無' }}</div>
+                  <div><strong>未稅金額：</strong>NT$ {{ formatNumber(parsedResult.subtotal) }}</div>
+                  <div><strong>營業稅：</strong>NT$ {{ formatNumber(parsedResult.tax) }}</div>
+                </div>
+                <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #cbd5e1;font-weight:600;color:#0f172a;display:flex;justify-content:space-between">
+                  <span>總計金額</span>
+                  <span style="color:#2563eb">NT$ {{ formatNumber(parsedResult.total) }}</span>
+                </div>
+              </div>
+
+              <div style="margin-top:12px">
+                <strong style="font-size:0.88rem">品項明細（{{ parsedResult.rows?.length || 0 }} 筆）：</strong>
+                <div style="max-height:160px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;margin-top:4px">
+                  <table class="data" style="margin:0;font-size:0.82rem">
+                    <thead>
+                      <tr><th>品名</th><th>數量</th><th>單價</th><th>小計</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(item, idx) in parsedResult.items || []" :key="idx">
+                        <td>{{ item.item }}</td>
+                        <td>{{ item.qty }}</td>
+                        <td>{{ formatNumber(item.price) }}</td>
+                        <td>{{ formatNumber(item.amount) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ai-ocr-modal-footer">
+            <button
+              v-if="!parsedResult"
+              type="button"
+              class="btn primary"
+              style="width:100%"
+              :disabled="parsing || (!selectedFile && !pasteText.trim())"
+              @click="startParse"
+            >
+              {{ parsing ? '辨識中…' : '✨ 開始 AI 辨識' }}
+            </button>
+            <template v-else>
+              <button type="button" class="btn outline" @click="parsedResult = null">
+                重新選取
+              </button>
+              <div style="display:flex;gap:8px">
+                <button type="button" class="btn outline" @click="applyInvoiceRows(false)">
+                  ➕ 追加至清單
+                </button>
+                <button type="button" class="btn primary" @click="applyInvoiceRows(true)">
+                  🔄 替換表格內容
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useFormCtx } from '@/lib/form/context';
+import { apiRequest } from '@/api/client';
+import { useToastStore } from '@/stores/toast';
 
 const props = defineProps({
   field: { type: Object, required: true },
 });
 
 const ctx = useFormCtx();
+const toast = useToastStore();
+
+const showOcrModal = ref(false);
+const ocrTab = ref('file');
+const fileInputRef = ref(null);
+const selectedFile = ref(null);
+const pasteText = ref('');
+const parsing = ref(false);
+const parsedResult = ref(null);
+
+function openOcrModal() {
+  showOcrModal.value = true;
+  parsedResult.value = null;
+  selectedFile.value = null;
+  pasteText.value = '';
+}
+
+function onFileSelected(e) {
+  const f = e.target.files?.[0];
+  if (f) selectedFile.value = f;
+}
+
+function onDropFile(e) {
+  const f = e.dataTransfer.files?.[0];
+  if (f) selectedFile.value = f;
+}
+
+async function startParse() {
+  parsing.value = true;
+  try {
+    let imageBase64 = null;
+    let textContent = pasteText.value.trim();
+
+    if (selectedFile.value) {
+      imageBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile.value);
+      });
+    }
+
+    const res = await apiRequest('/api/ai/parse-invoice', {
+      method: 'POST',
+      body: {
+        imageBase64,
+        textContent,
+        columns: columns.value,
+      },
+    });
+
+    if (res && res.success) {
+      parsedResult.value = res;
+      toast.success(`發票辨識成功！共識別 ${res.rows?.length || 0} 個品項`);
+    } else {
+      throw new Error(res.error || '未能識別發票內容');
+    }
+  } catch (err) {
+    toast.error(err.message || '發票辨識失敗');
+  } finally {
+    parsing.value = false;
+  }
+}
+
+function applyInvoiceRows(overwrite = false) {
+  if (!parsedResult.value || !Array.isArray(parsedResult.value.rows)) return;
+  const newRows = parsedResult.value.rows;
+
+  if (overwrite) {
+    rows.value = newRows;
+  } else {
+    if (rows.value.length === 1 && !rows.value[0].item && !rows.value[0].price) {
+      rows.value = newRows;
+    } else {
+      rows.value.push(...newRows);
+    }
+  }
+
+  showOcrModal.value = false;
+  toast.success(`已帶入 ${newRows.length} 筆明細至表格！`);
+}
 
 // 預設欄位定義（採購/品項標準明細表）
 const DEFAULT_COLUMNS = [
@@ -347,5 +596,82 @@ watch(grandTotal, (newTotal) => {
 }
 .font-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* AI OCR Modal */
+.ai-ocr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.ai-ocr-modal-card {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 580px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  color: #1e293b;
+}
+.ai-ocr-modal-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+}
+.ai-ocr-modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+.ai-drop-zone {
+  border: 2px dashed #818cf8;
+  background: #f5f3ff;
+  border-radius: 10px;
+  padding: 24px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.ai-drop-zone:hover {
+  background: #ede9fe;
+  border-color: #6366f1;
+}
+.ai-invoice-card {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.ai-ocr-modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.hidden {
+  display: none;
+}
+.spinner-sm {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
