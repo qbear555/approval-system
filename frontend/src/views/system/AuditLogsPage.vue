@@ -1,4 +1,7 @@
 <template>
+  <!-- 🚨 AI 智慧合規異常與拆單稽核雷達 -->
+  <ComplianceRadarCard />
+
   <div class="card">
     <form id="audit-filter-form" class="req-filter-bar" style="margin-bottom:16px;padding:16px 18px" @submit.prevent="onSubmit">
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px;align-items:end">
@@ -72,6 +75,7 @@
 
 <script setup>
 import { apiRequest } from '@/api/client';
+import ComplianceRadarCard from '@/components/system/ComplianceRadarCard.vue';
 import { htmlToPlain } from '@/lib/form/html';
 import { useToastStore } from '@/stores/toast';
 import { reactive, ref } from 'vue';

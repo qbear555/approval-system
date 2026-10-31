@@ -118,6 +118,9 @@
       </component>
     </div>
 
+    <!-- 🧠 企業簽核戰情 AI 智慧問答 (Text-to-SQL & BI) -->
+    <AnalyticsAssistantCard />
+
     <div class="card dashboard-pending-card">
       <div class="card-head">
         <h3>待辦簽核</h3>
@@ -240,6 +243,7 @@ import { useToastStore } from '@/stores/toast';
 import { getWorkflowIcon, getCategoryClass } from '@/lib/format';
 import { getFavWorkflowIds, saveFavWorkflowIds, resetFavWorkflowIds } from '@/lib/favorites';
 import RequestTable from '@/components/requests/RequestTable.vue';
+import AnalyticsAssistantCard from '@/components/dashboard/AnalyticsAssistantCard.vue';
 import AnnouncementModal from '@/components/admin/AnnouncementModal.vue';
 
 const router = useRouter();

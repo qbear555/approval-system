@@ -1,11 +1,22 @@
 <template>
   <div class="main-layout">
-    <Sidebar />
+    <Sidebar @open-policy="showPolicyModal = true" />
     <main class="content">
       <header class="page-header">
         <!-- 標題用 textContent 寫入，避免 Vue 插值蓋掉詳情頁「簽核詳情 #123」 -->
         <h2 id="page-title"></h2>
-        <div id="page-actions"></div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button
+            type="button"
+            class="btn outline sm"
+            style="display:flex;align-items:center;gap:6px;border-color:#38bdf8;color:#0284c7;background:#f0f9ff;font-weight:600;padding:5px 12px;border-radius:6px;cursor:pointer"
+            title="查詢差旅、特休、請購與各級核決權限 (SOA) 規範"
+            @click="showPolicyModal = true"
+          >
+            <span>📜 規章問答</span>
+          </button>
+          <div id="page-actions"></div>
+        </div>
       </header>
       <div class="page-body">
         <ErrorBoundary :key="$route.fullPath">
@@ -22,13 +33,15 @@
       <div class="modal-backdrop" data-close-modal></div>
       <div class="modal-panel" id="modal-panel"></div>
     </div>
+    <PolicyQaModal v-model="showPolicyModal" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import Sidebar from './Sidebar.vue';
+import PolicyQaModal from '@/components/common/PolicyQaModal.vue';
 import ErrorBoundary from '@/components/common/ErrorBoundary.vue';
 import { useSystemStore } from '@/stores/system';
 import { minePageTitle } from '@/lib/status';
@@ -37,6 +50,7 @@ import { startPendingWatcher } from '@/lib/admin-runtime';
 
 const route = useRoute();
 const systemStore = useSystemStore();
+const showPolicyModal = ref(false);
 
 const currentTitle = computed(() => {
   if (route.name === 'Mine') return minePageTitle(route.query.status);

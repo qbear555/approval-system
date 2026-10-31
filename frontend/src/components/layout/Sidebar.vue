@@ -17,6 +17,15 @@
       <router-link to="/mine" class="nav-item" active-class="active">我的申請</router-link>
       <router-link to="/records" class="nav-item" active-class="active">簽核紀錄</router-link>
       <router-link to="/new-request" class="nav-item" active-class="active">新增申請</router-link>
+      <button
+        type="button"
+        class="nav-item sidebar-policy-btn"
+        style="width:100%;text-align:left;background:none;border:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between"
+        @click="emit('open-policy')"
+      >
+        <span>規章問答</span>
+        <span class="badge" style="background:#e0f2fe;color:#0284c7;font-size:0.7rem;padding:1px 6px">AI</span>
+      </button>
 
       <router-link v-if="authStore.hasPerm('workflows')" to="/workflows" class="nav-item" active-class="active">簽核流程</router-link>
       <router-link v-if="authStore.hasPerm('backups') || authStore.hasPerm('leave_report') || authStore.hasPerm('leave_delete')" to="/backups" class="nav-item" active-class="active">備份資料</router-link>
@@ -49,6 +58,7 @@ import { useSystemStore } from '@/stores/system';
 import { performVueLogout } from '@/lib/session';
 
 const router = useRouter();
+const emit = defineEmits(['open-policy']);
 const authStore = useAuthStore();
 const systemStore = useSystemStore();
 

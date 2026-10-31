@@ -614,10 +614,21 @@ async function drawTemplate() {
   const token = localStorage.getItem('approval_token') || '';
   const authed = url + (url.includes('?') ? '&' : '?') + `token=${encodeURIComponent(token)}`;
   if (/\.pdf(\?.*)?$/i.test(file)) {
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const res = await fetch(authed, { headers, credentials: 'same-origin' });
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error('找不到指定的底圖 PDF 檔案（404）');
+      } else if (res.status === 401) {
+        throw new Error('登入已逾期，請重新登入（401）');
+      } else {
+        throw new Error(`底圖載入失敗（HTTP ${res.status}）`);
+      }
+    }
+    const arrayBuffer = await res.arrayBuffer();
     const pdfjsLib = await getPdfjs();
     const task = pdfjsLib.getDocument({
-      url: authed,
-      httpHeaders: token ? { Authorization: `Bearer ${token}` } : {},
+      data: arrayBuffer,
     });
     const pdf = await task.promise;
     pageCount.value = pdf.numPages || 1;

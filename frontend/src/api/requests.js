@@ -122,3 +122,33 @@ export function fetchAiPendingBriefing(requests = []) {
 export function fetchAiStatus() {
   return apiRequest('/api/ai/status');
 }
+
+export function askAiAnalytics(question) {
+  return apiRequest('/api/ai/analytics-query', {
+    method: 'POST',
+    body: JSON.stringify({ question }),
+  });
+}
+
+export function askAiPolicyQa(question) {
+  return apiRequest('/api/ai/policy-qa', {
+    method: 'POST',
+    body: JSON.stringify({ question }),
+  });
+}
+
+export function fetchAiComplianceAnomalies(days = 30) {
+  return apiRequest('/api/ai/compliance-anomalies?days=' + encodeURIComponent(days));
+}
+
+export function fetchAiPolicies() {
+  return apiRequest('/api/ai/policies');
+}
+
+export function saveAiPolicies(data) {
+  return apiRequest('/api/ai/policies', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+

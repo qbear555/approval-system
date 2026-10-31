@@ -125,10 +125,21 @@ async function draw() {
   const authed = url.includes('token=') ? url : url + (url.includes('?') ? '&' : '?') + `token=${encodeURIComponent(token)}`;
   try {
     if (/\.pdf(\?.*)?$/i.test(file)) {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(authed, { headers, credentials: 'same-origin' });
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('找不到此流程指定的紙本底圖檔案（404）。若您是管理員，請至「表單與流程管理」重新上傳底圖 PDF。');
+        } else if (res.status === 401) {
+          throw new Error('登入已逾期或無權限存取底圖檔案（401），請重新登入。');
+        } else {
+          throw new Error(`底圖載入失敗（HTTP ${res.status}）`);
+        }
+      }
+      const arrayBuffer = await res.arrayBuffer();
       const pdfjsLib = await getPdfjs();
       const pdf = await pdfjsLib.getDocument({
-        url: authed,
-        httpHeaders: token ? { Authorization: `Bearer ${token}` } : {},
+        data: arrayBuffer,
       }).promise;
       pageCount.value = pdf.numPages || 1;
       if (page.value > pageCount.value) page.value = 1;

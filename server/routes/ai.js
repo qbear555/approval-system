@@ -45,9 +45,9 @@ module.exports = function registerAiRoutes(app, { authMiddleware, adminOnly }) {
   });
 
   /**
-   * 更新 AI 系統設定
+   * 更新 AI 系統設定 (支援 POST 與 PUT)
    */
-  app.post('/api/ai/settings', authMiddleware, adminOnly, async (req, res) => {
+  const handleSaveAiSettings = async (req, res) => {
     try {
       const body = req.body || {};
       const enabled = body.aiEnabled !== undefined ? body.aiEnabled : body.enabled;
@@ -74,7 +74,9 @@ module.exports = function registerAiRoutes(app, { authMiddleware, adminOnly }) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  });
+  };
+  app.post('/api/ai/settings', authMiddleware, adminOnly, handleSaveAiSettings);
+  app.put('/api/ai/settings', authMiddleware, adminOnly, handleSaveAiSettings);
 
   /**
    * 對單據進行 AI 智慧審核與重點摘要
@@ -224,6 +226,78 @@ module.exports = function registerAiRoutes(app, { authMiddleware, adminOnly }) {
     } catch (err) {
       console.error('[AI] pending-briefing failed:', err);
       res.status(500).json({ error: err.message || 'AI 待審決策日報生成失敗' });
+    }
+  });
+
+  /**
+   * Phase 3: 自然語言簽核戰情智慧問答 (Text-to-SQL & 數據洞察)
+   */
+  app.post('/api/ai/analytics-query', authMiddleware, async (req, res) => {
+    try {
+      const { question } = req.body || {};
+      const result = await ai.askApprovalAnalytics({ question, user: req.user });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] analytics-query failed:', err);
+      res.status(500).json({ error: err.message || 'AI 戰情分析失敗' });
+    }
+  });
+
+  /**
+   * Phase 3: 企業簽核規章與政策問答知識庫 (Policy Q&A RAG)
+   */
+  app.post('/api/ai/policy-qa', authMiddleware, async (req, res) => {
+    try {
+      const { question } = req.body || {};
+      const result = await ai.askPolicyKnowledgeBase({ question, user: req.user });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] policy-qa failed:', err);
+      res.status(500).json({ error: err.message || 'AI 規章問答失敗' });
+    }
+  });
+
+  /**
+   * 取得公司政策規章庫
+   */
+  app.get('/api/ai/policies', authMiddleware, (req, res) => {
+    const path = require('path');
+    const p = path.join(__dirname, '..', '..', 'data', 'company-policies.json');
+    if (fs.existsSync(p)) {
+      try {
+        return res.json(JSON.parse(fs.readFileSync(p, 'utf8')));
+      } catch {}
+    }
+    res.json({ categories: [] });
+  });
+
+  /**
+   * 更新公司政策規章庫（管理員專屬）
+   */
+  app.post('/api/ai/policies', authMiddleware, adminOnly, (req, res) => {
+    const path = require('path');
+    const p = path.join(__dirname, '..', '..', 'data', 'company-policies.json');
+    try {
+      const data = req.body || {};
+      data.updatedAt = new Date().toISOString();
+      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+      res.json({ success: true, message: '規章庫已更新' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * Phase 3: 拆單舞弊與合規異常自動預警雷達 (Anti-Split & Compliance Radar)
+   */
+  app.get('/api/ai/compliance-anomalies', authMiddleware, async (req, res) => {
+    try {
+      const days = Number(req.query.days) || 30;
+      const result = await ai.scanComplianceAnomalies({ days });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] compliance-anomalies failed:', err);
+      res.status(500).json({ error: err.message || 'AI 合規異常診斷失敗' });
     }
   });
 };

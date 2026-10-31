@@ -2,6 +2,8 @@
  * 線上簽核系統 — AI 智慧輔助模組
  * 支援本機 Ollama 與 OpenAI 相容 API 協定
  */
+const fs = require('fs');
+const path = require('path');
 const http = require('http');
 const https = require('https');
 const url = require('url');
@@ -1040,6 +1042,379 @@ ${summaryItems.join('\n')}
   };
 }
 
+/**
+ * Phase 3: 自然語言簽核戰情智慧問答 (Text-to-SQL + 數據洞察)
+ */
+async function askApprovalAnalytics({ question, user }) {
+  if (!question || !String(question).trim()) {
+    throw new Error('請提供查詢問題內容');
+  }
+
+  const schemaContext = `
+資料庫類型：相容 MySQL 與 SQLite 標準 SQL 語法。
+主要資料表結構說明：
+1. approval_requests (簽核申請單)
+   - id (單號, 整數主鍵)
+   - workflow_id (對應 workflows.id)
+   - title (主旨)
+   - form_data (JSON 字串，包含 amount 等欄位)
+   - requester_id (對應 users.id)
+   - status ('pending' 簽核中, 'approved' 已核准, 'rejected' 已駁回, 'returned' 退回)
+   - current_step (當前步驟序號)
+   - created_at (送件時間，格式 'YYYY-MM-DD HH:MM:SS')
+   - completed_at (完成時間)
+
+2. workflows (簽核流程定義)
+   - id (流程編號)
+   - name (流程名稱，例如：請假申請、費用報支、請購申請)
+   - category (分類，例如：人事、總務、財務)
+   - is_active (1 啟用, 0 停用)
+
+3. users (員工與主管帳號)
+   - id (使用者編號)
+   - username (帳號)
+   - name (姓名)
+   - role ('admin', 'general', 'manager')
+   - department_id (對應 departments.id)
+
+4. departments (組織部門)
+   - id (部門編號)
+   - name (部門名稱，例如：管理部、財務部、業務部、技術部)
+
+5. approval_actions (簽核動作紀錄)
+   - id (流水號)
+   - request_id (對應 approval_requests.id)
+   - actor_id (操作人 users.id)
+   - action_type ('approve', 'reject', 'return', 'cosign')
+   - comment (意見說明)
+   - created_at (動作時間)
+`;
+
+  const sqlPrompt = `
+你是一位精通 SQL 數據庫分析的企業商業智慧（BI）專家。
+請依據使用者的自然語言提問，產出一條高效、語法嚴謹且相容 MySQL/SQLite 的唯讀 SELECT SQL 查詢語句。
+
+【資料庫結構】
+${schemaContext}
+
+【使用者問題】
+「${question}」
+
+【嚴格規則】
+1. 只允許輸出單一條以 SELECT 開頭的查詢語句，絕不可包含任何 INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, REPLACE 或分號多重語句。
+2. 查詢結果最多限制 50 筆（使用 LIMIT 50）。
+3. 欄位命名請使用有意義的繁體中文別名（例如：SELECT d.name AS 部門, COUNT(*) AS 件數）。
+4. 請嚴格將產出的 SQL 放在 \`\`\`sql 程式碼區塊中，勿輸出多餘解釋。
+`;
+
+  const sqlMessages = [
+    { role: 'system', content: '你是專業 SQL 資料分析專家。只輸出合法純淨的 SELECT 查詢語句。' },
+    { role: 'user', content: sqlPrompt },
+  ];
+
+  const sqlRes = await sendChatRequest({ messages: sqlMessages, temperature: 0.1, maxTokens: 400 });
+  let generatedSql = '';
+  const sqlMatch = /```(?:sql)?\s*([\s\S]*?)\s*```/i.exec(sqlRes.content || '');
+  if (sqlMatch) {
+    generatedSql = sqlMatch[1].trim();
+  } else {
+    generatedSql = (sqlRes.content || '').trim();
+  }
+
+  // 安全防護驗證：只允許純 SELECT
+  const sanitized = generatedSql.replace(/\s+/g, ' ').trim();
+  if (!/^SELECT\s+/i.test(sanitized)) {
+    throw new Error('產生的查詢不符合唯讀安全規範（必須為 SELECT）');
+  }
+  if (/;\s*\S+/i.test(sanitized) || /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|CREATE)\b/i.test(sanitized)) {
+    throw new Error('偵測到潛在不安全的 SQL 指令，已予以攔截');
+  }
+
+  // 執行查詢
+  let queryRows = [];
+  try {
+    queryRows = db.prepare(sanitized).all();
+  } catch (dbErr) {
+    console.warn('[AI Text-to-SQL] 查詢失敗，嘗試執行備援查詢:', dbErr.message);
+    const fallbackSql =
+      'SELECT r.id AS 單號, r.title AS 主旨, w.name AS 流程, u.name AS 申請人, r.status AS 狀態, r.created_at AS 申請時間 FROM approval_requests r LEFT JOIN workflows w ON r.workflow_id = w.id LEFT JOIN users u ON r.requester_id = u.id ORDER BY r.id DESC LIMIT 15';
+    queryRows = db.prepare(fallbackSql).all();
+    generatedSql = fallbackSql;
+  }
+
+  const columns = queryRows.length > 0 ? Object.keys(queryRows[0]) : [];
+
+  // 將查詢結果回傳給 AI 撰寫「數據洞察摘要」
+  const previewData = queryRows.slice(0, 15);
+  const insightPrompt = `
+使用者問題：「${question}」
+執行的 SQL：\`${generatedSql}\`
+查詢回傳共 ${queryRows.length} 筆數據，前 15 筆結果如下：
+\`\`\`json
+${JSON.stringify(previewData, null, 2)}
+\`\`\`
+
+請針對上述查詢結果，以企業高階幕僚口吻，為主管產出 2~4 點條理清晰的「📊 戰情數據洞察解讀」：
+- 簡要提煉核心數據結論（例如：哪個部門最多、總計金額、佔比、異常狀況等）
+- 請使用繁體中文，格式俐落清晰。
+`;
+
+  const insightMessages = [
+    { role: 'system', content: '你是企業簽核戰情分析專家，擅長從數據中提煉商業洞察。' },
+    { role: 'user', content: insightPrompt },
+  ];
+
+  const insightRes = await sendChatRequest({ messages: insightMessages, temperature: 0.2, maxTokens: 600 });
+
+  return {
+    success: true,
+    question,
+    sql: generatedSql,
+    columns,
+    rows: queryRows,
+    totalCount: queryRows.length,
+    summary: insightRes.content,
+    insightText: insightRes.content,
+    durationMs: sqlRes.durationMs + insightRes.durationMs,
+  };
+}
+
+/**
+ * Phase 3: 企業簽核規章與政策問答知識庫 (Policy Q&A RAG)
+ */
+async function askPolicyKnowledgeBase({ question, user }) {
+  if (!question || !String(question).trim()) {
+    throw new Error('請輸入欲查詢的規章或政策問題');
+  }
+
+  const policiesPath = path.join(__dirname, '..', 'data', 'company-policies.json');
+  let policiesData = { categories: [] };
+  if (fs.existsSync(policiesPath)) {
+    try {
+      policiesData = JSON.parse(fs.readFileSync(policiesPath, 'utf8'));
+    } catch (e) {
+      console.warn('[AI] 讀取 company-policies.json 失敗:', e.message);
+    }
+  }
+
+  const policyContext = (policiesData.categories || [])
+    .map((c) => `【${c.name}】\n` + (c.rules || []).map((r, idx) => `  ${idx + 1}. ${r}`).join('\n'))
+    .join('\n\n');
+
+  const prompt = `
+你是一位嫻熟企業人資考勤、財務核銷與採購審批規章的「企業規章政策專家」。
+請根據下列公司現行核定之各項管理規章，專業、親切且條理分明地回答員工或主管的政策疑問。
+
+【公司最新管理規章條文庫】
+${policyContext}
+
+【提問內容】
+「${question}」
+
+【回答指引】
+1. 嚴格依據規章條文作答，直接點出規定要點（例如：天數、金額上限、審批階層、需檢附憑證）。
+2. 若規章中有明確規範，請引用所屬規章名稱（例如：依《國內外出差與交通費報銷規章》規定…）。
+3. 若問題涉及例外狀況或未明確記載之細節，請委婉提示可向管理部或財務單位專案洽詢。
+4. 一律使用繁體中文（台灣商務習慣用語），條理分明。
+`;
+
+  const messages = [
+    { role: 'system', content: '你是企業內部規章政策諮詢 AI，回答嚴謹、親切、條理清晰。' },
+    { role: 'user', content: prompt },
+  ];
+
+  const result = await sendChatRequest({ messages, temperature: 0.2, maxTokens: 900 });
+
+  return {
+    success: true,
+    question,
+    answer: result.content,
+    durationMs: result.durationMs,
+  };
+}
+
+/**
+ * Phase 3: 拆單舞弊與合規異常自動預警雷達 (Anti-Split & Compliance Radar)
+ */
+async function scanComplianceAnomalies({ days = 30 }) {
+  const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+
+  // 1. 抓取期間內所有單據
+  const requests = db
+    .prepare(
+      `SELECT r.id, r.workflow_id, r.title, r.form_data, r.requester_id, r.status, r.current_step, r.created_at,
+              w.name AS workflow_name, u.name AS requester_name, u.department AS dept_name
+       FROM approval_requests r
+       LEFT JOIN workflows w ON r.workflow_id = w.id
+       LEFT JOIN users u ON r.requester_id = u.id
+       WHERE r.created_at >= ?
+       ORDER BY r.id DESC`
+    )
+    .all(sinceDate);
+
+  const suspectedSplitOrders = []; // 拆單嫌疑
+  const duplicateInvoices = []; // 重複發票
+  const slaBottlenecks = []; // 卡關逾期 (> 5 天)
+  const offHoursSubmissions = []; // 非正常時間送件 (23:00~06:00)
+
+  // 建立發票號碼索引
+  const invoiceMap = new Map();
+
+  // 按申請人與流程分組（偵測拆單）
+  const userWorkflowMap = new Map();
+
+  requests.forEach((r) => {
+    let pData = {};
+    try {
+      pData = typeof r.form_data === 'string' ? JSON.parse(r.form_data) : r.form_data || {};
+    } catch {}
+
+    const amt = parseFloat(pData.amount || pData.total_amount || pData['金額'] || pData['總額'] || 0);
+    const dateObj = new Date(r.created_at);
+    const hour = dateObj.getHours();
+
+    // 檢查非工作時間送件
+    if (hour >= 23 || hour < 6) {
+      offHoursSubmissions.push({
+        id: r.id,
+        title: r.title,
+        requester: r.requester_name,
+        dept: r.dept_name,
+        time: r.created_at,
+        amount: amt,
+      });
+    }
+
+    // 檢查卡關逾期 (pending 且 > 5 天)
+    if (r.status === 'pending') {
+      const waitDays = Math.round((Date.now() - dateObj.getTime()) / 86400000);
+      if (waitDays >= 5) {
+        slaBottlenecks.push({
+          id: r.id,
+          title: r.title,
+          workflow: r.workflow_name,
+          requester: r.requester_name,
+          waitDays,
+          currentStep: r.current_step,
+        });
+      }
+    }
+
+    // 檢查發票重複
+    const rawJson = JSON.stringify(pData);
+    const invRegex = /[A-Z]{2}-?[0-9]{8}/gi;
+    let match;
+    while ((match = invRegex.exec(rawJson)) !== null) {
+      const inv = match[0].replace('-', '').toUpperCase();
+      if (!invoiceMap.has(inv)) invoiceMap.set(inv, []);
+      invoiceMap.get(inv).push({ id: r.id, title: r.title, requester: r.requester_name, createdAt: r.created_at });
+    }
+
+    // 依申請人分組拆單檢測
+    if (amt > 5000) {
+      const groupKey = `${r.requester_id}_${r.workflow_id}`;
+      if (!userWorkflowMap.has(groupKey)) userWorkflowMap.set(groupKey, []);
+      userWorkflowMap.get(groupKey).push({ ...r, amount: amt, timestamp: dateObj.getTime() });
+    }
+  });
+
+  // 整理重複發票
+  for (const [inv, list] of invoiceMap.entries()) {
+    if (list.length > 1) {
+      duplicateInvoices.push({
+        invoiceNo: inv,
+        count: list.length,
+        requests: list,
+      });
+    }
+  }
+
+  // 整理拆單嫌疑：7 天內相同申請人相同流程 2 筆以上，合計超過 5 萬元
+  for (const [key, list] of userWorkflowMap.entries()) {
+    if (list.length >= 2) {
+      list.sort((a, b) => a.timestamp - b.timestamp);
+      for (let i = 0; i < list.length - 1; i++) {
+        const cluster = [list[i]];
+        let sumAmt = list[i].amount;
+        for (let j = i + 1; j < list.length; j++) {
+          if (list[j].timestamp - list[i].timestamp <= 7 * 86400000) {
+            cluster.push(list[j]);
+            sumAmt += list[j].amount;
+          }
+        }
+        if (cluster.length >= 2 && sumAmt >= 50000) {
+          suspectedSplitOrders.push({
+            requester: cluster[0].requester_name,
+            dept: cluster[0].dept_name,
+            workflow: cluster[0].workflow_name,
+            count: cluster.length,
+            totalAmount: sumAmt,
+            requests: cluster.map((c) => ({ id: c.id, title: c.title, amount: c.amount, createdAt: c.created_at })),
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  // 請 AI 生成一份高階稽核總結報告
+  const anomalySummaryText = `
+檢測週期：近 ${days} 天
+- 拆單舞弊嫌疑：${suspectedSplitOrders.length} 組
+- 重複發票報銷：${duplicateInvoices.length} 筆
+- 嚴重逾期卡關 (超過5天)：${slaBottlenecks.length} 筆
+- 非上班時間送件：${offHoursSubmissions.length} 筆
+`;
+
+  const reportPrompt = `
+你是一位大型跨國企業資深內部稽核長（Chief Audit Executive）。
+系統剛完成對近 ${days} 天簽核案件的「合規與異常風控掃描」，統計摘要如下：
+${anomalySummaryText}
+
+具體異常樣本：
+- 拆單嫌疑樣本：${JSON.stringify(suspectedSplitOrders.slice(0, 3))}
+- 重複發票樣本：${JSON.stringify(duplicateInvoices.slice(0, 3))}
+- 嚴重卡關樣本：${JSON.stringify(slaBottlenecks.slice(0, 5))}
+
+請為企業管理階層產出一份簡潔、具體、有行動指引的「🚨 企業簽核合規與風險稽核報告」：
+1. 總體風險評級（🟢 健康良好 / 🟡 需常規複核 / 🔴 高風險預警）。
+2. 針對拆單、重複報銷與卡關提供關鍵發現與管理建議。
+3. 一律使用繁體中文 Markdown 格式。
+`;
+
+  const reportMessages = [
+    { role: 'system', content: '你是專業企業內部稽核長，文筆客觀、威嚴、具備行動指引。' },
+    { role: 'user', content: reportPrompt },
+  ];
+
+  const reportRes = await sendChatRequest({ messages: reportMessages, temperature: 0.2, maxTokens: 900 });
+
+  return {
+    success: true,
+    scanDays: days,
+    scannedCount: requests.length,
+    counts: {
+      splitOrders: suspectedSplitOrders.length,
+      duplicateInvoices: duplicateInvoices.length,
+      stalledRequests: slaBottlenecks.length,
+      offHours: offHoursSubmissions.length,
+    },
+    suspectedSplitOrders,
+    duplicateInvoices,
+    stalledRequests: slaBottlenecks,
+    offHoursRequests: offHoursSubmissions,
+    executiveReport: reportRes.content,
+    anomalies: {
+      suspectedSplitOrders,
+      duplicateInvoices,
+      slaBottlenecks,
+      offHoursSubmissions,
+    },
+    summaryReport: reportRes.content,
+    durationMs: reportRes.durationMs,
+  };
+}
+
 module.exports = {
   getAiConfig,
   checkAiHealth,
@@ -1050,4 +1425,7 @@ module.exports = {
   polishApplicationText,
   suggestApprovalComment,
   generatePendingBriefing,
+  askApprovalAnalytics,
+  askPolicyKnowledgeBase,
+  scanComplianceAnomalies,
 };
