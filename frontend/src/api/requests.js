@@ -105,6 +105,20 @@ export function analyzeRequestWithAi(id) {
   return apiRequest(`/api/ai/analyze-request/${id}`, { method: 'POST' });
 }
 
+export function fetchAiSuggestedComment({ requestId, actionType, draftText, targetRole }) {
+  return apiRequest('/api/ai/suggest-comment', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, actionType, draftText, targetRole }),
+  });
+}
+
+export function fetchAiPendingBriefing(requests = []) {
+  return apiRequest('/api/ai/pending-briefing', {
+    method: 'POST',
+    body: JSON.stringify({ requests }),
+  });
+}
+
 export function fetchAiStatus() {
   return apiRequest('/api/ai/status');
 }

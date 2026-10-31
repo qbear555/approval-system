@@ -183,4 +183,47 @@ module.exports = function registerAiRoutes(app, { authMiddleware, adminOnly }) {
       res.status(500).json({ error: err.message || 'AI 潤飾公文失敗' });
     }
   });
+  /**
+   * 主管簽核決策輔助與智慧評語建議（核准/退件/加簽）
+   */
+  app.post('/api/ai/suggest-comment', authMiddleware, async (req, res) => {
+    try {
+      const { requestId, actionType, draftText, targetRole } = req.body || {};
+      const result = await ai.suggestApprovalComment({
+        requestId: Number(requestId) || null,
+        actionType: actionType || 'approve',
+        draftText: String(draftText || '').trim(),
+        targetRole: String(targetRole || '').trim(),
+        user: req.user,
+      });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] suggest-comment failed:', err);
+      res.status(500).json({ error: err.message || 'AI 智慧評語生成失敗' });
+    }
+  });
+
+  /**
+   * 主管晨間待審決策日報與優先級矩陣
+   */
+  app.post('/api/ai/pending-briefing', authMiddleware, async (req, res) => {
+    try {
+      let requests = req.body && Array.isArray(req.body.requests) ? req.body.requests : [];
+      if (!requests.length) {
+        const db = require('../db');
+        const sql = "SELECT r.id, r.title, r.form_data, r.status, r.created_at, w.name as workflow_name, u.name as requester_name FROM approval_requests r LEFT JOIN workflows w ON r.workflow_id = w.id LEFT JOIN users u ON r.requester_id = u.id WHERE r.status = 'pending' ORDER BY r.id DESC LIMIT 30";
+        const rows = db.prepare(sql).all();
+        requests = rows || [];
+      }
+      const result = await ai.generatePendingBriefing({
+        userId: req.user.id,
+        userRole: req.user.role,
+        requests,
+      });
+      res.json(result);
+    } catch (err) {
+      console.error('[AI] pending-briefing failed:', err);
+      res.status(500).json({ error: err.message || 'AI 待審決策日報生成失敗' });
+    }
+  });
 };

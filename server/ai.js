@@ -219,9 +219,152 @@ async function sendChatRequest({ messages, temperature = 0.2, maxTokens = 1200 }
 }
 
 /**
+ * 比對資料庫歷史單據，檢測重複發票報銷、同額重複請款與採購比價雷達
+ */
+function detectHistoricalRisks(detail) {
+  const currentId = Number(detail.id);
+  const formData = detail.form_data || {};
+  const requesterId = Number(detail.requester_id);
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+
+  // 1. 抓取本次申請中的所有發票／統一發票號碼
+  const currentInvoices = new Set();
+  const rawJson = JSON.stringify(formData);
+  const invRegex = /[A-Z]{2}-?[0-9]{8}/gi;
+  let match;
+  while ((match = invRegex.exec(rawJson)) !== null) {
+    currentInvoices.add(match[0].replace('-', '').toUpperCase());
+  }
+
+  // 2. 抓取本次申請中的品項與單價
+  const currentItems = [];
+  for (const [k, v] of Object.entries(formData)) {
+    if (Array.isArray(v)) {
+      v.forEach((row) => {
+        if (typeof row === 'object' && row !== null) {
+          const name = row.name || row.item_name || row.item || row['品名'] || row['項目'];
+          const price = parseFloat(row.price || row.unit_price || row['單價'] || row.amount || row['金額']);
+          const qty = parseFloat(row.qty || row.quantity || row['數量'] || 1);
+          if (name && !isNaN(price) && price > 0) {
+            currentItems.push({ name: String(name).trim(), unitPrice: price, qty: qty || 1 });
+          }
+        }
+      });
+    } else if (k === 'item_name' || k === 'itemName') {
+      const price = parseFloat(formData.amount || formData.unit_price || formData.price || 0);
+      if (price > 0) {
+        currentItems.push({ name: String(v).trim(), unitPrice: price, qty: parseFloat(formData.qty) || 1 });
+      }
+    }
+  }
+
+  const currentAmount = parseFloat(formData.amount || formData.total_amount || formData['總額'] || formData['金額'] || 0);
+
+  // 3. 查詢歷史 90 天內之有效/核准案件
+  let pastRequests = [];
+  try {
+    pastRequests = db
+      .prepare(
+        "SELECT id, title, form_data, requester_id, status, created_at FROM approval_requests WHERE id != ? AND status IN ('approved', 'in_progress', 'completed') AND created_at >= ? ORDER BY id DESC LIMIT 150"
+      )
+      .all(currentId, ninetyDaysAgo);
+  } catch (e) {
+    console.warn('[AI] detectHistoricalRisks DB query warning:', e.message);
+  }
+
+  const duplicateInvoices = [];
+  const suspectedDuplicateRequests = [];
+  const historicalItemPrices = {};
+
+  pastRequests.forEach((past) => {
+    let pData = {};
+    try {
+      pData = typeof past.form_data === 'string' ? JSON.parse(past.form_data) : past.form_data || {};
+    } catch {}
+
+    const pJson = JSON.stringify(pData);
+
+    // 發票重複性比對
+    if (currentInvoices.size > 0) {
+      let pMatch;
+      const pInvRegex = /[A-Z]{2}-?[0-9]{8}/gi;
+      while ((pMatch = pInvRegex.exec(pJson)) !== null) {
+        const inv = pMatch[0].replace('-', '').toUpperCase();
+        if (currentInvoices.has(inv)) {
+          duplicateInvoices.push({
+            invoiceNo: inv,
+            historicalRequestId: past.id,
+            title: past.title,
+            createdAt: past.created_at,
+            status: past.status,
+          });
+        }
+      }
+    }
+
+    // 同人同額度短天期申請比對（同申請人 90 天內金額相同且超過 500 元）
+    if (Number(past.requester_id) === requesterId && currentAmount > 500) {
+      const pastAmt = parseFloat(pData.amount || pData.total_amount || pData['總額'] || pData['金額'] || 0);
+      if (pastAmt === currentAmount) {
+        suspectedDuplicateRequests.push({
+          historicalRequestId: past.id,
+          title: past.title,
+          amount: pastAmt,
+          createdAt: past.created_at,
+        });
+      }
+    }
+
+    // 歷史品項價格統計
+    for (const [k, v] of Object.entries(pData)) {
+      if (Array.isArray(v)) {
+        v.forEach((row) => {
+          if (typeof row === 'object' && row !== null) {
+            const name = String(row.name || row.item_name || row.item || row['品名'] || row['項目'] || '').trim().toLowerCase();
+            const price = parseFloat(row.price || row.unit_price || row['單價'] || 0);
+            if (name && price > 0) {
+              if (!historicalItemPrices[name]) historicalItemPrices[name] = [];
+              historicalItemPrices[name].push(price);
+            }
+          }
+        });
+      }
+    }
+  });
+
+  // 比價雷達
+  const priceRadar = [];
+  currentItems.forEach((ci) => {
+    const key = ci.name.toLowerCase();
+    const history = historicalItemPrices[key];
+    if (history && history.length > 0) {
+      const avg = Math.round(history.reduce((a, b) => a + b, 0) / history.length);
+      const min = Math.min(...history);
+      const max = Math.max(...history);
+      const diffPercent = Math.round(((ci.unitPrice - avg) / avg) * 100);
+      priceRadar.push({
+        itemName: ci.name,
+        currentUnitPrice: ci.unitPrice,
+        avgHistoricalPrice: avg,
+        minPrice: min,
+        maxPrice: max,
+        diffPercent,
+        count: history.length,
+      });
+    }
+  });
+
+  return {
+    duplicateInvoices,
+    suspectedDuplicateRequests,
+    priceRadar,
+  };
+}
+
+/**
  * 依申請單詳情組成專業審核摘要 Prompt
  */
-function buildAuditPrompt(detail) {
+function buildAuditPrompt(detail, historicalRisks = {}) {
   const fieldsMap = {};
   if (Array.isArray(detail.formFields)) {
     for (const f of detail.formFields) {
@@ -274,9 +417,13 @@ function buildAuditPrompt(detail) {
     (a) => `- 📎 ${a.original_name || a.filename || '附件'} (${Math.round((a.size_bytes || 0) / 1024)} KB)`
   );
 
+  const dupInvoices = historicalRisks.duplicateInvoices || [];
+  const dupReqs = historicalRisks.suspectedDuplicateRequests || [];
+  const pRadar = historicalRisks.priceRadar || [];
+
   const promptText = `
 你是一位具備 15 年以上大型企業行政稽核與主管簽核經驗的「企業智慧簽核專家」。
-請針對下列申請單據的完整內容進行深度專業審核，並以「專業、客觀、俐落」的繁體中文 Markdown 格式提供主管審核摘要與風險檢核：
+請針對下列申請單據的完整內容，結合系統歷史比對數據進行深度專業審核，並以「專業、客觀、俐落」的繁體中文 Markdown 格式提供主管審核摘要與風險檢核：
 
 【單據基本資訊】
 - 單號：#${detail.id}
@@ -295,8 +442,13 @@ ${attList.length ? attList.join('\n') : '（無上傳附件）'}
 【簽核紀錄與過往意見】
 ${actionHistory.length ? actionHistory.join('\n') : '（尚未有簽核動作）'}
 
+【📊 歷史大數據比對與風險稽核雷達】
+- 發票重複查核：${dupInvoices.length > 0 ? `⚠️ 警告！發現 ${dupInvoices.length} 筆相同發票號碼已被歷史單據使用：\n` + dupInvoices.map(d => `  * 發票號 ${d.invoiceNo} 曾出現在 #${d.historicalRequestId}「${d.title}」（狀態: ${d.status}）`).join('\n') : '✅ 通過（歷史資料庫中無相同發票號碼記錄）'}
+- 同額同人重複比對：${dupReqs.length > 0 ? `⚠️ 留意！同申請人近 90 天內有 ${dupReqs.length} 筆相同金額之案件：\n` + dupReqs.map(s => `  * #${s.historicalRequestId}「${s.title}」`).join('\n') : '✅ 通過（無高度雷同重複請款）'}
+- 歷史採購比價雷達：${pRadar.length > 0 ? '\n' + pRadar.map(p => `  * 【${p.itemName}】本次單價 NT$${p.currentUnitPrice} vs 歷史均價 NT$${p.avgHistoricalPrice}（差異: ${p.diffPercent > 0 ? '+' : ''}${p.diffPercent}%，歷史比對樣本 ${p.count} 筆）`).join('\n') : '（本次無符合歷史採購庫存明細之項目）'}
+
 ----------------------------
-請嚴格依照以下三個維度進行分析輸出，勿回答無關內容：
+請嚴格依照以下四個維度進行分析輸出，勿回答無關內容：
 
 ### 📌【案件速覽】
 用 2~3 點扼要點出核心事實：誰因何事由申請、金額或天數期程、預計達成之業務目的。
@@ -304,17 +456,24 @@ ${actionHistory.length ? actionHistory.join('\n') : '（尚未有簽核動作）
 ### 🔍【合規與防呆檢核】
 - **資料齊全度**：重要欄位與必要憑證附件是否齊全？
 - **合理性與邏輯**：金額、計算方式、申請時間區間是否合理或有無矛盾？
+- **歷史雷達比對結果**：綜合發票重複性、比價雷達等數據給出稽核結論。
 - **風險評估等級**：評定此案件風險程度（請以「🟢 低風險 / 正常合規」、「🟡 中風險 / 需留意細節」、「🔴 高風險 / 疑似異常」標註，並簡述關鍵原因）。
 
 ### 💡【簽核主管審查建議】
 具體向簽核人提出核准、補件或確認方向建議（例如：若為低風險可放心核准；若缺憑證建議請同仁補充何種說明或單據）。
+
+### 🏷️【指標摘要】
+請在結尾獨立輸出這三行元數據供系統解析（冒號後嚴格填寫）：
+RISK_LEVEL: [LOW / MEDIUM / HIGH 擇一]
+RISK_SCORE: [0到100之整數，越高表示風險越大]
+RISK_BADGES: [以逗號分隔2至4個簡要標籤，例如：發票唯一性核驗通過, 單價合理, 附件齊全]
 `;
 
   return promptText;
 }
 
 /**
- * 對指定簽核單據進行 AI 審查分析
+ * 對指定簽核單據進行 AI 審查分析（結合歷史大數據風險比對）
  */
 async function analyzeRequest(requestId, user) {
   const detail = getRequestDetail(Number(requestId));
@@ -322,7 +481,11 @@ async function analyzeRequest(requestId, user) {
     throw new Error('找不到指定的簽核單據');
   }
 
-  const prompt = buildAuditPrompt(detail);
+  // 1. 執行歷史大數據多維比對
+  const historicalRisks = detectHistoricalRisks(detail);
+
+  // 2. 組裝 Prompt
+  const prompt = buildAuditPrompt(detail, historicalRisks);
   const messages = [
     {
       role: 'system',
@@ -335,13 +498,59 @@ async function analyzeRequest(requestId, user) {
     },
   ];
 
-  const result = await sendChatRequest({ messages, temperature: 0.2, maxTokens: 1200 });
+  const result = await sendChatRequest({ messages, temperature: 0.2, maxTokens: 1400 });
+  const rawContent = result.content || '';
+
+  // 3. 解析風險指標
+  let riskLevel = 'low';
+  let riskScore = 15;
+  let riskBadges = ['單據填寫合規', '無重複報銷'];
+
+  const levelMatch = /RISK_LEVEL:\s*(LOW|MEDIUM|HIGH)/i.exec(rawContent);
+  if (levelMatch) {
+    riskLevel = levelMatch[1].toLowerCase();
+  }
+
+  const scoreMatch = /RISK_SCORE:\s*(\d+)/i.exec(rawContent);
+  if (scoreMatch) {
+    riskScore = Math.min(100, Math.max(0, parseInt(scoreMatch[1], 10)));
+  }
+
+  const badgesMatch = /RISK_BADGES:\s*([^\r\n]+)/i.exec(rawContent);
+  if (badgesMatch) {
+    const list = badgesMatch[1].split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
+    if (list.length > 0) riskBadges = list;
+  }
+
+  // 強制規則防護：若確有重複發票，直接拔高為 high
+  if (historicalRisks.duplicateInvoices && historicalRisks.duplicateInvoices.length > 0) {
+    riskLevel = 'high';
+    riskScore = Math.max(riskScore, 85);
+    if (!riskBadges.some((b) => b.includes('重複發票'))) {
+      riskBadges.unshift('⚠️ 檢出重複發票');
+    }
+  } else if (historicalRisks.priceRadar && historicalRisks.priceRadar.some((p) => p.diffPercent > 30)) {
+    if (riskLevel === 'low') riskLevel = 'medium';
+    riskScore = Math.max(riskScore, 55);
+    if (!riskBadges.some((b) => b.includes('偏高'))) {
+      riskBadges.unshift('單價高於歷史均價');
+    }
+  }
+
+  // 清除末尾的技術性指標標籤，保持呈現的美觀整潔
+  const cleanAnalysis = rawContent.replace(/###\s*🏷️【指標摘要】[\s\S]*$/i, '').trim();
 
   return {
     requestId: detail.id,
     title: detail.title,
-    analysis: result.content,
-    report: result.content,
+    riskLevel,
+    riskScore,
+    riskBadges,
+    priceRadar: historicalRisks.priceRadar || [],
+    duplicateInvoices: historicalRisks.duplicateInvoices || [],
+    suspectedDuplicateRequests: historicalRisks.suspectedDuplicateRequests || [],
+    analysis: cleanAnalysis,
+    report: cleanAnalysis,
     model: result.model,
     durationMs: result.durationMs,
     durationSec: Number((result.durationMs / 1000).toFixed(1)),
@@ -694,6 +903,143 @@ ${text}
   };
 }
 
+/**
+ * 主管簽核決策輔助與智慧評語建議（核准肯定、退件指引、加簽說明）
+ */
+async function suggestApprovalComment({ requestId, actionType = 'approve', draftText = '', targetRole = '', user }) {
+  const detail = requestId ? getRequestDetail(Number(requestId)) : null;
+  const isReject = actionType === 'reject' || actionType === 'return';
+  const isCosign = actionType === 'cosign';
+
+  const prompt = `
+你是一位大型企業資深行政主管兼簽核合規顧問。
+現在簽核主管即將對一筆簽核單據執行「${isReject ? '退回修正' : isCosign ? '加簽/會簽' : '核准通過'}」操作。
+
+【單據資訊】
+- 單號：${detail ? '#' + detail.id : '未知'}
+- 流程：${detail ? detail.workflow_name : '簽核申請'}
+- 主旨：${detail ? detail.title : '申請案'}
+- 申請人：${detail ? detail.requester_name : '同仁'}（部門：${detail ? detail.requester_dept : '未知'}）
+- 主管輸入之簡短構想/關鍵字草稿：「${draftText || '（無，請依單據情況提供標準專業意見）'}」
+${targetRole ? `- 指定加簽/會簽對象角色：${targetRole}` : ''}
+
+請為簽核主管產生高品質的簽核意見建議：
+1. 若為「核准」：提供符合公司規範、權責清楚的核准評語。
+2. 若為「退回」：以專業、客觀且具體明確的退件指引（指出需要補件、修正發票憑證或調整金額之處），讓同仁一目了然如何修改，避免溝通誤會。
+3. 若為「加簽」：清楚說明會簽之目的（如請財務確認額度、請資訊評估相容性等）。
+
+請嚴格依照以下 JSON 格式回傳（勿附加任何其他文字）：
+\`\`\`json
+{
+  "quickPhrases": ["15字以內簡潔快捷意見1", "快捷意見2", "快捷意見3"],
+  "recommendedComment": "最推薦、最完整專業的回覆內容（40~80字）",
+  "alternatives": [
+    { "title": "標準常規版", "content": "意見文字" },
+    { "title": "補充提醒版", "content": "意見文字" }
+  ]
+}
+\`\`\`
+`;
+
+  const messages = [
+    { role: 'system', content: '你是企業簽核公文輔助 AI，一律使用繁體中文（台灣商務規範）。請只回傳合法的 JSON 字串。' },
+    { role: 'user', content: prompt },
+  ];
+
+  const result = await sendChatRequest({ messages, temperature: 0.3, maxTokens: 800 });
+  const parsed = parseJsonResponse(result.content);
+
+  const defaultSuggestions = isReject
+    ? {
+        quickPhrases: ['請補齊相關憑證單據後再行送件。', '請修正明細金額並重新計算總額。', '請補充說明採購用途與比價單。'],
+        recommendedComment: draftText
+          ? `同仁您好，本件因「${draftText}」，請協助補充相關說明或佐證單據後重新送審，謝謝。`
+          : '同仁您好，請確認相關憑證與明細填寫是否齊全，補正後重新送件，謝謝。',
+        alternatives: [],
+      }
+    : isCosign
+    ? {
+        quickPhrases: ['請相關單位協助確認並提供專業意見。', '請財務部協助審核動支額度。'],
+        recommendedComment: '請相關權責主管/部門協助會簽確認業務需求及合規性。',
+        alternatives: [],
+      }
+    : {
+        quickPhrases: ['符合規範，准予辦理。', '單據齊全，同意。', '經核對無誤，予以核准。'],
+        recommendedComment: '經審核單據內容、憑證及報價均符合公司作業規範，准予辦理。',
+        alternatives: [],
+      };
+
+  return {
+    success: true,
+    actionType,
+    suggestions: parsed || defaultSuggestions,
+    durationMs: result.durationMs,
+  };
+}
+
+/**
+ * 主管晨間待審決策日報與優先級矩陣
+ */
+async function generatePendingBriefing({ userId, userRole, requests = [] }) {
+  if (!Array.isArray(requests) || requests.length === 0) {
+    return {
+      success: true,
+      totalCount: 0,
+      totalAmount: 0,
+      briefingMarkdown: '🎉 **目前無待您審核的案件！**\n\n所有指派給您的簽核單據均已處理完畢，請繼續保持高效率！',
+    };
+  }
+
+  let totalAmt = 0;
+  const summaryItems = requests.slice(0, 20).map((r) => {
+    let amt = 0;
+    try {
+      const fd = typeof r.form_data === 'string' ? JSON.parse(r.form_data) : r.form_data || {};
+      amt = parseFloat(fd.amount || fd.total_amount || fd['金額'] || fd['總額'] || 0);
+    } catch {}
+    totalAmt += amt;
+    const waitDays = Math.max(0, Math.round((Date.now() - new Date(r.created_at).getTime()) / 86400000));
+    return `- 單號 #${r.id} | 流程: ${r.workflow_name || '一般流程'} | 主旨: ${r.title} | 申請人: ${r.requester_name || '同仁'} (${r.requester_dept || '未指定'}) | 金額: NT$${amt.toLocaleString()} | 已等待: ${waitDays}天`;
+  });
+
+  const prompt = `
+你是一位頂級企業幕僚長兼高階主管特助。
+以下是當前指派給該主管審核的 ${requests.length} 筆待辦簽核案件清單（總金額約 NT$${totalAmt.toLocaleString()}）：
+
+${summaryItems.join('\n')}
+
+請為主管生成一份精煉、條理分明、具備高度決策價值的「🌅 主管晨間待審決策日報」：
+請使用繁體中文 Markdown 呈現，結構必須包含以下三個區塊：
+
+### 📊【待審概況速覽】
+- 彙總待審總件數、累計請款總金額、平均等待天數。
+
+### 🚦【智慧優先級審核建議】
+依案件的「緊急程度（如即將出差/即期）」、「金額規模（大額風險高）」、「停留天數（防逾期卡關）」為主管建議分級：
+- 🔴 **高優先處理（急件 / 大額 / 已停留逾期風險）**：標註單號、重點與建議處理順序。
+- 🟡 **中優先處理（一般常規 / 需檢閱單據細節）**：標註單號與關注重點。
+- 🟢 **低優先（例行常規 / 小額日常 / 可速批）**：標註單號。
+
+### 💡【主管快速批閱指引】
+給主管 1~2 點批閱策略建議（例如：可先利用 2 分鐘快速核准綠燈例行小額單，再集中精力確認大額單據）。
+`;
+
+  const messages = [
+    { role: 'system', content: '你是專業的高階主管簽核決策幕僚 AI，使用繁體中文，文筆俐落精煉，結構清楚。' },
+    { role: 'user', content: prompt },
+  ];
+
+  const result = await sendChatRequest({ messages, temperature: 0.2, maxTokens: 1200 });
+
+  return {
+    success: true,
+    totalCount: requests.length,
+    totalAmount: totalAmt,
+    briefingMarkdown: result.content,
+    durationMs: result.durationMs,
+  };
+}
+
 module.exports = {
   getAiConfig,
   checkAiHealth,
@@ -702,4 +1048,6 @@ module.exports = {
   scanFormLayout,
   parseInvoiceOrReceipt,
   polishApplicationText,
+  suggestApprovalComment,
+  generatePendingBriefing,
 };

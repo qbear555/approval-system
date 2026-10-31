@@ -237,8 +237,67 @@
             <button type="button" class="btn outline xs" style="margin-top:8px" @click="triggerAiAudit(true)">重試</button>
           </div>
 
-          <!-- Content -->
-          <div v-else-if="aiReport" class="ai-content-box" v-html="formattedAiContent"></div>
+          <!-- Multi-dimensional Risk Radar & Content -->
+          <template v-else-if="aiReport">
+            <!-- 多維風險評級與歷史比價雷達指標 -->
+            <div class="ai-risk-summary-bar">
+              <div class="ai-risk-badge-wrap">
+                <span v-if="aiRiskLevel === 'high'" class="ai-risk-pill high">
+                  🔴 高風險（疑似異常/重複）
+                </span>
+                <span v-else-if="aiRiskLevel === 'medium'" class="ai-risk-pill medium">
+                  🟡 中風險（需留意細節）
+                </span>
+                <span v-else class="ai-risk-pill low">
+                  🟢 低風險（正常合規）
+                </span>
+                <span v-for="b in aiRiskBadges" :key="b" class="ai-badge-chip">
+                  {{ b }}
+                </span>
+              </div>
+
+              <!-- 重複發票警示 -->
+              <div v-if="aiDuplicateInvoices && aiDuplicateInvoices.length" class="ai-dup-alert">
+                <strong>⚠️ 檢出歷史重複報銷發票：</strong>
+                <div v-for="d in aiDuplicateInvoices" :key="d.invoiceNo + d.historicalRequestId" style="font-size:0.85rem;margin-top:3px">
+                  • 發票號 <code>{{ d.invoiceNo }}</code> 已於 {{ d.createdAt ? String(d.createdAt).slice(0, 10) : '' }} 被單據 #{{ d.historicalRequestId }}（{{ d.title }}，狀態: {{ d.status }}）報銷使用。
+                </div>
+              </div>
+
+              <!-- 採購比價雷達 -->
+              <div v-if="aiPriceRadar && aiPriceRadar.length" class="ai-radar-box">
+                <div style="font-size:0.85rem;font-weight:600;color:#0369a1;margin-bottom:6px">
+                  📊 歷史採購比價雷達比對結果
+                </div>
+                <div style="overflow-x:auto">
+                  <table class="ai-radar-table">
+                    <thead>
+                      <tr>
+                        <th>品名項目</th>
+                        <th>本次單價</th>
+                        <th>歷史均價</th>
+                        <th>價差比例</th>
+                        <th>歷史樣本</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="r in aiPriceRadar" :key="r.itemName">
+                        <td><strong>{{ r.itemName }}</strong></td>
+                        <td>NT$ {{ Number(r.currentUnitPrice || 0).toLocaleString() }}</td>
+                        <td>NT$ {{ Number(r.avgHistoricalPrice || 0).toLocaleString() }}</td>
+                        <td :style="{ color: r.diffPercent > 20 ? '#dc2626' : r.diffPercent < -10 ? '#16a34a' : '#4b5563', fontWeight: 600 }">
+                          {{ r.diffPercent > 0 ? '+' : '' }}{{ r.diffPercent }}%
+                        </td>
+                        <td>{{ r.count }} 筆</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="ai-content-box" v-html="formattedAiContent"></div>
+          </template>
         </div>
 
         <div v-if="usePdfFormView" class="pdf-form-view">
@@ -303,7 +362,18 @@
         </div>
         <p v-else-if="detail.isFinalStep" class="muted" style="font-size:0.85rem;margin:0 0 12px">此為最終審核步驟，不可新增附件。</p>
         <div class="field">
-          <label>簽核意見</label>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <label style="margin:0">簽核意見</label>
+            <button
+              type="button"
+              class="btn outline xs"
+              style="color:#4f46e5;border-color:#c7d2fe;background:#eef2ff;font-weight:600;"
+              :disabled="aiSuggestingComment"
+              @click="openAiCommentSuggestions('approve')"
+            >
+              <span>{{ aiSuggestingComment ? '⏳ AI 思考中…' : '✨ AI 智慧評語指引' }}</span>
+            </button>
+          </div>
           <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
             <button v-for="p in phrases" :key="p" type="button" class="btn outline xs" @click="comment = p">{{ p }}</button>
             <button
@@ -368,6 +438,133 @@
         </div>
       </div>
     </div>
+
+    <!-- 🤖 AI 智慧簽核評語指引 Modal -->
+    <div v-if="showAiCommentModal" class="action-modal-overlay" @click.self="showAiCommentModal = false">
+      <div class="action-modal-panel" style="max-width:580px;border-radius:12px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #e2e8f0;background:#f8fafc">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:1.25rem">✨</span>
+            <div>
+              <strong style="color:#1e1b4b;font-size:1.02rem">AI 簽核智慧評語指引</strong>
+              <span class="muted" style="font-size:0.8rem;margin-left:6px">依照單據內容生成得體意見</span>
+            </div>
+          </div>
+          <button type="button" class="btn outline xs" @click="showAiCommentModal = false">✕</button>
+        </div>
+
+        <div style="padding:16px 18px;max-height:70vh;overflow-y:auto">
+          <!-- 動作模式標籤切換 -->
+          <div style="display:flex;gap:6px;margin-bottom:14px">
+            <button
+              type="button"
+              :class="['btn sm', aiCommentActionType === 'approve' ? 'primary' : 'outline']"
+              @click="openAiCommentSuggestions('approve')"
+            >
+              ✅ 核准評語
+            </button>
+            <button
+              type="button"
+              :class="['btn sm', aiCommentActionType === 'reject' ? 'danger' : 'outline']"
+              @click="openAiCommentSuggestions('reject')"
+            >
+              ↩ 退回 / 補件指引
+            </button>
+            <button
+              type="button"
+              :class="['btn sm', aiCommentActionType === 'cosign' ? 'warning' : 'outline']"
+              @click="openAiCommentSuggestions('cosign')"
+            >
+              ➕ 加簽 / 會簽說明
+            </button>
+          </div>
+
+          <!-- 退件理由草稿輸入框（供主管輸入簡短關鍵字，AI 自動潤飾） -->
+          <div v-if="aiCommentActionType === 'reject'" style="margin-bottom:14px;background:#fef2f2;padding:10px 12px;border:1px solid #fecaca;border-radius:6px">
+            <label style="font-size:0.82rem;font-weight:600;color:#991b1b;margin-bottom:4px;display:block">
+              💡 輸入粗略退件原因（AI 將自動潤飾為委婉客氣、條理分明的正式公文退件指引）：
+            </label>
+            <div style="display:flex;gap:6px">
+              <input
+                v-model="aiCommentDraft"
+                type="text"
+                placeholder="例如：發票缺漏、金額小計不合、未附報價單…"
+                style="flex:1"
+                @keydown.enter="openAiCommentSuggestions('reject')"
+              />
+              <button
+                type="button"
+                class="btn sm danger"
+                :disabled="aiSuggestingComment"
+                @click="openAiCommentSuggestions('reject')"
+              >
+                {{ aiSuggestingComment ? '潤飾中…' : 'AI 潤飾' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Loading -->
+          <div v-if="aiSuggestingComment" style="text-align:center;padding:28px 0">
+            <div class="ai-spin" style="font-size:2rem">🧠⚡</div>
+            <div style="font-weight:600;color:#3730a3;margin-top:8px;font-size:0.95rem">AI 正在依據單據資訊生成得體專業的簽核意見…</div>
+          </div>
+
+          <!-- Suggestions -->
+          <div v-else-if="aiCommentSuggestions" style="display:flex;flex-direction:column;gap:12px">
+            <!-- 快捷短語 -->
+            <div v-if="aiCommentSuggestions.quickPhrases && aiCommentSuggestions.quickPhrases.length">
+              <div style="font-size:0.82rem;font-weight:600;color:#64748b;margin-bottom:6px">⚡ 快捷意見（點擊立即套用）：</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                <button
+                  v-for="p in aiCommentSuggestions.quickPhrases"
+                  :key="p"
+                  type="button"
+                  class="btn outline sm"
+                  style="background:#f8fafc;font-size:0.85rem;text-align:left;"
+                  @click="adoptAiComment(p)"
+                >
+                  {{ p }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 完整推薦意見 -->
+            <div v-if="aiCommentSuggestions.recommendedComment" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <span style="font-size:0.82rem;font-weight:700;color:#166534">🌟 最推薦完整評語：</span>
+                <button
+                  type="button"
+                  class="btn primary xs"
+                  @click="adoptAiComment(aiCommentSuggestions.recommendedComment)"
+                >
+                  採用此意見
+                </button>
+              </div>
+              <div style="font-size:0.9rem;color:#14532d;line-height:1.5">
+                {{ aiCommentSuggestions.recommendedComment }}
+              </div>
+            </div>
+
+            <!-- 備選方案 -->
+            <div
+              v-for="alt in (aiCommentSuggestions.alternatives || [])"
+              :key="alt.title"
+              style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px"
+            >
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <span style="font-size:0.82rem;font-weight:600;color:#334155">{{ alt.title }}</span>
+                <button type="button" class="btn outline xs" @click="adoptAiComment(alt.content)">採用</button>
+              </div>
+              <div style="font-size:0.88rem;color:#475569;line-height:1.4">{{ alt.content }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:12px 18px;border-top:1px solid #e2e8f0;background:#f8fafc;text-align:right">
+          <button type="button" class="btn outline sm" @click="showAiCommentModal = false">關閉</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -390,6 +587,7 @@ import {
   fetchRequestPdf,
   fetchOnlyOfficeStatus,
   analyzeRequestWithAi,
+  fetchAiSuggestedComment,
 } from '@/api/requests';
 import { apiRequest } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
@@ -453,6 +651,18 @@ const aiError = ref('');
 const aiModelName = ref('');
 const aiDuration = ref(0);
 const aiFromCache = ref(false);
+const aiRiskLevel = ref('low');
+const aiRiskScore = ref(0);
+const aiRiskBadges = ref([]);
+const aiPriceRadar = ref([]);
+const aiDuplicateInvoices = ref([]);
+
+// AI 評語建議指引
+const showAiCommentModal = ref(false);
+const aiSuggestingComment = ref(false);
+const aiCommentActionType = ref('approve');
+const aiCommentDraft = ref('');
+const aiCommentSuggestions = ref(null);
 
 const requestId = computed(() => Number(props.requestId || route.params.id || 0));
 const request = computed(() => detail.value.request || null);
@@ -723,6 +933,11 @@ async function triggerAiAudit(force = false) {
       aiModelName.value = res.model || '';
       aiDuration.value = res.durationSec ?? (res.durationMs ? Number((res.durationMs / 1000).toFixed(1)) : 0);
       aiFromCache.value = !!res.cached;
+      aiRiskLevel.value = res.riskLevel || 'low';
+      aiRiskScore.value = res.riskScore || 0;
+      aiRiskBadges.value = Array.isArray(res.riskBadges) ? res.riskBadges : [];
+      aiPriceRadar.value = Array.isArray(res.priceRadar) ? res.priceRadar : [];
+      aiDuplicateInvoices.value = Array.isArray(res.duplicateInvoices) ? res.duplicateInvoices : [];
     } else {
       aiError.value = '未取得分析內容';
     }
@@ -755,6 +970,37 @@ function applyAiAdviceToComment() {
     toast.success('已將 AI 審核建議帶入簽核意見');
     const el = document.getElementById('approval-process-section');
     if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+async function openAiCommentSuggestions(actionType = 'approve') {
+  aiCommentActionType.value = actionType;
+  if (!aiCommentDraft.value && comment.value) {
+    aiCommentDraft.value = comment.value;
+  }
+  showAiCommentModal.value = true;
+  aiSuggestingComment.value = true;
+  aiCommentSuggestions.value = null;
+  try {
+    const res = await fetchAiSuggestedComment({
+      requestId: requestId.value,
+      actionType,
+      draftText: aiCommentDraft.value || comment.value || '',
+      targetRole: currentStep.value?.role_name || '',
+    });
+    aiCommentSuggestions.value = res?.suggestions || null;
+  } catch (err) {
+    toast.error('AI 評語生成失敗：' + (err.message || ''));
+  } finally {
+    aiSuggestingComment.value = false;
+  }
+}
+
+function adoptAiComment(text) {
+  if (text) {
+    comment.value = text;
+    showAiCommentModal.value = false;
+    toast.success('已套用 AI 評語意見');
   }
 }
 
@@ -1550,5 +1796,79 @@ onBeforeUnmount(() => {
   background: #fee2e2;
   color: #b91c1c;
   border: 1px solid #fca5a5;
+}
+
+.ai-risk-summary-bar {
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.ai-risk-badge-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ai-risk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.ai-risk-pill.low {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+.ai-risk-pill.medium {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+.ai-risk-pill.high {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+.ai-badge-chip {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  color: #475569;
+}
+.ai-dup-alert {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #991b1b;
+}
+.ai-radar-box {
+  margin-top: 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px;
+}
+.ai-radar-table {
+  width: 100%;
+  font-size: 0.82rem;
+  border-collapse: collapse;
+}
+.ai-radar-table th, .ai-radar-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+}
+.ai-radar-table th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
 }
 </style>

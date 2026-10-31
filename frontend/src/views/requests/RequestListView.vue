@@ -84,6 +84,15 @@
           <button type="button" :class="['inbox-view-btn', inboxViewMode === 'split' ? 'active' : '']" @click="setInboxView('split')">
             🖥️ 雙欄審批
           </button>
+          <button
+            type="button"
+            class="inbox-view-btn"
+            style="color:#4338ca;font-weight:600;background:#eef2ff;border-color:#c7d2fe;"
+            :disabled="aiBriefingLoading"
+            @click="openAiBriefingModal"
+          >
+            🌅 {{ aiBriefingLoading ? '日報生成中…' : 'AI 待審決策日報' }}
+          </button>
         </div>
         <div v-if="allowBatchApprove && inboxViewMode === 'table'" class="form-actions" style="margin:0;flex-wrap:wrap;align-items:center;gap:10px">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
@@ -235,6 +244,57 @@
         </div>
       </div>
     </div>
+
+    <!-- 🌅 AI 晨間待審決策日報 Modal -->
+    <div v-if="showAiBriefingModal" class="action-modal-overlay" @click.self="showAiBriefingModal = false">
+      <div class="action-modal-panel" style="max-width:720px;max-height:85vh;display:flex;flex-direction:column;border-radius:12px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e2e8f0;background:#f8fafc">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:1.4rem">🌅</span>
+            <div>
+              <strong style="font-size:1.1rem;color:#1e1b4b">主管待審決策日報</strong>
+              <span class="muted" style="font-size:0.82rem;margin-left:8px">地端 AI (RTX 5080) 智慧彙總</span>
+            </div>
+          </div>
+          <button type="button" class="btn outline xs" @click="showAiBriefingModal = false">✕</button>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;padding:20px">
+          <!-- Loading -->
+          <div v-if="aiBriefingLoading" style="text-align:center;padding:40px 20px">
+            <div class="ai-spin" style="font-size:2.5rem;margin-bottom:12px">🧠⚡</div>
+            <div style="font-weight:700;color:#3730a3;font-size:1.1rem">AI 正在為您彙總所有待審案件…</div>
+            <div class="muted" style="font-size:0.88rem;margin-top:6px">比對緊急時效、預算規模與排程優先級中…</div>
+          </div>
+
+          <!-- Error -->
+          <div v-else-if="aiBriefingError" class="error-msg" style="padding:16px">
+            {{ aiBriefingError }}
+          </div>
+
+          <!-- Content -->
+          <div v-else-if="aiBriefingContent" class="ai-briefing-body">
+            <div class="ai-briefing-stats" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:12px;margin-bottom:16px">
+              <div style="padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;text-align:center">
+                <div class="muted" style="font-size:0.8rem">待審批案件</div>
+                <div style="font-size:1.5rem;font-weight:700;color:#0f172a">{{ allRequests.length }} 件</div>
+              </div>
+              <div style="padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;text-align:center">
+                <div class="muted" style="font-size:0.8rem">累計請核金額</div>
+                <div style="font-size:1.4rem;font-weight:700;color:#166534">NT$ {{ pendingTotalAmount.toLocaleString() }}</div>
+              </div>
+            </div>
+
+            <div class="ai-content-box" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;line-height:1.7" v-html="formattedBriefingContent"></div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid #e2e8f0;background:#f8fafc">
+          <button type="button" class="btn outline" :disabled="aiBriefingLoading" @click="fetchBriefing">🔄 重新整理</button>
+          <button type="button" class="btn primary" @click="showAiBriefingModal = false">我知道了</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -250,6 +310,57 @@ import { resolveCommentPhrases } from '@/lib/comment-phrases';
 import { canDeleteRequestRow } from '@/lib/request-access';
 import RequestTable from '@/components/requests/RequestTable.vue';
 import RequestDetailPanel from '@/components/requests/RequestDetailPanel.vue';
+import { fetchAiPendingBriefing } from '@/api/requests';
+
+const showAiBriefingModal = ref(false);
+const aiBriefingLoading = ref(false);
+const aiBriefingContent = ref('');
+const aiBriefingError = ref('');
+
+const pendingTotalAmount = computed(() => {
+  return allRequests.value.reduce((sum, r) => {
+    let amt = 0;
+    try {
+      const fd = typeof r.form_data === 'string' ? JSON.parse(r.form_data) : r.form_data || {};
+      amt = parseFloat(fd.amount || fd.total_amount || fd['金額'] || fd['總額'] || 0);
+    } catch {}
+    return sum + (isNaN(amt) ? 0 : amt);
+  }, 0);
+});
+
+const formattedBriefingContent = computed(() => {
+  if (!aiBriefingContent.value) return '';
+  return aiBriefingContent.value
+    .replace(/^### (.*$)/gim, '<h4 style="color:#1e1b4b;margin:14px 0 6px;font-size:1.05rem">$1</h4>')
+    .replace(/^## (.*$)/gim, '<h3 style="color:#1e1b4b;margin:16px 0 8px;font-size:1.15rem">$1</h3>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^\- (.*$)/gim, '<li style="margin-bottom:4px">$1</li>')
+    .replace(/(\r\n|\n)/g, '<br/>');
+});
+
+async function fetchBriefing() {
+  aiBriefingLoading.value = true;
+  aiBriefingError.value = '';
+  try {
+    const res = await fetchAiPendingBriefing(allRequests.value);
+    if (res && res.briefingMarkdown) {
+      aiBriefingContent.value = res.briefingMarkdown;
+    } else {
+      aiBriefingError.value = '未取得日報內容';
+    }
+  } catch (err) {
+    aiBriefingError.value = 'AI 待審決策日報生成失敗：' + (err.message || '');
+  } finally {
+    aiBriefingLoading.value = false;
+  }
+}
+
+function openAiBriefingModal() {
+  showAiBriefingModal.value = true;
+  if (!aiBriefingContent.value) {
+    fetchBriefing();
+  }
+}
 
 const PAGE_SIZE = 20;
 const statusOpts = [
