@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
@@ -100,6 +101,29 @@ function builtinAdminOnly(req, res, next) {
   next();
 }
 
+function generateBootstrapPassword() {
+  return crypto.randomBytes(12).toString('base64url');
+}
+
+function parseCookies(cookieHeader) {
+  const out = {};
+  const raw = String(cookieHeader || '');
+  if (!raw) return out;
+  for (const part of raw.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 1) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (!k) continue;
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 module.exports = {
   normalizeUsername,
   BUILTIN_ADMIN_USERNAME,
@@ -107,6 +131,8 @@ module.exports = {
   isBuiltinAdminUser,
   hashPassword,
   verifyPassword,
+  generateBootstrapPassword,
+  parseCookies,
   signToken,
   authMiddleware,
   adminOnly,

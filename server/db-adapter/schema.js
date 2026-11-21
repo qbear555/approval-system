@@ -195,6 +195,44 @@ const SQLITE_DDL = `
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS meeting_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    capacity INTEGER NOT NULL DEFAULT 6,
+    location TEXT DEFAULT '',
+    facilities TEXT DEFAULT '',
+    color TEXT DEFAULT '#2563eb',
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS meeting_bookings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    booking_date TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    start_datetime TEXT NOT NULL,
+    end_datetime TEXT NOT NULL,
+    attendee_count INTEGER DEFAULT 1,
+    attendees TEXT DEFAULT '',
+    attendee_ids TEXT DEFAULT '',
+    external_attendees TEXT DEFAULT '',
+    notify_email INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'confirmed' CHECK(status IN ('confirmed', 'cancelled')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (room_id) REFERENCES meeting_rooms(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_mb_room_date ON meeting_bookings(room_id, booking_date);
+  CREATE INDEX IF NOT EXISTS idx_mb_user ON meeting_bookings(user_id);
+  CREATE INDEX IF NOT EXISTS idx_mb_date ON meeting_bookings(booking_date);
 `;
 
 const MYSQL_TABLE_OPTS = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -393,6 +431,44 @@ const MYSQL_DDL = `
     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_dev_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ${MYSQL_TABLE_OPTS};
+
+  CREATE TABLE IF NOT EXISTS meeting_rooms (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(191) NOT NULL,
+    capacity INT NOT NULL DEFAULT 6,
+    location VARCHAR(255) DEFAULT '',
+    facilities VARCHAR(500) DEFAULT '',
+    color VARCHAR(16) DEFAULT '#2563eb',
+    active TINYINT NOT NULL DEFAULT 1,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  ) ${MYSQL_TABLE_OPTS};
+
+  CREATE TABLE IF NOT EXISTS meeting_bookings (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    room_id INT NOT NULL,
+    user_id INT NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    description TEXT,
+    booking_date VARCHAR(10) NOT NULL,
+    start_time VARCHAR(8) NOT NULL,
+    end_time VARCHAR(8) NOT NULL,
+    start_datetime VARCHAR(20) NOT NULL,
+    end_datetime VARCHAR(20) NOT NULL,
+    attendee_count INT DEFAULT 1,
+    attendees TEXT,
+    attendee_ids TEXT,
+    external_attendees TEXT,
+    notify_email TINYINT NOT NULL DEFAULT 1,
+    status VARCHAR(16) NOT NULL DEFAULT 'confirmed',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_mb_room_date (room_id, booking_date),
+    INDEX idx_mb_user (user_id),
+    INDEX idx_mb_date (booking_date),
+    CONSTRAINT fk_mb_room FOREIGN KEY (room_id) REFERENCES meeting_rooms(id),
+    CONSTRAINT fk_mb_user FOREIGN KEY (user_id) REFERENCES users(id)
   ) ${MYSQL_TABLE_OPTS};
 `;
 
@@ -642,6 +718,16 @@ function applySchema(db) {
     /* ignore */
   }
 
+  try {
+    const rc = db.prepare('SELECT COUNT(*) AS c FROM meeting_rooms').get();
+    if (!rc || Number(rc.c) === 0) {
+      db.prepare(
+        `INSERT INTO meeting_rooms (name, capacity, location, facilities, color, sort_order) VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('會議室', 0, '', '', '#2563eb', 1);
+    }
+  } catch (e) {
+    console.warn('[db] meeting room seed', e.message);
+  }
   const DEFAULT_DEPARTMENTS = ['管理部', '工程部', '採購部', '業務部', '財務部', '倉管部'];
   const insertDept = db.prepare(`INSERT OR IGNORE INTO departments (name, sort_order) VALUES (?, ?)`);
   DEFAULT_DEPARTMENTS.forEach((name, i) => {
@@ -676,6 +762,8 @@ const TABLE_ORDER = [
   'system_audit_logs',
   'request_node_states',
   'user_devices',
+  'meeting_rooms',
+  'meeting_bookings',
 ];
 
 const DATETIME_COLS = new Set([

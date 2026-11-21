@@ -450,12 +450,42 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
     }
   });
 
+  function readUploadedPackage(req) {
+    if (typeof parseUploadedPackage === 'function') {
+      return parseUploadedPackage(req);
+    }
+    if (req.file?.path) {
+      try {
+        const text = fs.readFileSync(req.file.path, 'utf8').replace(/^\uFEFF/, '');
+        return JSON.parse(text);
+      } finally {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (req.file?.buffer) {
+      return JSON.parse(req.file.buffer.toString('utf8').replace(/^\uFEFF/, ''));
+    }
+    if (req.body?.package) {
+      return typeof req.body.package === 'string'
+        ? JSON.parse(req.body.package)
+        : req.body.package;
+    }
+    if (req.body && req.body.format) return req.body;
+    return null;
+  }
+
   /** 預覽設定包摘要（不上傳寫入） */
   app.post(
     '/api/system/package/preview',
     authMiddleware,
     builtinAdminOnly,
     (req, res, next) => {
+      req.setTimeout(10 * 60 * 1000);
+      res.setTimeout(10 * 60 * 1000);
       if (typeof uploadPackage?.single === 'function') {
         uploadPackage.single('package')(req, res, (err) => {
           if (err) return res.status(400).json({ error: typeof packageUploadError === 'function' ? packageUploadError(err) : err.message });
@@ -467,7 +497,7 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
     },
     (req, res) => {
       try {
-        const data = typeof parseUploadedPackage === 'function' ? parseUploadedPackage(req) : req.body;
+        const data = readUploadedPackage(req);
         if (!data || !systemPackage.isConfigPackage(data)) {
           return res.status(400).json({
             error: '不是有效的系統設定完整包（format 不符）',
@@ -499,6 +529,8 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
     authMiddleware,
     builtinAdminOnly,
     (req, res, next) => {
+      req.setTimeout(10 * 60 * 1000);
+      res.setTimeout(10 * 60 * 1000);
       if (typeof uploadPackage?.single === 'function') {
         uploadPackage.single('package')(req, res, (err) => {
           if (err) return res.status(400).json({ error: typeof packageUploadError === 'function' ? packageUploadError(err) : err.message });
@@ -510,7 +542,7 @@ module.exports = function registerSystemAdminRoutes(app, ctx) {
     },
     (req, res) => {
       try {
-        const data = typeof parseUploadedPackage === 'function' ? parseUploadedPackage(req) : req.body;
+        const data = readUploadedPackage(req);
         if (!data || !systemPackage.isConfigPackage(data)) {
           return res.status(400).json({
             error: '不是有效的系統設定完整包。請使用「帳號設定 → 系統設定完整包」匯出的 JSON。',

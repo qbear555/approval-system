@@ -53,6 +53,7 @@ const deployLog = require('./deploy-log');
 const onlyoffice = require('./onlyoffice');
 const agents = require('./agents');
 const registerDepartmentRoutes = require('./routes/departments');
+const registerMeetingRoomRoutes = require('./routes/meeting-rooms');
 const registerMailRoutes = require('./routes/mail-settings');
 const registerSystemAdminRoutes = require('./routes/system-admin');
 const registerReportRoutes = require('./routes/reports');
@@ -2682,9 +2683,25 @@ registerSystemAdminRoutes(app, {
   builtinAdminOnly,
   userHasPermission,
   uploadPackage,
+  packageUploadError,
+  parseUploadedPackage,
 });
 
+// ---------- 會議室預約（共用簽核系統登入帳號與使用者清單）----------
+registerMeetingRoomRoutes(app, { db, authMiddleware });
+
 // ---------- 簽核逾時 SLA 自動催辦管理 API ----------
+app.get('/api/system/sla/config', authMiddleware, adminOnly, (req, res) => {
+  res.json(slaCron.getSlaConfig());
+});
+
+app.put('/api/system/sla/config', authMiddleware, adminOnly, (req, res) => {
+  try {
+    res.json(slaCron.setSlaConfig({ autoRemindEnabled: !!(req.body || {}).autoRemindEnabled }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.get('/api/system/sla/status', authMiddleware, adminOnly, async (req, res) => {
   try {
     const result = await slaCron.runSlaCheck();

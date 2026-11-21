@@ -11,12 +11,37 @@ const db = require('./db');
 const mail = require('./mail');
 const lineNotify = require('./line-notify');
 
+const fs = require('fs');
+const path = require('path');
+
+const SLA_CONFIG_PATH = path.join(__dirname, '..', 'data', 'sla-config.json');
+
+/** 讀取自動催辦設定（預設關閉，須管理員於「帳號設定」明確開啟） */
+function getSlaConfig() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SLA_CONFIG_PATH, 'utf8'));
+    return { autoRemindEnabled: raw.autoRemindEnabled === true };
+  } catch {
+    return { autoRemindEnabled: false };
+  }
+}
+
+function setSlaConfig(patch = {}) {
+  const next = { ...getSlaConfig() };
+  if (patch.autoRemindEnabled !== undefined) next.autoRemindEnabled = !!patch.autoRemindEnabled;
+  fs.mkdirSync(path.dirname(SLA_CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(SLA_CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
 let timer = null;
 
 /**
  * 執行一次 SLA 逾期掃描與自動催辦
  */
 async function runSlaCheck(opts = {}) {
+  if (!getSlaConfig().autoRemindEnabled) {
+    return { ok: true, disabled: true, checkedAt: new Date().toISOString(), totalPending: 0, remindedCount: 0, reminded: [], examined: [] };
+  }
   const defaultTimeoutHours = Number(process.env.SLA_TIMEOUT_HOURS || opts.timeoutHours || 24);
   const minRemindIntervalHours = Number(process.env.SLA_INTERVAL_HOURS || 24);
 
@@ -149,6 +174,8 @@ function stopSlaScheduler() {
 
 module.exports = {
   runSlaCheck,
+  getSlaConfig,
+  setSlaConfig,
   startSlaScheduler,
   stopSlaScheduler,
 };

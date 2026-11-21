@@ -528,7 +528,13 @@ function importPackage(pack, options = {}) {
           if (u) fixedApprovers.push({ id: nid, username: u.username, name: u.name });
         }
       }
-      return { ...s, approvers: fixedApprovers };
+      // 避免舊系統的 exportId 混入新系統 user id 造成簽核人對應錯誤
+      const mappedApproverIds = fixedApprovers.some((x) => x?.username)
+        ? []
+        : Array.isArray(s.approverIds)
+          ? s.approverIds.map((eid) => userIdMap.get(Number(eid))).filter(Boolean)
+          : [];
+      return { ...s, approverIds: mappedApproverIds, approvers: fixedApprovers };
     });
     return {
       format: 'approval-system-workflow',
