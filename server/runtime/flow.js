@@ -647,10 +647,12 @@ function mergeUsersPickFormData(baseData, rawFormData, templateSteps) {
   const pickSteps = (templateSteps || []).filter(
     (s) => s.assignType === 'users_pick'
   );
-  const keys = new Set([
-    ...Object.keys(raw).filter((k) => /^users_pick_\d+$/.test(k)),
-    ...pickSteps.map((s) => `users_pick_${s.order}`),
-  ]);
+  // Only current template picker fields are valid. Copied requests may carry
+  // stale picker keys belonging to steps that are now assigned differently.
+  const keys = new Set(pickSteps.map((s) => `users_pick_${s.order}`));
+  for (const key of Object.keys(merged)) {
+    if (/^users_pick_\d+$/.test(key) && !keys.has(key)) delete merged[key];
+  }
   for (const key of keys) {
     const m = key.match(/^users_pick_(\d+)$/);
     if (!m) continue;

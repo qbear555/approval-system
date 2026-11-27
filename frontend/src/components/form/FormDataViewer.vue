@@ -75,7 +75,19 @@ const rows = computed(() => {
   const pushPeople = (prefix, assignType, fallback, skipText) => {
     const re = new RegExp(`^${prefix}_(\\d+)$`);
     Object.keys(data)
-      .filter((k) => re.test(k))
+      .filter((k) => {
+        if (!re.test(k)) return false;
+        if (assignType !== 'users_pick') return true;
+        const n = Number(k.slice(prefix.length + 1));
+        const tpl = Array.isArray(props.templateSteps) ? props.templateSteps : [];
+        const snapshots = Array.isArray(props.steps) ? props.steps : [];
+        // Historical keys can survive copying a request. Never label one as a
+        // different kind of approval step (for example, the general manager).
+        if (tpl.length) return tpl.some((s) => Number(s.order) === n && s.assignType === assignType);
+        const hasTemplateOrders = snapshots.some((s) => s.templateOrder != null);
+        if (hasTemplateOrders) return snapshots.some((s) => Number(s.templateOrder) === n && s.assignType === assignType);
+        return true;
+      })
       .forEach((k) => {
         const n = k.slice(prefix.length + 1);
         let text = data[`${k}__label`];
